@@ -1,0 +1,14 @@
+[
+    {
+        "name": "TFC East US Server",
+        "ip": "108.61.128.120:27015",
+        "password": "pickup",
+	"url": "http://tinyurl.com/eastnoname"
+    },
+        {
+        "name": "TFC Central US Server",
+        "ip": "66.42.125.244:27015",
+        "password": "pickup",
+	"url": "http://tinyurl.com/centralnoname"
+    }
+]

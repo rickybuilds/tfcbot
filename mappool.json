@@ -1,0 +1,206 @@
+[
+  {
+    "key": "siege-f961",
+    "name": "siege",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "alchimy-l2-204f",
+    "name": "alchimy_lg",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "mortality-l-af01",
+    "name": "mortality_lg",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "openfire-lowgrens-78e2",
+    "name": "openfire_lowgrens",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "orbit-l3-da54",
+    "name": "orbit_tfp",
+    "mirv": 2,
+    "tier": 3
+  },
+  {
+    "key": "schtop-d371",
+    "name": "schtop",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "voltage-l-28db",
+    "name": "voltage_lg",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "waterwar-460d",
+    "name": "waterwar_lg",
+    "mirv": 2,
+    "tier": 3
+  },
+  {
+    "key": "blutopia-2425",
+    "name": "blutopia_tfp",
+    "mirv": 2,
+    "tier": 2
+  },
+  {
+    "key": "congestus-lg-cd34",
+    "name": "congestus_lg",
+    "mirv": 2,
+    "tier": 3
+  },
+  {
+    "key": "raiden9-9406",
+    "name": "raiden9",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "shutdown2-lg2-49a3",
+    "name": "shutdown2_lg2",
+    "mirv": 0,
+    "tier": 1
+  },
+  {
+    "key": "fry-baked-lg-cca8",
+    "name": "fry_baked_lg",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "stowaway2-lg2-9d2d",
+    "name": "stowaway2_lg2",
+    "mirv": 0,
+    "tier": 2
+  },
+  {
+    "key": "monkey-l-493e",
+    "name": "monkey_lg",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "phantom-lg-e933",
+    "name": "phantom_lg",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "stormz2-lg-5175",
+    "name": "stormz2_lg",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "siden-lg-3521",
+    "name": "siden_lg",
+    "mirv": 2,
+    "tier": 3
+  },
+  {
+    "key": "demolish2-b4r-bf9c",
+    "name": "demolish2_b6",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "cranked-f6fb",
+    "name": "cranked",
+    "mirv": 2,
+    "tier": 1
+  },
+  {
+    "key": "2mesa3-lg-3c6b",
+    "name": "2mesa3_lg",
+    "mirv": 1,
+    "tier": 3
+  },
+  {
+    "key": "mm-crossfaded2-b7-2e9e",
+    "name": "mm_crossfaded2_b9",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "toasted-b16-2827",
+    "name": "toasted_b16",
+    "mirv": 0,
+    "tier": 2
+  },
+  {
+    "key": "viridian-e651",
+    "name": "viridian",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "castra-b4-afee",
+    "name": "castra_b6",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "snow-gutter-769a",
+    "name": "snow_gutter",
+    "mirv": 2,
+    "tier": 2
+  },
+  {
+    "key": "pitfall-f816",
+    "name": "pitfall",
+    "mirv": 2,
+    "tier": 3
+  },
+  {
+    "key": "proton-l-baf0",
+    "name": "proton_l",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "spaceape-l-fb18",
+    "name": "spaceape_l",
+    "mirv": 1,
+    "tier": 3
+  },
+  {
+    "key": "nexus-b2-8cde",
+    "name": "nexus_b4",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "massive-b7-e8dc",
+    "name": "massive2_b7",
+    "mirv": 1,
+    "tier": 2
+  },
+  {
+    "key": "turbo-b10-19c6",
+    "name": "turbo_b10",
+    "mirv": 1,
+    "tier": 3
+  },
+  {
+    "key": "brutalist-b8-b5c9",
+    "name": "brutalist_b8",
+    "mirv": 1,
+    "tier": 3
+  },
+  {
+    "key": "hammer2-b4-aa1d",
+    "name": "hammer2_b4",
+    "mirv": 1,
+    "tier": 3
+  }
+]
