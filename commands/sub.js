@@ -308,7 +308,7 @@ console.log("=======================================");
 		  `Server: **${dbMatch.server_name}**\n` +
 		  `IP: **${fullIp}**\n` +
 		  `Password: pickup\n` +
-		  `[Click here to join server](steam://connect/${fullIp}/pickup)\n\n` +
+		  `Join: steam://connect/${fullIp}/pickup\n\n` +
 		  `Map: **${dbMatch.map_name}**\n` +
 		  `Mode: **${dbMatch.mode || "STANDARD"}**`,
 		fields: [
