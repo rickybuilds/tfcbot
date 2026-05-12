@@ -367,59 +367,80 @@ reg.set("++adl", (msg) => add(msg, true));
 reg.set("**", (msg) => add(msg, true));
 
 
-	/* ---------------- scheduled cleanup ---------------- */
-	setInterval(async () => {
-	  const idleMin = getNumber(settings, "queue:idle_min", 120);
-	  const ts = Date.now();
-	  const idleMs = idleMin * 60 * 1000;
+/* ---------------- scheduled cleanup ---------------- */
+setInterval(async () => {
+  // 🚫 Do not AFK kick anyone while a vote is already in progress
+  if (state.isVotingInProgress || state.vote) {
+    return;
+  }
 
-	  // Add 60s buffer so fresh re-adds don’t get kicked
-	  const expired = state.queue.filter(
-		p =>
-		  p.lastSeenAt &&
-		  (ts - p.lastSeenAt) >= (idleMs + 60_000) &&
-		  (!p.lastAfkKick || (ts - p.lastAfkKick) > 300_000) // 👈 skip if kicked <5min ago
-	  );
+  const idleMin = getNumber(settings, "queue:idle_min", 120);
+  const ts = Date.now();
+  const idleMs = idleMin * 60 * 1000;
 
-	  if (expired.length > 0) {
-		const kickedIds = new Set(expired.map(p => String(p.id)));
+  // Add 60s buffer so fresh re-adds don’t get kicked
+  const expired = state.queue.filter(
+    p =>
+      p.lastSeenAt &&
+      (ts - p.lastSeenAt) >= (idleMs + 60_000) &&
+      (!p.lastAfkKick || (ts - p.lastAfkKick) > 300_000)
+  );
 
-		// Mark kick time
-		for (const p of expired) {
-		  p.lastAfkKick = ts;
-		}
+  if (expired.length > 0) {
+    const kickedIds = new Set(expired.map(p => String(p.id)));
 
-		// Actually remove them
-		state.queue = state.queue.filter(p => !kickedIds.has(String(p.id)));
+    // Remove ADL votes for anyone being AFK kicked
+    for (const p of expired) {
+      try {
+        adl.unvote(String(p.id));
+        p.adlVote = false;
+        console.log(`[queue cleanup] Removed ADL vote for AFK kicked player ${p.id}`);
+      } catch (e) {
+        console.warn(`[queue cleanup] Failed to remove ADL vote for ${p.id}:`, e.message);
+      }
+    }
 
-		try {
-		  const realClient = client || reg.client;
-		  if (!realClient) {
-			console.error("[queue cleanup] No Discord client available");
-			return;
-		  }
-		  const chan = await realClient.channels.fetch(config.channels.pickup);
-		  if (chan?.isTextBased()) {
-			const kickedMentions = expired.map(p => `<@${p.id}>`).join(", ");
-			await chan.send(
-			  `⏰ Removed ${kickedMentions} — AFK too long (${idleMin} min). Please re-add if you want to play.`
-			);
-			await postQueueBoard(chan, state, elo, privacy);
-			await refreshBotName(realClient, state);
-		  }
-		} catch (e) {
-		  console.error("[queue cleanup] failed:", e);
-		}
+    // Mark kick time
+    for (const p of expired) {
+      p.lastAfkKick = ts;
+    }
 
-		// robustly call whichever persist function exists (reg or global)
-		try {
-		  const persist = (reg && typeof reg.persistQueueSoon === "function") ? reg.persistQueueSoon : global.persistQueueSoon;
-		  if (typeof persist === "function") persist();
-		} catch (err) {
-		  console.warn("[queue cleanup] persist failed", err);
-		}
-	  }
-	}, 60_000).unref();
+    // Actually remove them
+    state.queue = state.queue.filter(p => !kickedIds.has(String(p.id)));
+
+    try {
+      const realClient = client || reg.client;
+      if (!realClient) {
+        console.error("[queue cleanup] No Discord client available");
+        return;
+      }
+
+      const chan = await realClient.channels.fetch(config.channels.pickup);
+      if (chan?.isTextBased()) {
+        const kickedMentions = expired.map(p => `<@${p.id}>`).join(", ");
+        await chan.send(
+          `⏰ Removed ${kickedMentions} — AFK too long (${idleMin} min). Please re-add if you want to play.`
+        );
+        await postQueueBoard(chan, state, elo, privacy);
+        await refreshBotName(realClient, state);
+      }
+    } catch (e) {
+      console.error("[queue cleanup] failed:", e);
+    }
+
+    // robustly call whichever persist function exists (reg or global)
+    try {
+      const persist =
+        reg && typeof reg.persistQueueSoon === "function"
+          ? reg.persistQueueSoon
+          : global.persistQueueSoon;
+
+      if (typeof persist === "function") persist();
+    } catch (err) {
+      console.warn("[queue cleanup] persist failed", err);
+    }
+  }
+}, 60_000).unref();
 
 }
 
