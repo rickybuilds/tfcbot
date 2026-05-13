@@ -245,7 +245,9 @@ async function run(message, args, deps) {
   const fullIp = serverEntry
     ? `${serverEntry.host}:${serverEntry.port}`
     : "Unknown";
-
+	
+  const joinUrl = serverEntry?.url || `steam://connect/${fullIp}/pickup`;
+	
   const oddsEmbed = buildTeamScenariosEmbed({
     matchId,
     serverName: dbMatch.server_name,
@@ -308,7 +310,7 @@ console.log("=======================================");
 		  `Server: **${dbMatch.server_name}**\n` +
 		  `IP: **${fullIp}**\n` +
 		  `Password: pickup\n` +
-		  `Join: steam://connect/${fullIp}/pickup\n\n` +
+		  `Join: ${joinUrl}\n\n` +
 		  `Map: **${dbMatch.map_name}**\n` +
 		  `Mode: **${dbMatch.mode || "STANDARD"}**`,
 		fields: [
