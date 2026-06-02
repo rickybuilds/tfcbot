@@ -472,10 +472,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
 			  }
 			}
 
-		if (newVotes < threshold) {
-		  const fallback = top?.ref || options.find(o => o.id !== "N" && o.ref)?.ref;
-		  return finalize(fallback || null);
-		}
+			const nextRerollCount = newVotes >= threshold ? rerollCount + 1 : maxRerolls;
 
 			const used = new Set([
 			  ...excludeSet,
@@ -491,7 +488,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
 			  mapSource,
 			  excludeSet: used,
 			  carryName: top?.ref?.name || null,
-			  rerollCount: rerollCount + 1,
+			  rerollCount: nextRerollCount,
 			  maxRerolls,
 			  mapVoteDur,
 			  elo,

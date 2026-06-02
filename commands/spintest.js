@@ -3,7 +3,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 
-const maps = ["bitchass", "spek"];
+const maps = ["spek", "spek", "spek", "spek", "spek"];
 
 module.exports = {
   name: "spintest",
@@ -13,6 +13,7 @@ module.exports = {
     const OWNER_ID = [
       "255834576742645761",
       "737481545216163891",
+	  "596225454721990676",
       "468578577537826831",
     ];
 
@@ -32,64 +33,64 @@ module.exports = {
       hp: maxHp,
     }));
 
-    const attacks = [
-      "got rocket spammed",
-      "ate a grenade",
-      "got airshotted",
-      "took a pipe to the face",
-      "got EMP'd",
-      "was conc-jumped into lava",
-      "forgot to prime the grenade",
-      "walked into SG fire",
-      "got backstabbed",
-      "missed the BHop",
-      "telefragged themselves",
-      "got caught in a MIRV",
-      "got nailed to a wall",
-      "pressed reload instead",
-      "forgot armor exists",
-      "got juggled by rockets",
-      "was spawncamped",
-      "got gibbed",
-      "got caught with medkit out",
-      "walked into a detpack",
-      "was chasing pack timers",
-      "got denied by a dispenser",
-      "got sent to spectator",
-      "forgot the enemy had quad",
-      "fell off battlements",
-      "got sniped crossing mid",
-      "got vaporized",
-      "hit every wall except the enemy",
-      "disconnected mid-fight",
-      "looked away for one second",
-    ];
+ const attacks = [
+  "won before the battle began",
+  "attacked where the enemy was unprepared",
+  "appeared where they were not expected",
+  "turned weakness into bait",
+  "used deception as a weapon",
+  "struck only when victory was certain",
+  "made the enemy defeat themselves",
+  "chose the battlefield wisely",
+  "moved like the wind",
+  "stood firm like the mountain",
+  "struck like fire",
+  "waited in silence, then attacked",
+  "avoided strength and hit weakness",
+  "made chaos look like strategy",
+  "used patience as a weapon",
+  "won without unnecessary fighting",
+  "forced the enemy into confusion",
+  "hid strength behind weakness",
+  "turned delay into advantage",
+  "made retreat impossible",
+  "attacked the enemy's plan",
+  "controlled the pace of battle",
+  "made the enemy chase shadows",
+  "used discipline to survive",
+  "struck at the perfect moment",
+  "made victory inevitable",
+  "left no opening unused",
+  "turned terrain into a weapon",
+  "broke morale before armor",
+  "made the enemy fight blind",
+];
 
     const render = (eventText = "Match start") => {
-
       const lines = aliveMaps
         .filter((m) => m.hp > 0)
         .map((m) => {
-
-          const hearts =
-            "❤️".repeat(m.hp) +
-            "🤍".repeat(maxHp - m.hp);
-
+          const hearts = "❤️".repeat(m.hp) + "🤍".repeat(maxHp - m.hp);
           return `• **${m.name.toUpperCase()}**  ${hearts}`;
-
         })
         .join("\n");
 
       return `${lines}\n\n> ${eventText}`;
-
     };
+
+    const buildEmbed = (title, desc, color) =>
+      new EmbedBuilder()
+        .setColor(color)
+        .setTitle(title)
+        .setDescription(desc);
 
     const msg = await message.channel.send({
       embeds: [
-        new EmbedBuilder()
-          .setColor(0x5865f2)
-          .setTitle("MAP TIEBREAKER DEATHMATCH")
-          .setDescription(render("MATCH START")),
+        buildEmbed(
+          "MAP TIEBREAKER DEATHMATCH",
+          render("MATCH START"),
+          0x5865f2
+        ),
       ],
     });
 
@@ -107,10 +108,8 @@ module.exports = {
         eventText = `${victim.name.toUpperCase()} was fragged!`;
       } else {
         const attack =
-          attacks.splice(
-            Math.floor(Math.random() * attacks.length),
-            1
-          )[0] || "got fragged";
+          attacks.splice(Math.floor(Math.random() * attacks.length), 1)[0] ||
+          "got fragged";
 
         eventText = `${victim.name.toUpperCase()} ${attack}!`;
       }
@@ -118,16 +117,16 @@ module.exports = {
       const livingCount = aliveMaps.filter((x) => x.hp > 0).length;
 
       let delay = 1600;
-
       if (livingCount <= 3) delay = 2000;
       if (livingCount <= 2) delay = 2600;
 
-      await message.channel.send({
+      await msg.edit({
         embeds: [
-          new EmbedBuilder()
-            .setColor(Math.random() > 0.5 ? 0xed4245 : 0x5865f2)
-            .setTitle("MAP TIEBREAKER DEATHMATCH")
-            .setDescription(render(eventText)),
+          buildEmbed(
+            "MAP TIEBREAKER DEATHMATCH",
+            render(eventText),
+            Math.random() > 0.5 ? 0xed4245 : 0x5865f2
+          ),
         ],
       });
 
@@ -136,14 +135,13 @@ module.exports = {
 
     const winner = aliveMaps.find((x) => x.hp > 0);
 
-    await message.channel.send({
+    await msg.edit({
       embeds: [
-        new EmbedBuilder()
-          .setColor(0x57f287)
-          .setTitle("TIEBREAKER COMPLETE")
-          .setDescription(
-            `After intense combat...\n\n**${winner.name.toUpperCase()}**\n\nsurvives the chaos.`
-          ),
+        buildEmbed(
+          "TIEBREAKER COMPLETE",
+          `After intense combat...\n\n**${winner.name.toUpperCase()}**\n\nsurvives the chaos.`,
+          0x57f287
+        ),
       ],
     });
 
