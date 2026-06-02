@@ -18,6 +18,102 @@ console.log("[DEBUG queueCheck] autoRecap.locks =", state.autoRecap?.state?.lock
 
 const armed = new Map();
 
+const mapCapturesPath = path.resolve(__dirname, "..", "mapCaptures.json");
+
+const LIVE_STATE_PATH = "/root/tfcbot/live_state.json";
+
+function writeLiveState(a) {
+  try {
+
+    const state = {
+      active: true,
+      match_id: a.matchId,
+      map: a.map,
+      round: Math.min((a.half || 0) + 1, 2),
+
+      halfScores: a.halfScores || [],
+
+      liveCaps: a.liveCaps || 0,
+      currentScore: a.liveScore || 0,
+
+      savedScore:
+        (a.halfScores || []).reduce((sum, h) => {
+          return sum + Number(h.blue || 0) + Number(h.red || 0);
+        }, 0),
+
+      lastCap: a.lastCap || null,
+      events: a.liveEvents || [],
+
+      updated_at: Math.floor(Date.now()/1000)
+    };
+
+    fs.writeFileSync(
+      LIVE_STATE_PATH,
+      JSON.stringify(state,null,2)
+    );
+
+  } catch(err) {
+    console.warn(
+      "[live_state write failed]",
+      err
+    );
+  }
+}
+
+function clearLiveState() {
+  try {
+    fs.writeFileSync(
+      LIVE_STATE_PATH,
+        JSON.stringify({
+          active: false,
+          match_id: null,
+          map: null,
+          round: null,
+          halfScores: [],
+          liveCaps: 0,
+          currentScore: 0,
+          savedScore: 0,
+
+          lastCap: null,
+          events: [],
+
+          updated_at: Math.floor(Date.now() / 1000)
+        }, null, 2)
+    );
+  } catch (err) {
+    console.warn("[live_state clear failed]", err);
+  }
+}
+
+function loadMapCaptures() {
+  try {
+    if (!fs.existsSync(mapCapturesPath)) return {};
+    return JSON.parse(fs.readFileSync(mapCapturesPath, "utf8"));
+  } catch (err) {
+    console.warn("[autoRecap] failed to load mapCaptures.json:", err.message);
+    return {};
+  }
+}
+
+function getCaptureRule(mapName, evt) {
+  const triggerText = String(evt.trigger || evt.name || evt.raw || "").toLowerCase();
+  const mapKey = normalize(mapName);
+
+  const json = loadMapCaptures();
+
+  const globalRules = json.global || [];
+
+  const mapRules =
+    json.maps?.[mapName] ||
+    json.maps?.[mapKey] ||
+    [];
+
+  const rules = [...globalRules, ...mapRules];
+
+  return rules.find(r =>
+    triggerText.includes(String(r.trigger || "").toLowerCase())
+  ) || null;
+}
 /* ----------------------------- helper functions ---------------------------- */
 
 function normalize(s) {
@@ -95,6 +191,10 @@ const k = keyOf(serverIp);
       lastMapSeen: null,
       half: 0,
       halfScores: [],
+      liveCaps: 0,
+      liveScore: 0,
+      lastCap: null,
+      liveEvents: [],
       files: [],
       done: false,
       timeout: setTimeout(() => disarm(serverIp), ttlMin * 60 * 1000),
@@ -297,7 +397,12 @@ try {
 
     if (evt.type === "map") {
       a.lastMapSeen = evt.name;
-      a.mapStartTime = Date.now(); // 🕒 record when the map started
+      a.mapStartTime = Date.now();
+
+      a.liveCaps = 0;
+      writeLiveState(a);
+
+      console.log(`[autoRecap] reset liveCaps for ${a.matchId} on ${evt.name}`);
       await post(recapChannel, `🗺️ Map: **${evt.name}**`).catch?.(() => {});
 
       // 🎙️ Rule 1: arm voice bots when the correct match map loads
@@ -333,6 +438,58 @@ try {
       }
       return;
     }
+
+/* -------------------------------------------------------------------------- */
+/* Added this on 5/27/26 */
+/* -------------------------------------------------------------------------- */
+  if (evt.type === "capture") {
+    const mapNow = a.lastMapSeen || a.map;
+    const rule = getCaptureRule(mapNow, evt);
+
+    if (!rule) {
+      console.log(`[autoRecap] ignored capture trigger on ${mapNow}:`, evt.trigger || evt.name || evt.raw || evt);
+      return;
+    }
+
+	const capValue = Number(rule.capValue ?? 1);
+	const scoreValue = Number(rule.scoreValue ?? 10);
+
+a.liveCaps = (a.liveCaps || 0) + capValue;
+a.liveScore = (a.liveScore || 0) + scoreValue;
+
+const capTeam = rule.team === "Blue" ? "BLUE" : "RED";
+const capTeamLabel = rule.team === "Blue" ? "Team 1" : "Team 2";
+const capPlayer = evt.player || "unknown";
+
+  const capEvent = {
+    type: "capture",
+    capNumber: a.liveCaps,
+    player: capPlayer,
+    team: capTeam,
+    teamLabel: capTeamLabel,
+    scoreValue,
+    round: Math.min((a.half || 0) + 1, 2),
+    map: mapNow,
+    match_id: a.matchId,
+    text: `${capPlayer} capped for ${capTeamLabel}`,
+    ts: Math.floor(Date.now() / 1000)
+  };
+
+  a.lastCap = capEvent;
+  a.liveEvents = [capEvent, ...(a.liveEvents || [])].slice(0, 10);
+
+  writeLiveState(a);
+
+    await post(
+      recapChannel,
+      `🏁 Capture ${a.liveCaps} — ${rule.team === "Blue" ? "🔵 Blue" : "🔴 Red"} (${evt.player || "unknown"})`
+    ).catch?.(() => {});
+
+    return;
+  }
+/* -------------------------------------------------------------------------- */
+/* until here*/
+/* -------------------------------------------------------------------------- */
 
     if (evt.type === "score_pair") {
 	  const mapNow = a.lastMapSeen || a.map;
@@ -374,7 +531,14 @@ try {
 		  return;
 		}
 
-		a.halfScores.push({ blue: blueScore, red: redScore });
+    a.halfScores.push({ blue: blueScore, red: redScore });
+
+    a.liveCaps = 0;
+    a.liveScore = 0;
+    a.lastCap = null;
+    a.liveEvents = [];
+
+    writeLiveState(a);
 		post(
 		  recapChannel,
 		  `⏱️ Half 1 saved — ${mapNow} (Match ${a.matchId}): 🔵 ${blueScore} / 🔴 ${redScore}`
@@ -399,6 +563,7 @@ try {
 
 	  if (a.half === 2) {
 		a.halfScores.push({ blue: blueScore, red: redScore });
+    writeLiveState(a);
 		const h1 = a.halfScores[0] || { blue: 0, red: 0 };
 		const h2 = a.halfScores[1] || { blue: 0, red: 0 };
 
@@ -532,7 +697,10 @@ await sendRecapWithDemos(client, logsChannel, {
       try { cleanupResult(zipResult); } catch (e) {}
     }, 5000);
 
+    clearLiveState();
+    a.done = true;
     return; // skip default embed
+
   } else {
     console.log(`[autoRecap] demo zip too large: ${(sizeBytes / 1024 / 1024).toFixed(2)} MB`);
     try { cleanupResult(zipResult); } catch (e) {}
@@ -593,6 +761,7 @@ await sendRecapWithDemos(client, logsChannel, {
       console.error("[autoRecap resetHostname] failed:", e);
     }
 
+    clearLiveState();
     a.done = true;
 
 

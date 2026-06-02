@@ -261,138 +261,61 @@ function eligibleStreakPlayers(players, elo) {
 		  return;
 		}
 
-          /* ------------------ Map Vote — Round 1 ------------------ */
-          const recentN = Number(config.MAP_RECENT_EXCLUDE || 7);
-          const excludeRecent = new Set([...recentMapExclusions(matchesStore, recentN)].map(x => x.toLowerCase()));
+		 /* ------------------ Map Voting ------------------ */
 
-          const mapSource = (MODE === "ADL") ? (loadAdlPool() || []) : state.maps;
-		  console.log("[DEBUG] sample state.maps:", (state.maps || []).slice(0, 3).map(m => ({
-  name: m.name, mirv: m.mirv, tier: m.tier
-})));
-          const firstFour = require("../lib/maps").pickTieredMapsWithCounts(
-		  mapSource.length ? mapSource : state.maps,
-		  excludeRecent,
-		  null
+		const recentN = Number(config.MAP_RECENT_EXCLUDE || 7);
+
+		const excludeRecent = new Set(
+		  [...recentMapExclusions(matchesStore, recentN)]
+			.map(x => x.toLowerCase())
 		);
-		const mapOptions = buildMapOptionsFromList(firstFour, true);
 
-          await startVote(state, message, {
-            title: "Map Vote",
-            duration: mapVoteDur,
-            kind: "map",
-            options: mapOptions,
-            showVoters: true,
-            elo,
-            privacy,
+		const mapSrc =
+		  (MODE === "ADL")
+			? (loadAdlPool() || [])
+			: state.maps;
 
-            onVote: async ({ eligible, voted, voteHandle }) => {
-              try {
-                const realEligible = eligible.filter(uid => isRealDiscordId(uid));
-                const allVoted = realEligible.every(uid => voted.has(uid));
-                const timeLeft = Math.max(0, voteHandle.endsAt - Date.now());
-                if (allVoted && timeLeft > 10_000) {
-                  voteHandle.endsAt = Date.now() + 10_000;
-                  voteHandle.notifyTimers?.forEach(clearAnyTimer);
-                  voteHandle.notifyTimers = [];
-                  clearAnyTimer(voteHandle.endTimer);
-                  voteHandle.endTimer = setTimeout(() => {
-                    try { voteHandle.collector.stop("fast_forward"); } catch {}
-                  }, 10_000);
-                  const mentions = realEligible.map(id => `<@${id}>`).join(" ");
-                  await message.channel.send(`✅ All players voted. Vote ending early in **10s**! ${mentions}`);
-                }
-              } catch (e) {
-                console.error("[mapVote onVote shorten]", e);
-              }
-            },
+		await runMapVoteRound({
+		  message,
+		  state,
+		  title: "Map Vote",
+		  mapSource: mapSrc.length ? mapSrc : state.maps,
+		  excludeSet: excludeRecent,
+		  carryName: null,
+		  rerollCount: 0,
+		  maxRerolls: Number(process.env.MAP_MAX_REROLLS || 2),
+		  mapVoteDur,
+		  elo,
+		  privacy,
 
-            onFinish: async ({ winner: mapWin, counts, options }) => {
-              if (mapWin?.id === "N") {
-  // ✅ Find top map only if it has at least 1 vote
-  let top = null;
-  let topCount = 0;
-  for (const opt of options) {
-    if (opt.id === "N") continue;
-    const c = counts.get(opt.id) || 0;
-    if (c > topCount) {
-      top = opt;
-      topCount = c;
-    }
-  }
+		  finalize: async (mapRef) => {
 
-  // 🧹 If no map had votes (topCount == 0), clear carry-over entirely
-  if (!top || topCount === 0) {
-    top = null;
-  }
+			if (!mapRef || !state.serverWinner) {
+			  return message.channel.send(
+				"⚠️ Could not finalize match."
+			  );
+			}
 
-		// 🔹 build exclusions for Round 2
-		const round1Names = new Set(options.filter(o => o.ref?.name).map(o => o.ref.name.toLowerCase()));
-		const unionExcl = new Set([...round1Names, ...excludeRecent]);
+			await finalizeMatch(
+			  message.channel,
+			  registry,
+			  settings,
+			  state,
+			  state.serverWinner,
+			  mapRef,
+			  elo,
+			  privacy,
+			  matchesStore,
+			  config,
+			  MODE,
+			  streaks
+			);
 
-		// 🔸 remove carried map from exclusion so it can reappear
-		if (top?.ref?.name) unionExcl.delete(top.ref.name.toLowerCase());
+		  }
+		});
 
-		console.log("[Round2] excluding:", Array.from(unionExcl));
-
-                const mapSrc2 = (MODE === "ADL") ? (loadAdlPool() || []) : state.maps;
-                const carryName = top?.ref?.name || null;
-				const roundTwoList = require("../lib/maps").pickTieredMapsWithCounts(
-				  mapSrc2.length ? mapSrc2 : state.maps,
-				  unionExcl,
-				  carryName // pass name or tier
-				);
-                const secondRound = buildMapOptionsFromList(roundTwoList, false);
-				
-                return startVote(state, message, {
-                  title: "Map Vote (Round 2)",
-                  duration: mapVoteDur,
-                  kind: "map",
-                  options: secondRound,
-                  showVoters: true,
-                  elo,
-                  privacy,
-                  onVote: async ({ eligible, voted, voteHandle }) => {
-                    try {
-                      const realEligible = eligible.filter(uid => isRealDiscordId(uid));
-                      const allVoted = realEligible.every(uid => voted.has(uid));
-                      const timeLeft = Math.max(0, voteHandle.endsAt - Date.now());
-                      if (allVoted && timeLeft > 10_000) {
-                        voteHandle.endsAt = Date.now() + 10_000;
-                        voteHandle.notifyTimers?.forEach(clearAnyTimer);
-                        voteHandle.notifyTimers = [];
-                        clearAnyTimer(voteHandle.endTimer);
-                        voteHandle.endTimer = setTimeout(() => {
-                          try { voteHandle.collector.stop("fast_forward"); } catch {}
-                        }, 10_000);
-                        const mentions = realEligible.map(id => `<@${id}>`).join(" ");
-                        await message.channel.send(`✅ All players voted. Vote ending early in **10s**! ${mentions}`);
-                      }
-                    } catch (e) {
-                      console.error("[mapVote Round2 onVote shorten]", e);
-                    }
-                  },
-                  onFinish: async ({ winner: m2 }) => {
-                    const mapRef = secondRound.find(o => o.id === m2?.id)?.ref;
-                    if (!mapRef || !state.serverWinner) {
-                      console.error("[mapVote Round2] Missing server or map");
-                      return message.channel.send("⚠️ Could not finalize match (missing server or map).");
-                    }
-                    await finalizeMatch(message.channel, registry, settings, state, state.serverWinner, mapRef, elo, privacy, matchesStore, config, MODE, streaks);
-                  },
-                });
-              }
-
-              const mapRef = options.find(o => o.id === mapWin?.id)?.ref;
-              if (!mapRef || !state.serverWinner) {
-                console.error("[mapVote Round1] Missing server or map");
-                return message.channel.send("⚠️ Could not finalize match (missing server or map).");
-              }
-
-              await finalizeMatch(message.channel, registry, settings, state, state.serverWinner, mapRef, elo, privacy, matchesStore, config, MODE, streaks);
-            },
-          });
-        },
-      });
+				},
+			  });
     } catch (err) {
       console.error("[!fv error]", err);
       await message.channel.send("❌ Something went wrong during the vote.");
@@ -516,6 +439,72 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
 
   await postQueueBoard(message.channel, state, elo, privacy);
 }
+
+	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, elo, privacy, finalize }) {
+	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
+	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
+
+	  return startVote(state, message, {
+		title,
+		duration: mapVoteDur,
+		kind: "map",
+		options,
+		showVoters: true,
+		elo,
+		privacy,
+
+		onFinish: async ({ winner, counts, options }) => {
+		  if (winner?.id === "N" || /new\s*maps?/i.test(winner?.name || "")) {
+			const threshold = Number(process.env.MAP_REROLL_THRESHOLD || 6);
+			const newOpt = options.find(o =>
+				  o.id === winner?.id || /new\s*maps?/i.test(o.name || "")
+				);
+				const newVotes = counts.get(newOpt?.id) || 0;
+			let top = null;
+			let topCount = 0;
+
+			for (const opt of options) {
+			  if (opt.id === "N") continue;
+			  const c = counts.get(opt.id) || 0;
+			  if (c > topCount) {
+				top = opt;
+				topCount = c;
+			  }
+			}
+
+		if (newVotes < threshold) {
+		  const fallback = top?.ref || options.find(o => o.id !== "N" && o.ref)?.ref;
+		  return finalize(fallback || null);
+		}
+
+			const used = new Set([
+			  ...excludeSet,
+			  ...options.filter(o => o.ref?.name).map(o => o.ref.name.toLowerCase())
+			]);
+
+			if (top?.ref?.name) used.delete(top.ref.name.toLowerCase());
+
+			return runMapVoteRound({
+			  message,
+			  state,
+			  title: `Map Vote (Reroll ${rerollCount + 1})`,
+			  mapSource,
+			  excludeSet: used,
+			  carryName: top?.ref?.name || null,
+			  rerollCount: rerollCount + 1,
+			  maxRerolls,
+			  mapVoteDur,
+			  elo,
+			  privacy,
+			  finalize
+			});
+		  }
+
+		  const mapRef = options.find(o => o.id === winner?.id)?.ref;
+		  return finalize(mapRef);
+		}
+	  });
+	}
 
 
 /* ---------------------------- finalizeMatch ---------------------------- */

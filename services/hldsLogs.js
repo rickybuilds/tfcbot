@@ -117,6 +117,23 @@ function parseLine(raw) {
     }
     return { type: "score", team, score: Number(mScore[2]), raw: s };
   }
+/* -------------------------------------------------------------------------- */
+/* Added this on 5/27/26 */
+/* -------------------------------------------------------------------------- */
+  const mCap = s.match(/"([^"]+)<(\d+)><([^>]+)><(Red|Blue)>" triggered "([^"]+)"/i);
+
+  if (mCap) {
+    return {
+      type: "capture",
+      player: mCap[1],
+      team: mCap[4],
+      trigger: mCap[5],
+      raw: s
+    };
+  }
+/* -------------------------------------------------------------------------- */
+/* until here*/
+/* -------------------------------------------------------------------------- */
   return null;
 }
 /* -------------------------------------------------------------------------- */
@@ -164,6 +181,7 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
       onEvent?.(evt);
       return;
     }
+	
     // ---------- FINAL SCORE → STOP RECORDING ----------
     if (evt.type === "score_pair") {
       onEvent?.(evt);

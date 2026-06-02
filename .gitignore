@@ -40,6 +40,7 @@ scripts/
 # Backups
 *.bak*
 *.bk
+*.backup
 
 # Exports
 *.csv
@@ -72,4 +73,5 @@ test_server.js
 
 # Text map lists (if not needed)
 mappool.txt
-mappool_adl.txt
+mappool_adl.txtlive_state.json
+live_state.json

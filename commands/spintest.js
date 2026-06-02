@@ -1,86 +1,152 @@
 // commands/spintest.js
 "use strict";
+
 const { EmbedBuilder } = require("discord.js");
 
-const maps = ["dull", "razor", "lovin", "bofa", "deez", "nutz"];
+const maps = ["bitchass", "spek"];
 
 module.exports = {
   name: "spintest",
-  description: "Map spinner with flashing colors (rate-limit safe)",
+  description: "Map deathmatch tiebreaker",
+
   async execute(message) {
-    // 🔒 Only allow Ricky to run this command
-    const OWNER_ID = ["255834576742645761","737481545216163891","468578577537826831"];
+    const OWNER_ID = [
+      "255834576742645761",
+      "737481545216163891",
+      "468578577537826831",
+    ];
+
     if (!OWNER_ID.includes(message.author.id)) {
       try {
         if (message.deletable) await message.delete().catch(() => {});
       } catch {}
-      return; // silently ignore
+      return;
     }
 
-    const spinMsg = await message.channel.send("🎰 Initializing safe spinner...");
-    console.log("[spintest] 🎰 Starting rate-limit-safe spinner...");
+    console.log("[spintest] Starting map deathmatch");
 
-    const winner = maps[Math.floor(Math.random() * maps.length)];
-    let reels = ["?", "?", "?"];
+    const maxHp = 3;
 
-    const totalFrames = 18;
-    const delayStart = 200;
-    const delayEnd = 900;
-    const easeOut = (t) => delayStart + (delayEnd - delayStart) * (t ** 2);
+    const aliveMaps = maps.map((m) => ({
+      name: m,
+      hp: maxHp,
+    }));
 
-    const box = (a, b, c, mapList = "") =>
-      "```\n" +
-      "╔═════════════════════╗\n" +
-      "║ ┌─────┬─────┬─────┐ ║\n" +
-      `║ │  ${a}  │  ${b}  │  ${c}  │ ║\n` +
-      "║ └─────┴─────┴─────┘ ║\n" +
-      "╚═════════════════════╝\n" +
-      "```\n" +
-      mapList;
+    const attacks = [
+      "got rocket spammed",
+      "ate a grenade",
+      "got airshotted",
+      "took a pipe to the face",
+      "got EMP'd",
+      "was conc-jumped into lava",
+      "forgot to prime the grenade",
+      "walked into SG fire",
+      "got backstabbed",
+      "missed the BHop",
+      "telefragged themselves",
+      "got caught in a MIRV",
+      "got nailed to a wall",
+      "pressed reload instead",
+      "forgot armor exists",
+      "got juggled by rockets",
+      "was spawncamped",
+      "got gibbed",
+      "got caught with medkit out",
+      "walked into a detpack",
+      "was chasing pack timers",
+      "got denied by a dispenser",
+      "got sent to spectator",
+      "forgot the enemy had quad",
+      "fell off battlements",
+      "got sniped crossing mid",
+      "got vaporized",
+      "hit every wall except the enemy",
+      "disconnected mid-fight",
+      "looked away for one second",
+    ];
 
-    const mapListText = maps.map((m, i) => `${i + 1}. ${m}`).join(" | ");
+    const render = (eventText = "Match start") => {
 
-    let colorToggle = false;
-    let lastEdit = 0;
+      const lines = aliveMaps
+        .filter((m) => m.hp > 0)
+        .map((m) => {
 
-    for (let i = 0; i < totalFrames; i++) {
-      const now = Date.now();
-      const progress = i / totalFrames;
-      const delay = easeOut(progress) + Math.random() * 100;
+          const hearts =
+            "❤️".repeat(m.hp) +
+            "🤍".repeat(maxHp - m.hp);
 
-      // randomize reels
-      reels = reels.map((r, idx) => {
-        const shouldSpin = i < totalFrames - (idx * 3 + 3);
-        return shouldSpin ? String(Math.ceil(Math.random() * maps.length)) : reels[idx];
-      });
+          return `• **${m.name.toUpperCase()}**  ${hearts}`;
 
-      if (now - lastEdit > 500) {
-        colorToggle = !colorToggle;
-        lastEdit = now;
+        })
+        .join("\n");
 
-        const embed = new EmbedBuilder()
-          .setColor(colorToggle ? 0xed4245 : 0x5865f2)
-          .setDescription(box(reels[0], reels[1], reels[2], mapListText))
-          .setFooter({ text: "Spinning..." });
+      return `${lines}\n\n> ${eventText}`;
 
-        await spinMsg.edit({ embeds: [embed] });
+    };
+
+    const msg = await message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle("MAP TIEBREAKER DEATHMATCH")
+          .setDescription(render("MATCH START")),
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 1600));
+
+    while (aliveMaps.filter((x) => x.hp > 0).length > 1) {
+      const living = aliveMaps.filter((x) => x.hp > 0);
+      const victim = living[Math.floor(Math.random() * living.length)];
+
+      victim.hp--;
+
+      let eventText;
+
+      if (victim.hp <= 0) {
+        eventText = `${victim.name.toUpperCase()} was fragged!`;
+      } else {
+        const attack =
+          attacks.splice(
+            Math.floor(Math.random() * attacks.length),
+            1
+          )[0] || "got fragged";
+
+        eventText = `${victim.name.toUpperCase()} ${attack}!`;
       }
+
+      const livingCount = aliveMaps.filter((x) => x.hp > 0).length;
+
+      let delay = 1600;
+
+      if (livingCount <= 3) delay = 2000;
+      if (livingCount <= 2) delay = 2600;
+
+      await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(Math.random() > 0.5 ? 0xed4245 : 0x5865f2)
+            .setTitle("MAP TIEBREAKER DEATHMATCH")
+            .setDescription(render(eventText)),
+        ],
+      });
 
       await new Promise((r) => setTimeout(r, delay));
     }
 
-	// final winner
-	const winIndex = maps.indexOf(winner) + 1;
-	reels = [winIndex, winIndex, winIndex];
+    const winner = aliveMaps.find((x) => x.hp > 0);
 
-	const finalEmbed = new EmbedBuilder()
-	  .setColor(0x57f287)
-	  .setDescription(
-		box(reels[0], reels[1], reels[2], mapListText + "\n\n") + // ⬅️ added extra line break
-		`🧠 **Winner:** ${winner.toUpperCase()}`
-	  );
+    await message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle("TIEBREAKER COMPLETE")
+          .setDescription(
+            `After intense combat...\n\n**${winner.name.toUpperCase()}**\n\nsurvives the chaos.`
+          ),
+      ],
+    });
 
-    await spinMsg.edit({ embeds: [finalEmbed] });
-    console.log(`[spintest] ✅ Final map: ${winner}`);
+    console.log(`[spintest] winner=${winner.name}`);
   },
 };

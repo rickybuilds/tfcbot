@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "notes": "Built from uploaded HLDS logs. Team defaults to the player's log team unless overridden. Use scoreValue for live score, capValue for cap count.",
+  "global": [
+    {
+      "trigger": "Team 1 dropoff",
+      "teamFrom": "player",
+      "capValue": 1,
+      "scoreValue": 10
+    },
+    {
+      "trigger": "Team 2 dropoff",
+      "teamFrom": "player",
+      "capValue": 1,
+      "scoreValue": 10
+    }
+  ],
+  "maps": {
+    "openfire_lowgrens": [],
+    "phantom_lg": [],
+    "schtop": [],
+    "snow_gutter": [],
+    "shutdown2_lg2": [],
+    "alchimy_lg": [],
+    "siege": [],
+    "fry_baked_lg": [],
+    "stormz2_lg": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "demolish2_b6": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "monkey_lg": [
+      {
+        "trigger": "Blue Cap Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Cap Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "waterwar_lg": [
+      {
+        "trigger": "Blue Cap",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Cap",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "cranked": [
+      {
+        "trigger": "Capture Point Extra",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 15
+      },
+      {
+        "trigger": "Capture Point Extra",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 15
+      },
+      {
+        "trigger": "Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "raiden9": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ]
+  }
+}

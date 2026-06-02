@@ -1,0 +1,4 @@
+asti_r 1 mirv
+copper 1 mirv
+palermo 2 mirv
+noidea 2 mirv

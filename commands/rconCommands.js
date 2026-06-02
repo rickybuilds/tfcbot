@@ -49,7 +49,8 @@ module.exports = {
           map: a.map,
           half: a.half,
           done: a.done,
-          halfScores: a.halfScores || []   
+          halfScores: a.halfScores || [],
+		  liveCaps: a.liveCaps || 0		  
         }));
 
         console.log("[!timeleft] Armed matches:", armedList);
@@ -208,14 +209,32 @@ module.exports = {
 		  if (armedMatch.half === 1) roundLabel = "Round 2";
 		  else if (armedMatch.half >= 2 || armedMatch.done) roundLabel = "Completed";
 
-      const h1 = armedMatch.halfScores?.[0];
-      details.push(`**Current Round:** ${roundLabel}`);
+      /* removed on 5/27 and updated to below code 
+	  const h1 = armedMatch.halfScores?.[0];
+      `details.push(`**Current Round:** ${roundLabel}`);
 
       if (h1) {
         details.push(`**Round 1 Score:** 🔵 ${h1.blue} — 🔴 ${h1.red}`);
       } else {
         details.push("**Round 1 Score:** Round 1 not completed yet");
       }
+	  
+	  Updated below here until next comment*/
+	  
+		const h1 = armedMatch.halfScores?.[0];
+		const liveCaps = armedMatch.liveCaps || 0;
+		const liveScore = liveCaps * 10;
+
+		details.push(`**Current Round:** ${roundLabel}`);
+
+		if (h1) {
+		  details.push(`**Round 1 Score:** 🔵 ${h1.blue} — 🔴 ${h1.red}`);
+		}
+
+		details.push(
+		  `**Current Score:** ${liveScore}`
+		);
+		/* until here */
 
 		  details.push(`🗺️ **Map:** ${mapName}`);
 		  details.push(`⏱️ **Timeleft:** ${String(rawTime || "Unknown")}`);
