@@ -444,16 +444,48 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
-	  return startVote(state, message, {
-		title,
-		duration: mapVoteDur,
-		kind: "map",
-		options,
-		showVoters: true,
-		elo,
-		privacy,
+return startVote(state, message, {
+  title,
+  duration: mapVoteDur,
+  kind: "map",
+  options,
+  showVoters: true,
+  elo,
+  privacy,
 
-		onFinish: async ({ winner, counts, options }) => {
+  onVote: async ({ eligible, voted, voteHandle }) => {
+    try {
+      const realEligible = eligible.filter(uid => isRealDiscordId(uid));
+      const allVoted = realEligible.every(uid => voted.has(uid));
+      const timeLeft = Math.max(0, voteHandle.endsAt - Date.now());
+
+      if (allVoted && timeLeft > 10_000) {
+        voteHandle.endsAt = Date.now() + 10_000;
+
+        voteHandle.notifyTimers?.forEach(clearAnyTimer);
+        voteHandle.notifyTimers = [];
+
+        clearAnyTimer(voteHandle.endTimer);
+
+        voteHandle.endTimer = setTimeout(() => {
+          try {
+            voteHandle.collector.stop("fast_forward");
+          } catch {}
+        }, 10_000);
+
+        const mentions =
+          realEligible.map(id => `<@${id}>`).join(" ");
+
+        await message.channel.send(
+          `✅ All players voted. Vote ending early in **10s**! ${mentions}`
+        );
+      }
+    } catch (e) {
+      console.error("[mapVote onVote shorten]", e);
+    }
+  },
+
+  onFinish: async ({ winner, counts, options }) => {
 		  if (winner?.id === "N" || /new\s*maps?/i.test(winner?.name || "")) {
 			const threshold = Number(process.env.MAP_REROLL_THRESHOLD || 6);
 			const newOpt = options.find(o =>
