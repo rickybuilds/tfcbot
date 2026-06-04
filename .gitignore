@@ -1,77 +1,11 @@
-# ENV / Secrets
-.env
-.env.*
-!.env.example
-
-# Databases
-*.db
-*.db-shm
-*.db-wal
-
-# Logs
-logs/
-*.log
-
-# Runtime / temp files
-*.json.bk
-backups/
-temp/
-tmp/
-
-# Node stuff
 node_modules/
-npm-debug.log*
-yarn-error.log*
-
-# OS junk
-.DS_Store
-Thumbs.db
-
-# PM2
-.pm2/
-
-# Coverage / testing
-coverage/
-scripts/
-
-# Private keys
-*.ppk
-
-# Backups
-*.bak*
-*.bk
-*.backup
-
-# Exports
-*.csv
-
-# Runtime JSON state
+.env
+*.db
+*.sqlite
 queue.json
-adl_votes.json
-armed.json
-jails.json
-kicked.json
-
-# Optional: ignore all runtime JSON except config
-# *.json
-# !config/*.json
-# !servers.json
-
-# Dev / test / one-off scripts
-TestHandle.js
-backfill_match_players.js
-backup.sh
-compare.js
-create_voice_relays.sh
-exportEloFull.js
-purgetestplayers.js
-setup-pingsdb.js
-testSftpList.js
-test_client.js
-test_fetch.js
-test_server.js
-
-# Text map lists (if not needed)
-mappool.txt
-mappool_adl.txtlive_state.json
 live_state.json
+logs/
+backups/
+*.log
+pm2.log
+*.ppk

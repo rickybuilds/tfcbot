@@ -2,7 +2,6 @@
 "use strict";
 require("dotenv").config();
 console.log("[MAIN] Loaded state file:", require.resolve("./lib/state"));
-console.log("[DEBUG] ADMIN_ROLE_ID =", process.env.ADMIN_ROLE_ID);
 
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
@@ -57,11 +56,10 @@ const banStore     = new BanStore("bot.db");
 // 👇 JAIL SYSTEM
 const jailStore    = new JailStore();
 
-// WinStreaks (live from elo.db)
+// WinStreaks
 const { WinStreakStore } = require("./lib/winstreak");
-const streaks = new WinStreakStore("/root/tfcbot/elo.db");
+const streaks = new WinStreakStore("bot.db");
 const ranks = require("./commands/ranks");
-const shuffle = require("./commands/shuffle");
 
 // global toggles
 state.showVoters   = settings.getBool?.("showVoters", true) ?? true;
@@ -84,7 +82,6 @@ console.log("[INIT] Lock sets initialized:", {
   servers: state.lockedServers.size,
   players: state.lockedPlayers.size
 });
-console.log("[DEBUG] STREAK vars:", process.env.STREAK_TRIGGER_WINS, process.env.STREAK_MIN_RANK);
 
 // registry
 const registry = new Map();
@@ -118,16 +115,14 @@ require("./commands/searchelo").register(registry, deps);
 require("./commands/maplist").register(registry, deps);
 require("./commands/adlmaplist").register(registry, deps);
 require("./commands/rules").register(registry, deps);
-require("./commands/setmap").register(registry, deps);
 require("./commands/onboarding").register(registry, deps);
 require("./commands/privacy").register(registry, deps);
-require("./commands/purgematches").register(registry, deps);
 require("./commands/moderation").register(registry, deps);
 require("./commands/tfcmap").register(registry, deps);
 require("./commands/settings").register(registry, deps);
+require("./commands/purgematches").register(registry, deps);
 require("./commands/streakdebug").register(registry, deps);
 require("./commands/ranks").register(registry, deps);
-require("./commands/mapcaps").register(registry, deps);
 require("./commands/noticeRoles").register(registry, {
   state,
   elo,
@@ -135,10 +130,7 @@ require("./commands/noticeRoles").register(registry, {
   config,
 });
 
-// 👇 Admin-only: unlock stuck servers
-const unlock = require("./commands/unlock");
-registry.set(unlock.name.toLowerCase(), (m, a) => unlock.execute(m, a, deps));
-
+require("./commands/autochange").register(registry, deps);
 try { require("./commands/lastauto").register(registry, deps); } catch {}
 const lastmaps = require("./commands/lastmaps");
 registry.set(lastmaps.name.toLowerCase(), (m, a) => lastmaps.run(m, deps));
@@ -150,46 +142,14 @@ registry.set("sub", (m, a) => sub.run(m, a, deps));
 // 👇 JAIL SYSTEM
 require("./commands/jail").register(registry, deps);
 require("./commands/unjail").register(registry, deps);
-require("./commands/jaillist").register(registry, deps);
-
-// 👇 Match editing command (admin only)
-require("./commands/setmap").register(registry, deps);
 
 // RCON commands (!timeleft, !rcon <cmd>)
 registry.set("rcon", (m, a) => rconCommands.execute(m, a, deps));
-
-// ✅ Make !timeleft dynamic and future-proof
-registry.set("timeleft", (message, args) => {
-  // Load all servers from config dynamically
-  const allServers = Object.keys(require("./config/rcon") || {});
-  let serverKey = null;
-
-  // Normalize any given argument to a matching server name
-  if (args.length > 0) {
-    const requested = args[0].toLowerCase();
-    serverKey = allServers.find(srv => srv.toLowerCase() === requested);
-  }
-
-  // 🟢 If a specific server was found, run it for that server only
-  if (serverKey) {
-    return rconCommands.execute(message, [serverKey, "timeleft"], deps);
-  }
-
-  // 🔁 Otherwise, run it globally (show all servers)
-  return rconCommands.execute(message, ["timeleft"], deps);
-});
-
+registry.set("timeleft", (m, a) => rconCommands.execute(m, ["east", "timeleft"], deps));
 
 // custom exports
 const elocsv = require("./commands/elocsv");
 registry.set("elocsv", (message, args) => elocsv.run(message, deps));
-
-// commands/eloUsers.js
-const eloUsers = require("./commands/eloUsers");
-if (eloUsers?.execute) {
-  registry.set("allelo", (m, a) => eloUsers.execute(m, a, deps));
-  registry.set("deluser", (m, a) => eloUsers.execute(m, a, deps));
-}
 
 const permapelo = require("./commands/permapelo");
 if (permapelo?.run) {
@@ -232,10 +192,6 @@ addadl.aliases.forEach(a =>
   registry.set(String(a).toLowerCase(), (m) => addadl.run(m, deps))
 );
 
-// Shuffle commands
-registry.set("shuffle", (m, a) => shuffle.execute(m, a, deps));
-
-
 // explicitly map bare specials
 registry.set("++adl", (m) => addadl.run(m, deps));
 
@@ -265,10 +221,6 @@ const client = new Client({
 registry.client = client;
 client.persistQueueSoon = persistQueueSoon;
 
-// Member Leaves
-const { register: memberLeaves } = require("./commands/memberLeaves");
-memberLeaves(client, config);
-
 // now extend deps with client
 deps.client = client;
 
@@ -277,46 +229,12 @@ const ROLE_PERMABAN = config.roles.permaban;
 const ROLE_TEMPBAN  = config.roles.tempban;
 const ROLE_JAIL     = config.roles.jail;
 
-const spintest = require("./commands/spintest");
-registry.set("spintest", (m, a) => spintest.execute(m, a, deps));
-
-const kix = require("./commands/kix");
-registry.set("kix", (m, a) => kix.execute(m, a, deps));
-
 // READY
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   try { await refreshBotName(client, state); } catch {}
 
   try { startJailWatcher(client, jailStore); } catch (e) { console.error("[JAIL-WATCHER] failed:", e); }
-    // Auto-re-jail anyone who rejoins while still flagged
-  client.on("guildMemberAdd", async (member) => {
-    const rec = jailStore.get(member.id);
-    if (!rec) return;
-
-    try {
-      // Treat anyone who left while jailed as indefinitely jailed
-      // (either existing long timestamp, or normal jail converted to infinite)
-      const INFINITE_JAIL = 32503680000000; // year 2999
-      rec.expires = INFINITE_JAIL;
-      jailStore.set(member.id, rec);
-
-      // strip all non-@everyone roles
-      for (const [, role] of member.roles.cache) {
-        if (role.name !== "@everyone") await member.roles.remove(role).catch(() => {});
-      }
-
-      // re-add the jail role
-      await member.roles.add(config.roles.jail).catch(() => {});
-
-      // log to audit
-      const auditCh = member.guild.channels.cache.get(config.channels.audit);
-      auditCh?.send(`🔒 ${member} rejoined and was automatically **re-jailed** (indefinite until manual !unjail).`).catch(() => {});
-    } catch (err) {
-      console.error("[JAIL rejoin]", err);
-    }
-  });
-
 
   // HLDS log receiver + auto-recap
   try {
@@ -369,23 +287,15 @@ client.once("ready", async () => {
 
 
 // bump activity
-// Update queue lastSeenAt globally when user talks anywhere in the server
 client.on("messageCreate", (message) => {
   try {
-    if (!message.guild) return;               // Ignore DMs
-    if (message.author.bot) return;           // Ignore bots
-    const id = message.author.id;
+    if (!message.guild) return;
+    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
+    const id = message.author?.id;
     if (!id) return;
-
-    // Only touch if they're in the queue
-    const player = state.queue.find(q => String(q.id) === String(id));
-    if (player) {
-      player.lastSeenAt = Date.now();
-      client.persistQueueSoon?.();
-    }
-  } catch (err) {
-    console.error("[AFK heartbeat update failed]", err);
-  }
+    const p = state.queue.find(q => String(q.id) === String(id));
+    if (p) { p.lastSeenAt = Date.now(); client.persistQueueSoon?.(); }
+  } catch {}
 });
 
 // router

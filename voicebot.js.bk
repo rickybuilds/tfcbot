@@ -1,0 +1,301 @@
+//voicebot.js
+"use strict";
+const path = process.env.ENV_FILE || ".env";
+require("dotenv").config({ path });
+console.log(`[dotenv] loaded from ${path}`);
+const net = require("net");
+const { Client, GatewayIntentBits } = require("discord.js");
+const {
+  joinVoiceChannel,
+  VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
+  NoSubscriberBehavior,
+  StreamType,
+  EndBehaviorType,
+} = require("@discordjs/voice");
+const prism = require("prism-media");
+const { Readable, PassThrough } = require("stream");
+const ROLE = (process.env.BOT_ROLE || "").toLowerCase();
+if (!["blue", "red", "spectator"].includes(ROLE)) {
+  console.error("BOT_ROLE must be 'blue', 'red' or 'spectator'");
+  process.exit(1);
+}
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+});
+/* -------------------------------------------------------------------------- */
+/* TEAM MIXER — PATCHED FOR BACKPRESSURE */
+/* -------------------------------------------------------------------------- */
+class TeamVoiceMixer extends Readable {
+  constructor() {
+    super({ objectMode: false });
+    this.streams = new Map();
+    this.frameSize = 3840;
+    this.mixCount = 0;
+    this.needsData = false; // 🔥 NEW
+    this.interval = setInterval(() => this.flush(), 20);
+    console.log(`Team mixer started (${ROLE})`);
+  }
+  _read() {
+    this.needsData = true; // 🔥 tell flush() to push again
+  }
+  addStream(userId, opusStream) {
+    if (this.streams.has(userId)) return;
+    const decoder = new prism.opus.Decoder({
+      rate: 48000,
+      channels: 2,
+      frameSize: 960,
+    });
+    this.streams.set(userId, { decoder, buffer: Buffer.alloc(0), opusStream });
+    opusStream.pipe(decoder);
+    decoder.on("data", (chunk) => {
+      const s = this.streams.get(userId);
+      if (!s) return;
+      s.buffer = Buffer.concat([s.buffer, chunk]);
+    });
+    console.log(`Added stream ${userId} (${this.streams.size} total)`);
+  }
+  removeStream(userId) {
+    const s = this.streams.get(userId);
+    if (!s) return;
+    s.decoder.destroy();
+    s.opusStream.destroy();
+    this.streams.delete(userId);
+    console.log(`Removed stream ${userId} (${this.streams.size} left)`);
+  }
+  flush() {
+    if (!this.needsData) return; // 🔥 prevent overflow pushes
+    this.needsData = false;
+    const chunks = [];
+    let active = 0;
+    let maxEnergy = 0;
+    this.streams.forEach((s, uid) => {
+      let chunk = s.buffer.slice(0, this.frameSize);
+      if (chunk.length < this.frameSize) {
+        chunk = Buffer.concat([chunk, Buffer.alloc(this.frameSize - chunk.length, 0)]);
+      } else {
+        active++;
+      }
+      chunks.push({ chunk, uid });
+      s.buffer = s.buffer.slice(this.frameSize);
+    });
+    const mixed = Buffer.alloc(this.frameSize);
+    let totalVol = 0;
+    for (let i = 0; i < this.frameSize; i += 4) {
+      let lSum = 0,
+        rSum = 0,
+        speaking = 0;
+      chunks.forEach(({ chunk }) => {
+        const l = chunk.readInt16LE(i);
+        const r = chunk.readInt16LE(i + 2);
+        const energy = Math.abs(l) + Math.abs(r);
+        maxEnergy = Math.max(maxEnergy, energy);
+        lSum += l;
+        rSum += r;
+        speaking++;
+      });
+      let left = 0,
+        right = 0;
+      if (speaking > 0) {
+        left = Math.round(lSum / speaking);
+        right = Math.round(rSum / speaking);
+        const peak = Math.max(Math.abs(left), Math.abs(right));
+        if (peak > 30000) {
+          const scale = Math.pow(30000 / peak, 0.8);
+          left *= scale;
+          right *= scale;
+        }
+      }
+      left = Math.max(-32768, Math.min(32767, left));
+      right = Math.max(-32768, Math.min(32767, right));
+      mixed.writeInt16LE(left, i);
+      mixed.writeInt16LE(right, i + 2);
+      totalVol += Math.abs(left) + Math.abs(right);
+    }
+    totalVol /= this.frameSize / 2;
+    this.mixCount++;
+    if (this.mixCount % 50 === 0) {
+      console.log(
+        `Team mix #${this.mixCount}: ${active} active, vol ${totalVol.toFixed(
+          0
+        )}, MAX ENERGY: ${maxEnergy}`
+      );
+    }
+    this.push(mixed); // 🔥 SAFE NOW
+  }
+  destroy() {
+    clearInterval(this.interval);
+    this.streams.forEach((s) => s.decoder.destroy());
+    this.push(null);
+  }
+}
+/* -------------------------------------------------------------------------- */
+/* SPECTATOR MIXER — PATCHED FOR BACKPRESSURE */
+/* -------------------------------------------------------------------------- */
+class SpectatorMixer extends Readable {
+  constructor() {
+    super({ objectMode: false });
+    this.blueIn = new PassThrough();
+    this.redIn = new PassThrough();
+    this.frameSize = 3840;
+    this.mixCount = 0;
+    this.needsData = false; // 🔥 NEW
+    this.interval = setInterval(() => this.flush(), 20);
+    console.log("Spectator mixer initialized");
+  }
+  _read() {
+    this.needsData = true; // 🔥 signal ready for more data
+  }
+  flush() {
+    if (!this.needsData) return; // 🔥 DON’T PUSH IF FS IS NOT READY
+    this.needsData = false;
+    let blueChunk = this.blueIn.read(this.frameSize);
+    let redChunk = this.redIn.read(this.frameSize);
+    if (!blueChunk) blueChunk = Buffer.alloc(this.frameSize, 0);
+    if (!redChunk) redChunk = Buffer.alloc(this.frameSize, 0);
+    const mixed = Buffer.alloc(this.frameSize);
+    let vol = 0;
+    for (let i = 0; i < this.frameSize; i += 4) {
+      const bl = blueChunk.readInt16LE(i),
+        br = blueChunk.readInt16LE(i + 2);
+      const rl = redChunk.readInt16LE(i),
+        rr = redChunk.readInt16LE(i + 2);
+      let left = Math.round((bl + rl) * 0.9);
+      let right = Math.round((br + rr) * 0.9);
+      left = Math.max(-32768, Math.min(32767, left));
+      right = Math.max(-32768, Math.min(32767, right));
+      mixed.writeInt16LE(left, i);
+      mixed.writeInt16LE(right, i + 2);
+      vol += Math.abs(left) + Math.abs(right);
+    }
+    vol /= this.frameSize / 2;
+    this.mixCount++;
+    if (this.mixCount % 50 === 0) {
+      console.log(`Spectator mix #${this.mixCount}: vol ${vol.toFixed(0)}`);
+    }
+    this.push(mixed); // 🔥 NOW SAFE
+  }
+  destroy() {
+    clearInterval(this.interval);
+    this.blueIn.destroy();
+    this.redIn.destroy();
+    this.push(null);
+  }
+}
+/* -------------------------------------------------------------------------- */
+/* MAIN LOGIC — ALL ROLES */
+/* -------------------------------------------------------------------------- */
+let connection, teamMixer, spectatorMixer, player, socket;
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag} (${ROLE})`);
+  const guild = await client.guilds.fetch(process.env.GUILD_ID);
+  const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
+  connection = joinVoiceChannel({
+    channelId: channel.id,
+    guildId: guild.id,
+    adapterCreator: guild.voiceAdapterCreator,
+    selfDeaf: false,
+    selfMute: ROLE === "spectator" ? false : true,
+  });
+  connection.on(VoiceConnectionStatus.Ready, async () => {
+    console.log(`JOINED VOICE: ${channel.name}`);
+    const me = await guild.members.fetch(client.user.id);
+    await me.voice.setDeaf(false);
+    await me.voice.setMute(ROLE === "spectator" ? false : true);
+    console.log(`BOT: mute=${me.voice.mute}, deaf=${me.voice.deaf}`);
+    /* --------------------------- TEAM BOTS (BLUE/RED) --------------------------- */
+    if (ROLE === "blue" || ROLE === "red") {
+      teamMixer = new TeamVoiceMixer();
+      teamMixer.resume();
+      const port = ROLE === "blue" ? 5000 : 5001;
+      const connect = () => {
+        socket = net.createConnection({ host: "127.0.0.1", port }, () => {
+          console.log(`${ROLE.toUpperCase()} → SPECTATOR (port ${port}) CONNECTED`);
+          teamMixer.pipe(socket);
+        });
+        socket.on("close", () => {
+          console.log(`${ROLE.toUpperCase()} socket closed – reconnecting...`);
+          setTimeout(connect, 1000);
+        });
+        socket.on("error", (e) => {
+          if (e.code !== "ECONNREFUSED") console.error(`${ROLE} socket error:`, e.message);
+        });
+      };
+      connect();
+      connection.receiver.speaking.on("start", (uid) => {
+        if (uid === client.user.id || teamMixer.streams.has(uid)) return;
+        console.log(`${ROLE} subscribing to ${uid}`);
+        const sub = connection.receiver.subscribe(uid, {
+          end: { behavior: EndBehaviorType.Manual },
+        });
+        teamMixer.addStream(uid, sub);
+      });
+      connection.receiver.speaking.on("end", (uid) => {
+        setTimeout(() => {
+          if (!connection.receiver.speaking.users.has(uid))
+            teamMixer.removeStream(uid);
+        }, 5000);
+      });
+    }
+    /* --------------------------- SPECTATOR BOT --------------------------- */
+    else if (ROLE === "spectator") {
+      spectatorMixer = new SpectatorMixer();
+      const {
+        startHldsLogReceiver,
+        setSpectatorMixer,
+        markSpectatorReady,
+      } = require("./services/hldsLogs.js");
+      setSpectatorMixer(spectatorMixer);
+      player = createAudioPlayer({
+        behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+      });
+      connection.subscribe(player);
+      startHldsLogReceiver(client, {}, (evt) => {
+        if (evt.type === "hltv_start")
+          console.log(`[${evt.serverName}] HLTV recording started`);
+        if (evt.type === "hltv_stop" || evt.type === "match_over")
+          console.log(`[${evt.serverName}] HLTV stopped`);
+      });
+      net.createServer((sock) => {
+        console.log("BLUE TEAM CONNECTED");
+        sock.pipe(spectatorMixer.blueIn, { end: false });
+        sock.on("close", () => console.log("BLUE TEAM DISCONNECTED"));
+      }).listen(5000, "127.0.0.1", () =>
+        console.log("LISTENING ON 5000 (BLUE)")
+      );
+      net.createServer((sock) => {
+        console.log("RED TEAM CONNECTED");
+        sock.pipe(spectatorMixer.redIn, { end: false });
+        sock.on("close", () => console.log("RED TEAM DISCONNECTED"));
+      }).listen(5001, "127.0.0.1", () =>
+        console.log("LISTENING ON 5001 (RED)")
+      );
+      const resource = createAudioResource(spectatorMixer, {
+        inputType: StreamType.Raw,
+        inlineVolume: true,
+      });
+      resource.volume?.setVolume(1.8);
+      player.play(resource);
+      console.log("PLAYING MIXED AUDIO (1.8x volume)");
+      console.log("READY");
+      markSpectatorReady();
+    }
+  });
+  connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    console.log("DISCONNECTED — trying to rejoin…");
+    try {
+      connection.destroy();
+    } catch (_) {}
+    setTimeout(() => {
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guild.id,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: ROLE === "spectator" ? false : true,
+      });
+    }, 2000);
+  });
+});
+client.login(process.env.DISCORD_TOKEN);

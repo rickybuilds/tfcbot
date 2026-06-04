@@ -1,0 +1,145 @@
+// services/voiceManager.js
+"use strict";
+
+const pm2 = require("pm2");
+
+const BOT_SPECTATOR = "tfcbot-spectator";
+const BOT_BLUE = "tfcbot-blue";
+const BOT_RED = "tfcbot-red";
+
+function connectPM2() {
+  return new Promise((res, rej) => {
+    pm2.connect((err) => (err ? rej(err) : res()));
+  });
+}
+
+function startProcess(name) {
+  return new Promise((resolve) => {
+    pm2.start(name, (err) => {
+      if (err) {
+        console.error(`[VoiceManager] ❌ Failed to start ${name}:`, err.message);
+      } else {
+        console.log(`[VoiceManager] ✅ Started ${name}`);
+      }
+      resolve();
+    });
+  });
+}
+
+function stopProcess(name) {
+  return new Promise((resolve) => {
+    pm2.stop(name, (err) => {
+      if (err) {
+        console.error(`[VoiceManager] ⚠️ Failed to stop ${name}:`, err.message);
+      } else {
+        console.log(`[VoiceManager] 🛑 Stopped ${name}`);
+      }
+      resolve();
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Graceful shutdown of spectator when ffmpeg conversion is running           */
+/* -------------------------------------------------------------------------- */
+
+async function waitForSpectatorToFinish() {
+  return new Promise((resolve) => {
+    pm2.list((err, list) => {
+      if (err) return resolve();
+
+      const spec = list.find((p) => p.name === BOT_SPECTATOR);
+      if (!spec) return resolve();
+
+      // PM2 sends log output while ffmpeg is converting
+      pm2.launchBus((err, bus) => {
+        if (err) return resolve();
+
+        let done = false;
+
+        bus.on("log:out", (packet) => {
+          if (packet.process.name !== BOT_SPECTATOR) return;
+
+          if (packet.data.includes("Converted →")) {
+            if (!done) {
+              done = true;
+              setTimeout(resolve, 500);
+            }
+          }
+        });
+
+        // Safety fallback: max 7 seconds wait
+        setTimeout(() => {
+          if (!done) resolve();
+        }, 7000);
+      });
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+
+async function startVoiceBots() {
+  await connectPM2();
+  console.log("[VoiceManager] 🚀 Arming voice bots...");
+
+  // Wait for spectator READY
+const readyPromise = new Promise((resolve) => {
+  pm2.launchBus((err, bus) => {
+    if (err) {
+      console.error("[VoiceManager] PM2 bus error:", err);
+      return resolve();
+    }
+
+    let done = false;
+
+    bus.on("log:out", (packet) => {
+      if (packet.process.name !== BOT_SPECTATOR) return;
+
+      const line = (packet.data || "").toString().trim();
+
+      // Match the line that tlog prints
+      if (!done && (line.includes("SPECTATOR READY") || line.endsWith("READY"))) {
+        done = true;
+        console.log("[VoiceManager] 🎧 Spectator READY (matched:", line, ")");
+        resolve();
+
+        // Optional: close the bus so we don't leak listeners
+        try {
+          bus.close && bus.close();
+        } catch (_) {}
+      }
+    });
+  });
+});
+
+  await startProcess(BOT_SPECTATOR);
+
+  console.log("[VoiceManager] Waiting for spectator to say READY...");
+  await readyPromise;
+
+  await Promise.all([startProcess(BOT_BLUE), startProcess(BOT_RED)]);
+
+  pm2.disconnect();
+  console.log("[VoiceManager] ✅ All voice bots online.");
+}
+
+async function stopVoiceBots() {
+  await connectPM2();
+  console.log("[VoiceManager] 🔻 Disarming voice bots...");
+
+  // Stop blue/red first
+  await stopProcess(BOT_BLUE);
+  await stopProcess(BOT_RED);
+
+  // Wait for spectator’s ffmpeg conversions
+  await waitForSpectatorToFinish();
+
+  // Now safe to kill spectator
+  await stopProcess(BOT_SPECTATOR);
+
+  pm2.disconnect();
+  console.log("[VoiceManager] 💤 All voice bots stopped.");
+}
+
+module.exports = { startVoiceBots, stopVoiceBots };

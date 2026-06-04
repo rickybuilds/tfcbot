@@ -1,0 +1,75 @@
+// commands/setmap.js
+"use strict";
+
+const { isAdmin } = require("../lib/guards");
+
+async function register(reg, deps) {
+  const { elo, config, state } = deps;
+
+  reg.set("setmap", async (message, args) => {
+    if (!isAdmin(message)) return;
+
+    const matchId = args[0];
+    const newMap = args.slice(1).join(" ");
+
+    if (!matchId || !newMap) {
+      await message.reply("Usage: `!setmap <matchid> <map>`");
+      return;
+    }
+
+    try {
+      // --- Check match status ---
+      const matchRow = elo.db
+        .prepare("SELECT match_id, map_name, status FROM matches WHERE match_id = ?")
+        .get(matchId);
+
+      if (!matchRow) {
+        await message.reply(`⚠️ No match found with ID **${matchId}**`);
+        return;
+      }
+
+      const currentStatus = (matchRow.status || "").toLowerCase();
+      if (currentStatus !== "in_progress") {
+        await message.reply(
+          `🚫 Cannot change map — match **${matchId}** is **${currentStatus.toUpperCase()}**.`
+        );
+        return;
+      }
+
+      // --- Perform update ---
+      const res = elo.db
+        .prepare("UPDATE matches SET map_name = ? WHERE match_id = ?")
+        .run(newMap, matchId);
+
+      if (res.changes > 0) {
+        // Update in-memory store too
+        const match = state.matches.find((m) => String(m.id) === String(matchId));
+        if (match) match.map = newMap;
+
+        await message.reply(`✅ Updated map for match **${matchId}** → **${newMap}**`);
+
+        // --- Audit log ---
+        try {
+          const channelId = config?.channels?.audit;
+          if (message.client && channelId) {
+            const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
+            if (auditCh && auditCh.isTextBased()) {
+              await auditCh.send(
+                `🗺️ **SETMAP:** <@${message.author.id}> changed map for **${matchId}** → **${newMap}**`
+              );
+            }
+          }
+        } catch (err) {
+          console.warn("[setmap audit] failed:", err);
+        }
+      } else {
+        await message.reply(`⚠️ No map change was made (already set to **${newMap}**?)`);
+      }
+    } catch (err) {
+      console.error("[!setmap error]", err);
+      await message.reply("❌ Failed to update map. Check logs for details.");
+    }
+  });
+}
+
+module.exports = { register };
