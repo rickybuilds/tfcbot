@@ -10,5 +10,11 @@
         "ip": "66.42.125.244:27015",
         "password": "pickup",
 	"url": "http://tinyurl.com/centralnoname"
+    },{
+        "name": "TFC Central 2 US Server",
+        "ip": "66.55.67.73:27015",
+        "password": "pickup",
+	"url": "https://tinyurl.com/nonamecentral2"
     }
+
 ]

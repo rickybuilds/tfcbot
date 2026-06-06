@@ -5,6 +5,7 @@ const { EmbedBuilder } = require("discord.js");
 const { refreshBotName } = require("../lib/botName");
 const { mention, formatPlayerName, clearAnyTimer, disableAllButtons } = require("../lib/util");
 const adl = require("../lib/adl");
+const { supporterBadge } = require("../lib/supporters");
 const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
 let lastStatusUsedAt = 0; // global cooldown timestamp
 
@@ -46,8 +47,18 @@ function queueLines(state, elo, privacy) {
 
   return state.queue.map(p => {
     try {
-      const base = formatPlayerName(state, elo, p.id, p.name || `Player#${String(p.id).slice(-4)}`, privacy, false);
-      return p.adlVote ? `${base} (ADL)` : base;  // 👈 tag ADL voters
+      const base = formatPlayerName(
+        state,
+        elo,
+        p.id,
+        p.name || `Player#${String(p.id).slice(-4)}`,
+        privacy,
+        false
+      );
+
+      const name = `${base}${supporterBadge(p.id)}`;
+
+      return p.adlVote ? `${name} (ADL)` : name;
     } catch (e) {
       console.error("[queueLines] failed formatting", p, e);
       return mention(p.id);

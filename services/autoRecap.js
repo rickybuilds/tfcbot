@@ -443,6 +443,14 @@ try {
 /* Added this on 5/27/26 */
 /* -------------------------------------------------------------------------- */
   if (evt.type === "capture") {
+
+  // ignore captures before actual map start
+  if (!a.lastMapSeen) {
+    console.log(
+      `[autoRecap] ignoring prematch capture for ${a.matchId}`
+    );
+    return;
+  }
     const mapNow = a.lastMapSeen || a.map;
     const rule = getCaptureRule(mapNow, evt);
 

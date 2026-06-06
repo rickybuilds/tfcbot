@@ -91,6 +91,10 @@ const registry = new Map();
 function persistQueueSoon() { try { queueStore.save(state.queue); } catch {} }
 global.persistQueueSoon = persistQueueSoon;
 
+//Supporters
+const supporters = require("./commands/supporters");
+registry.set("addsupport", (m, a) => supporters.execute(m, a, deps));
+
 const deps = { 
   config, 
   state, 
@@ -282,6 +286,26 @@ registry.set("spintest", (m, a) => spintest.execute(m, a, deps));
 
 const kix = require("./commands/kix");
 registry.set("kix", (m, a) => kix.execute(m, a, deps));
+const kixHandler = (m, a) => kix.execute(m, a, deps);
+registry.set(kix.name.toLowerCase(), kixHandler);
+(kix.aliases || []).forEach(alias => {
+  registry.set(alias.toLowerCase(), kixHandler);
+});
+
+const light = require("./commands/light");
+const lightHandler = (m, a) => light.execute(m, a, deps);
+registry.set(light.name.toLowerCase(), lightHandler);
+(light.aliases || []).forEach(alias => {
+  registry.set(alias.toLowerCase(), lightHandler);
+});
+
+const emilio = require("./commands/emilio");
+const emilioHandler = (m, a) => emilio.execute(m, a, deps);
+registry.set(emilio.name.toLowerCase(), emilioHandler);
+(emilio.aliases || []).forEach(alias => {
+  registry.set(alias.toLowerCase(), emilioHandler);
+});
+
 
 // READY
 client.once("ready", async () => {

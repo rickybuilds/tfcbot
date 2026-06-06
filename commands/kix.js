@@ -2,6 +2,7 @@
 
 module.exports = {
   name: "kix",
+  aliases: ["rufio"],
   description: "The kix clip",
 
   async execute(message) {
