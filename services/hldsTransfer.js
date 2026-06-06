@@ -73,6 +73,7 @@ async function sftpConnect(serverKey = "east") {
 
   console.log(`[SFTP] Connecting to ${cfg.host}:${cfg.port} (${serverKey})...`);
   await sftp.connect(cfg);
+  console.log(`[SFTP] Connected to ${cfg.host} (${serverKey})`);
   return sftp;
 }
 
@@ -99,6 +100,7 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
 
     const workDir = ensureDir(path.join(TMP_DIR, `${serverKey}-${matchId || "unknown"}`));
 
+    console.log(  `[SFTP:${serverKey}] Listing remote log dir: ${base}`);
     let remoteFiles = await sftp.list(base);
     remoteFiles = remoteFiles
       .filter(f => f.name.endsWith(".log"))
@@ -121,7 +123,9 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
 
       const remotePath = `${base}/${f.name}`;
       const local = path.join(workDir, f.name);
+      console.log(`[SFTP:${serverKey}] Downloading ${remotePath} -> ${local}`);
       await sftp.fastGet(remotePath, local);
+      console.log(`[SFTP:${serverKey}] Downloaded ${f.name}`);
 
       const detectedMap = detectMapInLog(local);
       if (
@@ -146,7 +150,10 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
         if (eligible.find(e => e.fname === f.name)) continue;
         const remotePath = `${base}/${f.name}`;
         const local = path.join(workDir, f.name);
+
+        console.log(`[SFTP:${serverKey}] Downloading ${remotePath} -> ${local}`);
         await sftp.fastGet(remotePath, local);
+        console.log(`[SFTP:${serverKey}] Downloaded ${f.name}`);
         const detectedMap = detectMapInLog(local);
         if (
           detectedMap &&
