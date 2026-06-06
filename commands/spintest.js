@@ -3,7 +3,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 
-const maps = ["spek", "spek", "spek", "spek", "spek"];
+const maps = ["1", "2"];
 
 module.exports = {
   name: "spintest",

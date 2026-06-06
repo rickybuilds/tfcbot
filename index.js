@@ -308,7 +308,7 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 
 // READY
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   try { await refreshBotName(client, state); } catch {}
 
