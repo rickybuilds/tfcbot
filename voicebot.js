@@ -28,7 +28,6 @@ if (!["blue", "red", "spectator"].includes(ROLE)) {
   process.exit(1);
 }
 
-// Spectator listens on these ports; blue/red connect to them
 const BLUE_PORT = Number(process.env.BLUE_PCM_PORT || 7001);
 const RED_PORT  = Number(process.env.RED_PCM_PORT  || 7002);
 
@@ -37,17 +36,23 @@ function tlog(...args) {
   console.log(`[${ts}]`, ...args);
 }
 
+// Swallow unhandled errors globally so one bad socket never crashes the process
+process.on("uncaughtException", (err) => {
+  tlog(`[uncaughtException] ${err.message}`);
+});
+process.on("unhandledRejection", (err) => {
+  tlog(`[unhandledRejection] ${err}`);
+});
+
 /* -------------------------------------------------------------------------- */
 /* TEAM MIXER                                                                 */
-/* Reads Opus from every member in a channel, decodes, mixes to PCM,        */
-/* and streams the result to whoever is connected (spectator's TCP server).  */
 /* -------------------------------------------------------------------------- */
 class TeamVoiceMixer extends Readable {
   constructor(role) {
-    super({ objectMode: false, highWaterMark: 3840 * 960 });
+    super({ objectMode: false, highWaterMark: 3840 * 20 });
     this.role      = role;
     this.streams   = new Map();
-    this.frameSize = 3840; // 960 samples × 2ch × 2 bytes = 20ms @ 48kHz
+    this.frameSize = 3840;
     this._paused   = false;
     this._clock    = setInterval(() => this._flush(), 20);
     tlog(`[${role}] Mixer started`);
@@ -67,6 +72,8 @@ class TeamVoiceMixer extends Readable {
       const s = this.streams.get(userId);
       if (s) s.buffer = Buffer.concat([s.buffer, chunk]);
     });
+    decoder.on("error", (e) => tlog(`[${this.role}] decoder error ${userId}: ${e.message}`));
+    opusStream.on("error", (e) => tlog(`[${this.role}] opus error ${userId}: ${e.message}`));
     opusStream.on("close", () => this.removeStream(userId));
     tlog(`[${this.role}] +stream ${userId} (total=${this.streams.size})`);
   }
@@ -74,7 +81,7 @@ class TeamVoiceMixer extends Readable {
   removeStream(userId) {
     const s = this.streams.get(userId);
     if (!s) return;
-    try { s.decoder.destroy(); }   catch {}
+    try { s.decoder.destroy(); }    catch {}
     try { s.opusStream.destroy(); } catch {}
     this.streams.delete(userId);
     tlog(`[${this.role}] -stream ${userId} (total=${this.streams.size})`);
@@ -94,8 +101,8 @@ class TeamVoiceMixer extends Readable {
           }
         });
         const peak = Math.max(Math.abs(lSum), Math.abs(rSum));
-        if (peak > 24000) {
-          const scale = 24000 / peak;
+        if (peak > 32767) {
+          const scale = 32767 / peak;
           lSum = Math.round(lSum * scale);
           rSum = Math.round(rSum * scale);
         }
@@ -147,17 +154,20 @@ client.once("clientReady", async () => {
   });
 
   /* -----------------------------------------------------------------------
-     BLUE / RED — capture channel audio, stream PCM to spectator via TCP
+     BLUE / RED
      ----------------------------------------------------------------------- */
   if (ROLE === "blue" || ROLE === "red") {
     const TARGET_PORT = ROLE === "blue" ? BLUE_PORT : RED_PORT;
     const mixer       = new TeamVoiceMixer(ROLE);
 
-    // Connect to spectator's TCP server and pipe mixer output into it.
-    // Retries automatically if spectator isn't up yet.
     function connectToSpectator() {
       tlog(`[${ROLE}] Connecting to spectator on port ${TARGET_PORT}...`);
       const sock = net.connect(TARGET_PORT, "127.0.0.1");
+
+      // Must attach error handler before connect fires to avoid unhandled error crash
+      sock.on("error", (err) => {
+        tlog(`[${ROLE}] Socket error: ${err.message} — retry in 2s`);
+      });
 
       sock.on("connect", () => {
         tlog(`[${ROLE}] Connected to spectator — streaming PCM`);
@@ -165,12 +175,8 @@ client.once("clientReady", async () => {
         mixer.resume();
       });
 
-      sock.on("error", (err) => {
-        tlog(`[${ROLE}] Spectator socket error: ${err.message} — retry in 2s`);
-      });
-
       sock.on("close", () => {
-        tlog(`[${ROLE}] Spectator socket closed — retry in 2s`);
+        tlog(`[${ROLE}] Socket closed — retry in 2s`);
         try { mixer.unpipe(sock); } catch {}
         setTimeout(connectToSpectator, 2000);
       });
@@ -179,7 +185,6 @@ client.once("clientReady", async () => {
     connection.on(VoiceConnectionStatus.Ready, () => {
       tlog(`[${ROLE}] Joined voice: ${channel.name}`);
 
-      // Subscribe everyone already in the channel
       channel.members.forEach((member) => {
         if (member.id === client.user.id) return;
         const sub = connection.receiver.subscribe(member.id, {
@@ -188,7 +193,6 @@ client.once("clientReady", async () => {
         mixer.addStream(member.id, sub);
       });
 
-      // Pick up muted/deafened members when they speak
       connection.receiver.speaking.on("start", (uid) => {
         if (uid === client.user.id || mixer.streams.has(uid)) return;
         const sub = connection.receiver.subscribe(uid, {
@@ -197,7 +201,6 @@ client.once("clientReady", async () => {
         mixer.addStream(uid, sub);
       });
 
-      // Joins and leaves
       client.on("voiceStateUpdate", (oldState, newState) => {
         const uid = newState.member?.id;
         if (!uid || uid === client.user.id) return;
@@ -219,23 +222,25 @@ client.once("clientReady", async () => {
   }
 
   /* -----------------------------------------------------------------------
-     SPECTATOR — receives PCM from blue+red over TCP, mixes with ffmpeg,
-                 plays the result into a Discord voice channel
+     SPECTATOR
      ----------------------------------------------------------------------- */
   else if (ROLE === "spectator") {
 
-    // Two PassThroughs — one per team.  ffmpeg reads from these.
-    const bluePass = new PassThrough({ highWaterMark: 3840 * 960 });
-    const redPass  = new PassThrough({ highWaterMark: 3840 * 960 });
+    const bluePass = new PassThrough({ highWaterMark: 3840 * 20 });
+    const redPass  = new PassThrough({ highWaterMark: 3840 * 20 });
 
-    // TCP servers that receive raw PCM from blue and red bots
+    // Swallow errors on the PassThroughs themselves so a reset never bubbles up
+    bluePass.on("error", (e) => tlog(`[Spectator] bluePass error: ${e.message}`));
+    redPass.on("error",  (e) => tlog(`[Spectator] redPass error: ${e.message}`));
+
     function makePcmServer(port, label, dest) {
       const server = net.createServer((sock) => {
         tlog(`[Spectator] ${label} bot connected`);
-        sock.pipe(dest, { end: false });
-        sock.on("close", () => tlog(`[Spectator] ${label} bot disconnected`));
         sock.on("error", (e) => tlog(`[Spectator] ${label} socket error: ${e.message}`));
+        sock.on("close", () => tlog(`[Spectator] ${label} bot disconnected`));
+        sock.pipe(dest, { end: false });
       });
+      server.on("error", (e) => tlog(`[Spectator] ${label} server error: ${e.message}`));
       server.listen(port, "127.0.0.1", () => {
         tlog(`[Spectator] Listening for ${label} PCM on port ${port}`);
       });
@@ -244,9 +249,9 @@ client.once("clientReady", async () => {
     makePcmServer(BLUE_PORT, "blue", bluePass);
     makePcmServer(RED_PORT,  "red",  redPass);
 
-    // Control port (unchanged from original)
     const CONTROL_PORT = Number(process.env.VOICE_CONTROL_PORT || 6200);
     net.createServer((sock) => {
+      sock.on("error", (e) => tlog(`[Spectator] control socket error: ${e.message}`));
       tlog("[Spectator] Control client connected");
       let buf = "";
       sock.on("data", (d) => {
@@ -271,8 +276,21 @@ client.once("clientReady", async () => {
     connection.on(VoiceConnectionStatus.Ready, () => {
       tlog(`[Spectator] Joined voice: ${channel.name}`);
 
-      // Single PassThrough Discord reads from — survives ffmpeg restarts
-      const audioPass = new PassThrough({ highWaterMark: 3840 * 960 });
+      // Small highWaterMark — we want Discord to consume immediately, not buffer up
+      const audioPass = new PassThrough({ highWaterMark: 3840 * 4 });
+      audioPass.on("error", (e) => tlog(`[Spectator] audioPass error: ${e.message}`));
+
+      // Drain the buffer if it grows beyond ~200ms worth of audio (38400 bytes).
+      // This is what keeps the bot "live" — if Discord falls behind we drop old
+      // audio instead of letting the delay snowball over time.
+      const MAX_BUFFER = 3840 * 10; // ~200ms
+      setInterval(() => {
+        const buffered = audioPass.readableLength;
+        if (buffered > MAX_BUFFER) {
+          const drop = audioPass.read(buffered - MAX_BUFFER);
+          if (drop) tlog(`[Spectator] ⏩ Dropped ${(drop.length / 1024).toFixed(1)} KB to stay live`);
+        }
+      }, 200);
 
       const player = createAudioPlayer({
         behaviors: { noSubscriber: NoSubscriberBehavior.Play },
@@ -283,34 +301,43 @@ client.once("clientReady", async () => {
         inputType: StreamType.Raw,
         inlineVolume: true,
       });
-      resource.volume?.setVolume(1.5);
+      resource.volume?.setVolume(1.0);
       player.play(resource);
 
-      let ffmpegProc      = null;
-      let bytesSinceLast  = 0;
-      let emptyWindows    = 0;
+      let ffmpegProc     = null;
+      let bytesSinceLast = 0;
+      let emptyWindows   = 0;
 
       function startFfmpeg() {
+        // Clean up old process first
         if (ffmpegProc) {
-          try { ffmpegProc.kill("SIGKILL"); } catch {}
+          try { bluePass.unpipe(ffmpegProc.stdio[3]); } catch {}
+          try { redPass.unpipe(ffmpegProc.stdio[4]);  } catch {}
+          try { ffmpegProc.stdio[3].destroy(); }        catch {}
+          try { ffmpegProc.stdio[4].destroy(); }        catch {}
+          try { ffmpegProc.kill("SIGKILL"); }           catch {}
           ffmpegProc = null;
         }
+
         tlog("[Spectator] Starting ffmpeg mixer...");
 
-        // ffmpeg reads live PCM from the two PassThroughs via stdin fds
-        // We pass them as extra stdio pipes (fd 3 = blue, fd 4 = red)
         ffmpegProc = spawn("ffmpeg", [
           "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "512", "-i", "pipe:3",
           "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "512", "-i", "pipe:4",
           "-filter_complex",
-          "amix=inputs=2:duration=longest:dropout_transition=1:normalize=0,volume=0.25",
+          "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,volume=.25",
           "-f", "s16le", "-ar", "48000", "-ac", "2",
           "pipe:1",
         ], {
           stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"],
         });
 
-        // Pipe the team streams into ffmpeg's extra fds
+        // Error handlers on ffmpeg's stdio pipes — missing these caused the ECONNRESET crash
+        ffmpegProc.stdio[1].on("error", (e) => tlog(`[Spectator] ffmpeg stdout error: ${e.message}`));
+        ffmpegProc.stdio[2].on("error", (e) => tlog(`[Spectator] ffmpeg stderr error: ${e.message}`));
+        ffmpegProc.stdio[3].on("error", (e) => tlog(`[Spectator] ffmpeg pipe3 error: ${e.message}`));
+        ffmpegProc.stdio[4].on("error", (e) => tlog(`[Spectator] ffmpeg pipe4 error: ${e.message}`));
+
         bluePass.pipe(ffmpegProc.stdio[3], { end: false });
         redPass.pipe(ffmpegProc.stdio[4],  { end: false });
 
@@ -332,7 +359,6 @@ client.once("clientReady", async () => {
         ffmpegProc.on("error", (err) => tlog(`[Spectator] ffmpeg error: ${err.message}`));
       }
 
-      // Health check
       setInterval(() => {
         if (bytesSinceLast > 0) {
           tlog(`[Spectator] ✅ Relaying — ${(bytesSinceLast / 1024).toFixed(1)} KB in last 10s`);
@@ -355,7 +381,7 @@ client.once("clientReady", async () => {
   }
 
   /* -----------------------------------------------------------------------
-     RECONNECT on disconnect
+     RECONNECT
      ----------------------------------------------------------------------- */
   connection.on(VoiceConnectionStatus.Disconnected, () => {
     tlog("Voice disconnected — rejoining in 2s...");

@@ -20,7 +20,7 @@ const armed = new Map();
 
 const mapCapturesPath = path.resolve(__dirname, "..", "mapCaptures.json");
 
-const LIVE_STATE_PATH = "/root/tfcbot/live_state.json";
+function getLiveStatePath(serverKey){return `/root/tfcbot/live_${serverKey}.json`;}
 
 function writeLiveState(a) {
   try {
@@ -48,7 +48,7 @@ function writeLiveState(a) {
     };
 
     fs.writeFileSync(
-      LIVE_STATE_PATH,
+      getLiveStatePath(a.serverKey),
       JSON.stringify(state,null,2)
     );
 
@@ -60,10 +60,10 @@ function writeLiveState(a) {
   }
 }
 
-function clearLiveState() {
+function clearLiveState(serverKey) {
   try {
     fs.writeFileSync(
-      LIVE_STATE_PATH,
+       getLiveStatePath(serverKey),
         JSON.stringify({
           active: false,
           match_id: null,
@@ -337,6 +337,7 @@ function updateArmedMap(matchId, newMap) {
     if (a.matchId === matchId) {
       if (a.timeout) clearTimeout(a.timeout);
       armed.delete(k);
+      clearLiveState(a.serverKey);
       count++;
       const reason = a.done ? "cleanup complete" : "manual delete";
 	  post(recapChannel, `🛑 Disarmed match ${matchId} (${reason})`).catch?.(() => {});
@@ -705,7 +706,7 @@ await sendRecapWithDemos(client, logsChannel, {
       try { cleanupResult(zipResult); } catch (e) {}
     }, 5000);
 
-    clearLiveState();
+    clearLiveState(a.serverKey);
     a.done = true;
     return; // skip default embed
 
@@ -769,7 +770,7 @@ await sendRecapWithDemos(client, logsChannel, {
       console.error("[autoRecap resetHostname] failed:", e);
     }
 
-    clearLiveState();
+    clearLiveState(a.serverKey);
     a.done = true;
 
 
