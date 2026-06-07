@@ -230,6 +230,9 @@ if (elowithdev?.run) {
   );
 }
 
+const serverhealth=require("./commands/serverhealth");
+registry.set("serverhealth",(m,a)=>serverhealth.execute(m,a,deps));
+
 // ADL commands
 registry.set(addadl.name.toLowerCase(), (m) => addadl.run(m, deps));
 addadl.aliases.forEach(a =>
