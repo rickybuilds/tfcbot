@@ -248,8 +248,20 @@ if (ban) {
   const addplayer = async (message) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     if (!isAdmin(message)) return;
-    const target = message.mentions?.users?.first();
-    if (!target) return message.channel.send("Usage: `!addplayer @user`");
+	const target = message.mentions?.users?.first();
+	if (!target) return message.channel.send("Usage: `!addplayer @user`");
+
+	if (state.isVotingInProgress || state.vote) {
+	  return message.channel.send(
+		"🚫 Cannot add players while a vote is in progress."
+	  );
+	}
+
+	if (state.queue.length >= (state.MAX_PLAYERS || 8)) {
+	  return message.channel.send(
+		`🚨 Queue is already full (${state.MAX_PLAYERS || 8} players).`
+	  );
+	}
 
     const ban = banStore?.getBan(target.id);
     if (ban) {
