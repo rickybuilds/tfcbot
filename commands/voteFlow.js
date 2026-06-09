@@ -20,6 +20,7 @@ const {
 const { makeBalancedTeams } = require("../lib/balance");
 const { postQueueBoard } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
+const QUEUE_FILE=path.join(process.cwd(),"queue.json");
 
 // HLDS auto-recap
 const { autoArmFromMatchReady } = require("../lib/autoArm");
@@ -534,7 +535,14 @@ return startVote(state, message, {
 		}
 	  });
 	}
-
+/* Save queue File */
+	function saveQueueFile(queue){
+	  try{
+		fs.writeFileSync(QUEUE_FILE,JSON.stringify(queue||[],null,2));
+	  }catch(e){
+		console.error("[queue] failed to write queue.json:",e);
+	  }
+	}
 
 /* ---------------------------- finalizeMatch ---------------------------- */
 async function finalizeMatch(
@@ -761,6 +769,7 @@ const record = {
 	}
 
   state.queue = [];
+  saveQueueFile(state.queue);
   state.queueSnapshot = null;
   state.serverWinner = null;
   state.isVotingInProgress = false;
