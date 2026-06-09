@@ -21,7 +21,7 @@ const servers = {
 
 if (process.env.TFC_RCON_CENTRAL_HOST) {
   servers.central = {
-    name: "TFC CENTRAL Server",
+    name: "TFC Central US Server",
     host: process.env.TFC_RCON_CENTRAL_HOST,
     port: parseInt(process.env.TFC_RCON_CENTRAL_PORT || "27015", 10),
     password: process.env.TFC_RCON_CENTRAL_PASS,
@@ -38,7 +38,7 @@ if (process.env.TFC_RCON_CENTRAL_HOST) {
 
   if (process.env.TFC_RCON_CENTRAL2_HOST) {
   servers.central2 = {
-    name: "TFC CENTRAL 2 Server",
+    name: "TFC Central 2 US Server",
     host: process.env.TFC_RCON_CENTRAL2_HOST,
     port: parseInt(process.env.TFC_RCON_CENTRAL2_PORT || "27015", 10),
     password: process.env.TFC_RCON_CENTRAL2_PASS,
