@@ -5,6 +5,26 @@ const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 const rconCfg = require("../config/rcon"); // ✅ add this line
 const os = require("os");
 
+
+const { spawn } = require("child_process");
+
+function importHampalyzerStats(matchId, hampalyzerUrl) {
+  if (!matchId || !hampalyzerUrl) return;
+  if (!/^https?:\/\/app\.hampalyzer\.com\/parsedlogs\//i.test(hampalyzerUrl)) return;
+
+  const child = spawn("node", [
+    "/root/tfcbot/hampalyzerImport.js",
+    String(matchId),
+    String(hampalyzerUrl)
+  ], {
+    cwd: "/root/tfcbot",
+    stdio: "ignore",
+    detached: true
+  });
+
+  child.unref();
+}
+
 /**
  * sendRecapWithDemos(client, channelId, options)
  */
@@ -76,6 +96,11 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
     content: mentionRoles || null,
     embeds: [embed],
   });
+
+if (hampalyzer?.url && displayId && displayId !== "N/A") {
+  console.log(`[hampalyzerImport] Queuing stats import for ${displayId}`);
+  importHampalyzerStats(displayId, hampalyzer.url);
+}
 
   // 📎 Optional attachment
   if (options.zipPath && fs.existsSync(options.zipPath)) {
