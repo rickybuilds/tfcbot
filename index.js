@@ -1,5 +1,10 @@
 // index.js
 "use strict";
+
+// ============================================================================
+// Environment and configuration
+// ============================================================================
+
 require("dotenv").config();
 console.log("[MAIN] Loaded state file:", require.resolve("./lib/state"));
 console.log("[DEBUG] ADMIN_ROLE_ID =", process.env.ADMIN_ROLE_ID);
@@ -7,7 +12,10 @@ console.log("[DEBUG] ADMIN_ROLE_ID =", process.env.ADMIN_ROLE_ID);
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
 
-// core libs / singletons
+// ============================================================================
+// Core libraries and services
+// ============================================================================
+
 const { SettingsDB }   = require("./lib/settings");
 const { state, loadServersFile, loadMappoolFile, loadAdlMappoolFile } = require("./lib/state");
 const { PrivacyDB }    = require("./lib/privacy");
@@ -15,13 +23,12 @@ const { MatchStore }   = require("./lib/matchStore");
 const { refreshBotName } = require("./lib/botName");
 const { scheduleBackups } = require("./lib/backup");
 
-// 👇 JAIL SYSTEM
+// Jail system
 const { JailStore } = require("./lib/jailStore");
 const { startJailWatcher } = require("./lib/jailWatcher");
 
 // TFC Server Commands
 const rconCommands = require("./commands/rconCommands");
-const rconCfgs = require("./config/rcon");
 
 // commands (ADL + health)
 const addadl    = require("./commands/addadl");
@@ -37,6 +44,10 @@ const { findLogsForMatch }     = require("./services/hldsManualTransfer"); // �
 const { QueueStore } = require("./lib/queueStore");
 const { BanStore }   = require("./lib/banStore");
 const { scheduleDecayIfNeeded } = require("./lib/eloDecay");
+
+// ============================================================================
+// Shared service initialization
+// ============================================================================
 
 // robust Elo import (supports multiple export styles)
 const EloAny = require("./lib/elo");
@@ -54,25 +65,28 @@ const matchesStore = new MatchStore("/root/tfcbot/elo.db");
 const queueStore   = new QueueStore("queue.json");
 const banStore     = new BanStore("bot.db");
 
-// 👇 JAIL SYSTEM
+// Jail system
 const jailStore    = new JailStore();
 
 // WinStreaks (live from elo.db)
 const { WinStreakStore } = require("./lib/winstreak");
 const streaks = new WinStreakStore("/root/tfcbot/elo.db");
-const ranks = require("./commands/ranks");
 const shuffle = require("./commands/shuffle");
 
-// global toggles
+// ============================================================================
+// Shared state preload
+// ============================================================================
+
+// Global toggles
 state.showVoters   = settings.getBool?.("showVoters", true) ?? true;
 state.showEloNames = settings.getBool?.("showEloNames", true) ?? true;
 
-// preload
+// Static configuration
 loadServersFile();
 loadMappoolFile();
 loadAdlMappoolFile();
 
-// preload from disk
+// Persistent runtime state
 state.matches       = matchesStore.getRecent?.(50) ?? [];
 state.queue         = queueStore.load?.() ?? [];
 state.bannedUsers   = new Set();
@@ -86,14 +100,13 @@ console.log("[INIT] Lock sets initialized:", {
 });
 console.log("[DEBUG] STREAK vars:", process.env.STREAK_TRIGGER_WINS, process.env.STREAK_MIN_RANK);
 
-// registry
+// ============================================================================
+// Command registry and shared dependencies
+// ============================================================================
+
 const registry = new Map();
 function persistQueueSoon() { try { queueStore.save(state.queue); } catch {} }
 global.persistQueueSoon = persistQueueSoon;
-
-//Supporters
-const supporters = require("./commands/supporters");
-registry.set("addsupport", (m, a) => supporters.execute(m, a, deps));
 
 const deps = { 
   config, 
@@ -108,7 +121,15 @@ const deps = {
   jailStore
 };
 
-// register commands
+// ============================================================================
+// Command registration
+// ============================================================================
+
+// Supporters
+const supporters = require("./commands/supporters");
+registry.set("addsupport", (m, a) => supporters.execute(m, a, deps));
+
+// Commands with register() entry points
 require("./commands/queue").register(registry, deps);
 require("./commands/eloAdminAdjust").register(registry, deps);
 require("./commands/files").register(registry, deps);
@@ -116,7 +137,6 @@ require("./commands/admin").register(registry, deps);
 require("./commands/voteFlow").register(registry, deps);
 require("./commands/matches").register(registry, deps);
 require("./commands/elo").register(registry, deps);
-require("./commands/reportMatch").register(registry, deps);
 require("./commands/help").register(registry, deps);
 require("./commands/searchelo").register(registry, deps);
 require("./commands/maplist").register(registry, deps);
@@ -139,7 +159,7 @@ require("./commands/noticeRoles").register(registry, {
   config,
 });
 
-// 👇 Admin-only: unlock stuck servers
+// Admin and match utilities
 const unlock = require("./commands/unlock");
 registry.set(unlock.name.toLowerCase(), (m, a) => unlock.execute(m, a, deps));
 
@@ -147,17 +167,13 @@ try { require("./commands/lastauto").register(registry, deps); } catch {}
 const lastmaps = require("./commands/lastmaps");
 registry.set(lastmaps.name.toLowerCase(), (m, a) => lastmaps.run(m, deps));
 
-// commands/sub
 const sub = require("./commands/sub");
 registry.set("sub", (m, a) => sub.run(m, a, deps));
 
-// 👇 JAIL SYSTEM
+// Jail commands
 require("./commands/jail").register(registry, deps);
 require("./commands/unjail").register(registry, deps);
 require("./commands/jaillist").register(registry, deps);
-
-// 👇 Match editing command (admin only)
-require("./commands/setmap").register(registry, deps);
 
 // RCON commands (!timeleft, !rcon <cmd>)
 registry.set("rcon", (m, a) => rconCommands.execute(m, a, deps));
@@ -183,12 +199,24 @@ registry.set("timeleft", (message, args) => {
   return rconCommands.execute(message, ["timeleft"], deps);
 });
 
+// Steam account commands
+const steamids = require("./commands/steam/steamids");
+const whoissteam = require("./commands/steam/whoissteam");
+const linksteam = require("./commands/steam/linksteam");
+const unlinksteam = require("./commands/steam/unlinksteam");
+const missinglink = require("./commands/steam/missinglink");
+const linkprogress = require("./commands/steam/linkprogress");
+registry.set("linkprogress", (m, a) => linkprogress.execute(m, a, deps));
+registry.set("steamids", (m, a) => steamids.execute(m, a, deps));
+registry.set("whoissteam", (m, a) => whoissteam.execute(m, a, deps));
+registry.set("linksteam", (m, a) => linksteam.execute(m, a, deps));
+registry.set("unlinksteam", (m, a) => unlinksteam.execute(m, a, deps));
+registry.set("missinglink", (m, a) => missinglink.execute(m, a, deps));
 
-// custom exports
+// Elo exports and lookup commands
 const elocsv = require("./commands/elocsv");
 registry.set("elocsv", (message, args) => elocsv.run(message, deps));
 
-// commands/eloUsers.js
 const eloUsers = require("./commands/eloUsers");
 if (eloUsers?.execute) {
   registry.set("allelo", (m, a) => eloUsers.execute(m, a, deps));
@@ -233,7 +261,7 @@ if (elowithdev?.run) {
 const serverhealth=require("./commands/serverhealth");
 registry.set("serverhealth",(m,a)=>serverhealth.execute(m,a,deps));
 
-// ADL commands
+// ADL, shuffle, and health commands
 registry.set(addadl.name.toLowerCase(), (m) => addadl.run(m, deps));
 addadl.aliases.forEach(a =>
   registry.set(String(a).toLowerCase(), (m) => addadl.run(m, deps))
@@ -242,23 +270,18 @@ addadl.aliases.forEach(a =>
 // Shuffle commands
 registry.set("shuffle", (m, a) => shuffle.execute(m, a, deps));
 
-
-// explicitly map bare specials
-registry.set("++adl", (m) => addadl.run(m, deps));
-
 registry.set(removeadl.name.toLowerCase(), (m) => removeadl.run(m, deps));
 removeadl.aliases.forEach(a =>
   registry.set(String(a).toLowerCase(), (m) => removeadl.run(m, deps))
 );
 
-// explicitly map bare specials
-registry.set("--adl", (m) => removeadl.run(m, deps));
-
-
 // health
 registry.set(health.name.toLowerCase(), (m) => health.run(m, deps));
 
-// discord client
+// ============================================================================
+// Discord client and client-dependent registrations
+// ============================================================================
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -272,7 +295,7 @@ const client = new Client({
 registry.client = client;
 client.persistQueueSoon = persistQueueSoon;
 
-// Member Leaves
+// Member lifecycle hooks
 const { register: memberLeaves } = require("./commands/memberLeaves");
 memberLeaves(client, config);
 
@@ -284,11 +307,11 @@ const ROLE_PERMABAN = config.roles.permaban;
 const ROLE_TEMPBAN  = config.roles.tempban;
 const ROLE_JAIL     = config.roles.jail;
 
+// Client-dependent utility commands
 const spintest = require("./commands/spintest");
 registry.set("spintest", (m, a) => spintest.execute(m, a, deps));
 
 const kix = require("./commands/kix");
-registry.set("kix", (m, a) => kix.execute(m, a, deps));
 const kixHandler = (m, a) => kix.execute(m, a, deps);
 registry.set(kix.name.toLowerCase(), kixHandler);
 (kix.aliases || []).forEach(alias => {
@@ -309,8 +332,10 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
   registry.set(alias.toLowerCase(), emilioHandler);
 });
 
+// ============================================================================
+// Discord ready lifecycle
+// ============================================================================
 
-// READY
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   try { await refreshBotName(client, state); } catch {}
@@ -356,7 +381,7 @@ client.once("clientReady", async () => {
         windowMin: 30,
         ttlMin: 90,
         recapChannel: recapChannel,   // half + recap
-        reportChannel: reportChannel, // !reportmatch
+        reportChannel: reportChannel, // !report
       }
     );
 
@@ -394,8 +419,10 @@ client.once("clientReady", async () => {
   // TODO: keep your ban restore + backups + decay logic here
 });
 
+// ============================================================================
+// Queue activity tracking
+// ============================================================================
 
-// bump activity
 // Update queue lastSeenAt globally when user talks anywhere in the server
 client.on("messageCreate", (message) => {
   try {
@@ -415,7 +442,10 @@ client.on("messageCreate", (message) => {
   }
 });
 
-// router
+// ============================================================================
+// Message command router
+// ============================================================================
+
 client.on("messageCreate", async (message) => {
   try {
     const isSelf = message.author?.id === client.user?.id;
@@ -540,6 +570,9 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// login
+// ============================================================================
+// Discord login
+// ============================================================================
+
 if (!config.DISCORD_TOKEN) { console.error("Missing DISCORD_TOKEN in .env"); process.exit(1); }
 client.login(config.DISCORD_TOKEN).catch(err => { console.error("Discord login failed:", err); process.exit(1); });
