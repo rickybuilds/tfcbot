@@ -95,3 +95,10 @@ mappool_adl.txtlive_state.json
 live_state.json
 supporters.json
 
+
+# One-off import / migration scripts
+hamp2.js
+hampalyzerBulkImport.js
+importU7TPLEPlayers.js
+reimportHampalyzerStats.js
+reimportOneHampalyzerMatch.js
