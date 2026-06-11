@@ -286,6 +286,7 @@ function eligibleStreakPlayers(players, elo) {
 		  rerollCount: 0,
 		  maxRerolls: Number(process.env.MAP_MAX_REROLLS || 2),
 		  mapVoteDur,
+		  maxSelectionsPerUser: config.mapMaxSelectionsPerUser,
 		  elo,
 		  privacy,
 
@@ -441,7 +442,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
   await postQueueBoard(message.channel, state, elo, privacy);
 }
 
-	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, elo, privacy, finalize }) {
+	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, finalize }) {
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
@@ -451,6 +452,7 @@ return startVote(state, message, {
   kind: "map",
   options,
   showVoters: true,
+  maxSelectionsPerUser,
   elo,
   privacy,
 
@@ -524,6 +526,7 @@ return startVote(state, message, {
 			  rerollCount: nextRerollCount,
 			  maxRerolls,
 			  mapVoteDur,
+			  maxSelectionsPerUser,
 			  elo,
 			  privacy,
 			  finalize
