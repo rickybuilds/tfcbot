@@ -401,6 +401,9 @@ try {
       a.mapStartTime = Date.now();
 
       a.liveCaps = 0;
+      a.liveScore = 0;
+      a.lastCap = null;
+      a.liveEvents = [];
       writeLiveState(a);
 
       console.log(`[autoRecap] reset liveCaps for ${a.matchId} on ${evt.name}`);

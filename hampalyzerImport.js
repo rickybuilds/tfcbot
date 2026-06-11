@@ -344,6 +344,7 @@ function parseMatchRoundData(mainHtml){
   const teamMembership=parseTeamMembership(mainHtml);
   const playerStats={};
   const rounds=[];
+  const mvps=[];
   const summaryStart=mainHtml.indexOf('id="summary"');
   const summaryEnd=mainHtml.indexOf('id="comp"',summaryStart+1);
   if(summaryStart<0||summaryEnd<0){
@@ -351,6 +352,7 @@ function parseMatchRoundData(mainHtml){
       map_name:parseMapName(mainHtml),
       fallback_duration_seconds:parseFallbackRoundDuration(mainHtml),
       rounds,
+      mvps,
       playerStats
     };
   }
@@ -377,6 +379,9 @@ function parseMatchRoundData(mainHtml){
       const playerId=(rowHtml.match(/href="[^"]*\/p(\d+)\.html"/)||[])[1];
       if(!playerId)continue;
 
+      const displayName=textContent(
+        (rowHtml.match(/<td\s+class="[^"]*\bplayer-name\b[^"]*"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i)||[])[1]||""
+      );
       const touchText=tableCellText(rowHtml,"flag-touches");
       const row={
         round_num:roundNum,
@@ -404,6 +409,14 @@ function parseMatchRoundData(mainHtml){
       rows.push(row);
       playerStats[playerId]=playerStats[playerId]||{};
       playerStats[playerId][roundNum]=row;
+
+      if(/<span\s+class="[^"]*\bmvp\b[^"]*"[^>]*>\s*★?\s*<\/span>/i.test(rowHtml)){
+        mvps.push({
+          round_num:roundNum,
+          player_id:playerId,
+          mvp_display_name:displayName||null
+        });
+      }
     }
 
     const offenseRow=rows.find(row=>row.visual_team==="team1");
@@ -427,6 +440,7 @@ function parseMatchRoundData(mainHtml){
     map_name:parseMapName(mainHtml),
     fallback_duration_seconds:parseFallbackRoundDuration(mainHtml),
     rounds,
+    mvps,
     playerStats
   };
 }
@@ -489,6 +503,17 @@ async function ensureSchema(){
       PRIMARY KEY (match_id, player_key, round_num)
     )
   `);
+
+  await runDb(`
+    CREATE TABLE IF NOT EXISTS match_round_mvps (
+      match_id TEXT NOT NULL,
+      round_num INTEGER NOT NULL,
+      mvp_display_name TEXT,
+      mvp_player_key TEXT,
+      steam_id TEXT,
+      PRIMARY KEY (match_id, round_num)
+    )
+  `);
 }
 
 const matchId=process.argv[2];
@@ -517,6 +542,7 @@ if(existing&&!FORCE){
 }
 
 if(FORCE){
+  await runDb("DELETE FROM match_round_mvps WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_player_round_stats WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_rounds WHERE match_id=?",[matchId]);
 }
@@ -537,6 +563,7 @@ if(existing&&FORCE){
   const matchRoundData=parseMatchRoundData(mainHtml);
   const importedRoundNums=new Set(matchRoundData.rounds.map(round=>round.round_num));
   const roundDurations={};
+  const playerIdentityByHampId={};
 
   await runDb("BEGIN");
 
@@ -554,6 +581,11 @@ if(existing&&FORCE){
     const fallbackSteam=`STEAM_0:${accountId%2}:${Math.floor(accountId/2)}`;
     const steam=steamIds[i]||fallbackSteam;
     const playerKey=steam;
+    playerIdentityByHampId[p.playerId]={
+      player_key:playerKey,
+      steam_id:steam,
+      display_name:stats.display_name
+    };
     const flags=flagStats[p.playerId]||{};
     const playerRoundStats=parseRoundStats(html);
     const classSecondsByRound={};
@@ -633,6 +665,22 @@ if(existing&&FORCE){
         matchId,round.round_num,matchRoundData.map_name,
         roundDurations[round.round_num]||matchRoundData.fallback_duration_seconds||0,
         round.team1_score,round.team2_score,round.offense_team,round.defense_team
+      ]
+    );
+  }
+
+  for(const mvp of matchRoundData.mvps){
+    const identity=playerIdentityByHampId[mvp.player_id]||{};
+    await runDb(
+      `INSERT OR REPLACE INTO match_round_mvps
+       (match_id,round_num,mvp_display_name,mvp_player_key,steam_id)
+       VALUES(?,?,?,?,?)`,
+      [
+        matchId,
+        mvp.round_num,
+        identity.display_name||mvp.mvp_display_name||null,
+        identity.player_key||null,
+        identity.steam_id||null
       ]
     );
   }
