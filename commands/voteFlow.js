@@ -156,8 +156,8 @@ function eligibleStreakPlayers(players, elo) {
       // Announce mode
       await message.channel.send(
         useAdl
-          ? "**ADL ACTIVATED** — ADL map pool for **3× Elo**."
-          : "Running **Standard** (insufficient ADL votes)."
+		  ? "**ADL ACTIVATED** — ADL map pool with **Bonus Elo Enabled**."
+		  : "Running **Standard** (insufficient ADL votes)."
       );
 
       const serverVoteDur = settings.getNumber("vote:server_duration", 10);
@@ -620,12 +620,10 @@ async function finalizeMatch(
                 : "special rule";
 
     await channel.send({
-      content:
-        `🔥 **BONUS ELO ENABLED** (triggered by ${reason})\n` +
-        `👀 **${bonus.multiplier}× Elo** to the ` +
-        (bonus.type === "ALL" ? "**all players**" : "**winning team**") +
-        " (normal loss for losers)."
-    });
+	  content:
+		`🔥 **BONUS ELO ENABLED** (triggered by ${reason})\n` +
+		`👀 Bonus Elo is active. Winner gains are capped at **+35 Elo**.`
+	});
   }
 
 	// 🔒 Lock server
