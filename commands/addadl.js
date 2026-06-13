@@ -65,7 +65,7 @@ module.exports = {
       await message.channel.send(`✅ **ADL armed** for the next full match. (${votes}/${required})`);
     } else {
       await message.channel.send(
-        `ADL Mode almost activated! **${remaining}** more ADL vote(s) → **3× Elo**. (${votes}/${required})`
+        `ADL Mode almost activated! **${remaining}** more ADL vote(s). (${votes}/${required})`
       );
     }
   },
