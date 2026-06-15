@@ -169,6 +169,11 @@ registry.set(lastmaps.name.toLowerCase(), (m, a) => lastmaps.run(m, deps));
 const sub = require("./commands/sub");
 registry.set("sub", (m, a) => sub.run(m, a, deps));
 
+// SQL Additions for Servers
+const tfcAdmin = require("./commands/tfcAdmin");
+registry.set("tfcadmin", (m, a) => tfcAdmin.execute(m, a, deps));
+registry.set("tfcadmins", (m, a) => tfcAdmin.list(m, a, deps));
+
 // Jail commands
 require("./commands/jail").register(registry, deps);
 require("./commands/unjail").register(registry, deps);
