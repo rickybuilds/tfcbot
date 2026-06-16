@@ -392,18 +392,6 @@ client.once("clientReady", async () => {
     registry.autoRecap = autoRecap;
     state.autoRecap = autoRecap;
 
-    // Debug wrappers
-    const recapCh = client.channels.cache.get(recapChannel);
-    if (recapCh) {
-      const orig = recapCh.send.bind(recapCh);
-      recapCh.send = (msg) => { console.log("[DEBUG Recap]", msg); return orig(msg); };
-    }
-    const reportCh = client.channels.cache.get(reportChannel);
-    if (reportCh) {
-      const orig = reportCh.send.bind(reportCh);
-      reportCh.send = (msg) => { console.log("[DEBUG Report]", msg); return orig(msg); };
-    }
-
     const udpPort = Number(process.env.HL_LOG_PORT || 27500);
     const allowedSources = (process.env.HL_ALLOWED_SOURCE || "108.61.128.120")
       .split(",").map(s => s.trim()).filter(Boolean);

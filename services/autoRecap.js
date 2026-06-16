@@ -12,9 +12,9 @@ const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
 
 console.log("[AUTORECAP] Loaded state file:", require.resolve("../lib/state"));
-console.log("[DEBUG queueCheck] state.locks.servers =", state.locks?.servers);
-console.log("[DEBUG queueCheck] state.lockedServers =", state.lockedServers);
-console.log("[DEBUG queueCheck] autoRecap.locks =", state.autoRecap?.state?.locks?.servers);
+console.log("[AUTORECAP queueCheck] state.locks.servers =", state.locks?.servers);
+console.log("[AUTORECAP queueCheck] state.lockedServers =", state.lockedServers);
+console.log("[AUTORECAP queueCheck] autoRecap.locks =", state.autoRecap?.state?.locks?.servers);
 
 const armed = new Map();
 
@@ -458,10 +458,7 @@ try {
     const mapNow = a.lastMapSeen || a.map;
     const rule = getCaptureRule(mapNow, evt);
 
-    if (!rule) {
-      console.log(`[autoRecap] ignored capture trigger on ${mapNow}:`, evt.trigger || evt.name || evt.raw || evt);
-      return;
-    }
+    if (!rule) return;
 
 	const capValue = Number(rule.capValue ?? 1);
 	const scoreValue = Number(rule.scoreValue ?? 10);
@@ -591,7 +588,7 @@ const capPlayer = evt.player || "unknown";
 		).catch?.(() => {});
 
 await post(reportChannel, `!report ${a.matchId} ${winner} --auto`).catch?.(() => {});
-console.log(`[DEBUG Report] !report ${a.matchId} ${winner} --auto`);
+console.log(`[autoRecap] Reporting ${a.matchId} (${winner}) --auto`);
 
 // 🧩 ensure serverName always set, even if armed entry missing
 const resolvedKey = determineServerKey(evt.from || a?.serverIp);
