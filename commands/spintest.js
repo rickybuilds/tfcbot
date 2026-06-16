@@ -3,7 +3,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 
-const maps = ["1", "2"];
+const maps = ["openfire_lowgrens", "New Maps"];
 
 module.exports = {
   name: "spintest",
@@ -13,7 +13,7 @@ module.exports = {
     const OWNER_ID = [
       "255834576742645761",
       "737481545216163891",
-	  "596225454721990676",
+      "596225454721990676",
       "468578577537826831",
     ];
 
@@ -24,54 +24,68 @@ module.exports = {
       return;
     }
 
-    console.log("[spintest] Starting map deathmatch");
+    console.log("[spintest] Starting weighted map deathmatch");
 
     const maxHp = 3;
 
-    const aliveMaps = maps.map((m) => ({
+    const weightedMaps = maps.flatMap((m) =>
+      /new\s*maps?/i.test(m) ? [m, m] : [m]
+    );
+
+    const oddsLines = maps.map((m) => {
+      const tickets = weightedMaps.filter((x) => x === m).length;
+      const pct = ((tickets / weightedMaps.length) * 100).toFixed(1);
+      return `• **${m.toUpperCase()}** — ${tickets}/${weightedMaps.length} tickets (${pct}%)`;
+    });
+
+    const aliveMaps = weightedMaps.map((m, i) => ({
       name: m,
       hp: maxHp,
+      ticket: i + 1,
     }));
 
- const attacks = [
-  "won before the battle began",
-  "attacked where the enemy was unprepared",
-  "appeared where they were not expected",
-  "turned weakness into bait",
-  "used deception as a weapon",
-  "struck only when victory was certain",
-  "made the enemy defeat themselves",
-  "chose the battlefield wisely",
-  "moved like the wind",
-  "stood firm like the mountain",
-  "struck like fire",
-  "waited in silence, then attacked",
-  "avoided strength and hit weakness",
-  "made chaos look like strategy",
-  "used patience as a weapon",
-  "won without unnecessary fighting",
-  "forced the enemy into confusion",
-  "hid strength behind weakness",
-  "turned delay into advantage",
-  "made retreat impossible",
-  "attacked the enemy's plan",
-  "controlled the pace of battle",
-  "made the enemy chase shadows",
-  "used discipline to survive",
-  "struck at the perfect moment",
-  "made victory inevitable",
-  "left no opening unused",
-  "turned terrain into a weapon",
-  "broke morale before armor",
-  "made the enemy fight blind",
-];
+    const attacks = [
+      "won before the battle began",
+      "attacked where the enemy was unprepared",
+      "appeared where they were not expected",
+      "turned weakness into bait",
+      "used deception as a weapon",
+      "struck only when victory was certain",
+      "made the enemy defeat themselves",
+      "chose the battlefield wisely",
+      "moved like the wind",
+      "stood firm like the mountain",
+      "struck like fire",
+      "waited in silence, then attacked",
+      "avoided strength and hit weakness",
+      "made chaos look like strategy",
+      "used patience as a weapon",
+      "won without unnecessary fighting",
+      "forced the enemy into confusion",
+      "hid strength behind weakness",
+      "turned delay into advantage",
+      "made retreat impossible",
+      "attacked the enemy's plan",
+      "controlled the pace of battle",
+      "made the enemy chase shadows",
+      "used discipline to survive",
+      "struck at the perfect moment",
+      "made victory inevitable",
+      "left no opening unused",
+      "turned terrain into a weapon",
+      "broke morale before armor",
+      "made the enemy fight blind",
+    ];
+
+    const displayName = (m) =>
+      m.name.toUpperCase() + (m.name === "New Maps" ? ` #${m.ticket}` : "");
 
     const render = (eventText = "Match start") => {
       const lines = aliveMaps
         .filter((m) => m.hp > 0)
         .map((m) => {
           const hearts = "❤️".repeat(m.hp) + "🤍".repeat(maxHp - m.hp);
-          return `• **${m.name.toUpperCase()}**  ${hearts}`;
+          return `• **${displayName(m)}**  ${hearts}`;
         })
         .join("\n");
 
@@ -85,6 +99,7 @@ module.exports = {
         .setDescription(desc);
 
     const msg = await message.channel.send({
+      content: `🎲 **Weighted odds**\n${oddsLines.join("\n")}`,
       embeds: [
         buildEmbed(
           "MAP TIEBREAKER DEATHMATCH",
@@ -105,13 +120,13 @@ module.exports = {
       let eventText;
 
       if (victim.hp <= 0) {
-        eventText = `${victim.name.toUpperCase()} was fragged!`;
+        eventText = `${displayName(victim)} was fragged!`;
       } else {
         const attack =
           attacks.splice(Math.floor(Math.random() * attacks.length), 1)[0] ||
           "got fragged";
 
-        eventText = `${victim.name.toUpperCase()} ${attack}!`;
+        eventText = `${displayName(victim)} ${attack}!`;
       }
 
       const livingCount = aliveMaps.filter((x) => x.hp > 0).length;
@@ -121,6 +136,7 @@ module.exports = {
       if (livingCount <= 2) delay = 2600;
 
       await msg.edit({
+        content: `🎲 **Weighted odds**\n${oddsLines.join("\n")}`,
         embeds: [
           buildEmbed(
             "MAP TIEBREAKER DEATHMATCH",
@@ -136,15 +152,16 @@ module.exports = {
     const winner = aliveMaps.find((x) => x.hp > 0);
 
     await msg.edit({
+      content: `🎲 **Weighted odds**\n${oddsLines.join("\n")}`,
       embeds: [
         buildEmbed(
           "TIEBREAKER COMPLETE",
-          `After intense combat...\n\n**${winner.name.toUpperCase()}**\n\nsurvives the chaos.`,
+          `After intense combat...\n\n**${displayName(winner)}**\n\nsurvives the chaos.`,
           0x57f287
         ),
       ],
     });
 
-    console.log(`[spintest] winner=${winner.name}`);
+    console.log(`[spintest] winner=${winner.name} ticket=${winner.ticket}`);
   },
 };
