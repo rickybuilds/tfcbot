@@ -221,6 +221,130 @@ function parseWeaponKills(html){
   return weapons;
 }
 
+function parseClassTimeline(classes){
+  const timelines={};
+
+  for(const c of classes){
+    const round=Number(c.round_num);
+    timelines[round]=timelines[round]||[];
+  }
+
+  for(const round of Object.keys(timelines)){
+    let cursor=0;
+    for(const c of classes.filter(x=>Number(x.round_num)===Number(round))){
+      timelines[round].push({
+        class_name:c.class_name,
+        start_seconds:cursor,
+        end_seconds:cursor+c.seconds
+      });
+      cursor+=c.seconds;
+    }
+  }
+
+  return timelines;
+}
+
+function classForEvent(timeline, seconds){
+  if(!timeline||!timeline.length)return {class_name:null,confidence:"unknown_no_class_timeline"};
+
+  const hit=timeline.find(c=>seconds>=c.start_seconds&&seconds<c.end_seconds);
+  if(hit){
+    return {
+      class_name:hit.class_name,
+      confidence:timeline.length===1?"exact_single_class_round":"exact_timeline_match"
+    };
+  }
+
+  const last=timeline[timeline.length-1];
+  if(last&&seconds>=last.end_seconds){
+    return {
+      class_name:last.class_name,
+      confidence:"exact_after_pause_clamped"
+    };
+  }
+
+  return {class_name:null,confidence:"unknown_timeline_gap"};
+}
+
+function parseKillEventTitle(title){
+  const isFlagCarrier=/Killed flag carrier /i.test(title);
+  const isConced=/ while conced at /i.test(title);
+  const m=String(title||"").match(/^Killed (?:flag carrier )?(.+?)(?: while conced)? at (\d+:\d+)$/i);
+  if(!m)return null;
+
+  return {
+    victim_name:m[1],
+    event_time_text:m[2],
+    event_time_seconds:timeToSec(m[2]),
+    is_flag_carrier_kill:isFlagCarrier?1:0,
+    is_conced:isConced?1:0
+  };
+}
+
+function killEventKey(e){
+  return `${e.weapon}|${e.victim_name}|${e.event_time_text}`;
+}
+
+function extractKillEventsFromSection(section){
+  const events=[];
+  const re=/class="weapon-icon\s+(weapon-\d+)[^"]*"\s+title="([^"]+)"/g;
+  let m;
+
+  while((m=re.exec(section))){
+    const parsed=parseKillEventTitle(m[2]);
+    if(!parsed)continue;
+    events.push({weapon:m[1],...parsed});
+  }
+
+  return events;
+}
+
+function parseKillEvents(html,classes){
+  const start=html.indexOf("<!-- kills -->");
+  const end=html.indexOf("<!-- deaths -->",start);
+  if(start<0||end<0)return [];
+
+  const timelines=parseClassTimeline(classes);
+  const block=html.slice(start,end);
+  const columns=[...block.matchAll(/<div class="d-flex flex-column">([\s\S]*?)<\/div>\s*(?=<div class="d-flex flex-column">|$)/g)];
+  const events=[];
+
+  columns.forEach((col,index)=>{
+    const roundNum=index+1;
+    const sections=[...col[1].matchAll(/<div class="stats-faceted">([\s\S]*?)(?=<div class="stats-faceted">|$)/g)];
+
+    let mainKills=[];
+    let concedKills=[];
+
+    for(const sec of sections){
+      const section=sec[1];
+      const title=textContent((section.match(/<h4>([\s\S]*?)<\/h4>/)||[])[1]||"");
+
+      if(/^Enemy kills:\s*\d+/i.test(title)){
+        mainKills=extractKillEventsFromSection(section);
+      }else if(/^Enemy kills while conced:\s*\d+/i.test(title)){
+        concedKills=extractKillEventsFromSection(section);
+      }
+    }
+
+    const concedSet=new Set(concedKills.map(killEventKey));
+
+    for(const e of mainKills){
+      const classInfo=classForEvent(timelines[roundNum],e.event_time_seconds);
+      events.push({
+        round_num:roundNum,
+        ...e,
+        is_conced:concedSet.has(killEventKey(e))?1:0,
+        attacker_class:classInfo.class_name,
+        attacker_class_confidence:classInfo.confidence
+      });
+    }
+  });
+
+  return events;
+}
+
+
 function parsePlayerStats(html){
   const h4=parseH4(html);
   const deathsByEnemy=sumLabels(h4,"Deaths by enemy");
@@ -243,20 +367,22 @@ function parsePlayerStats(html){
     conc_jumps:sumLabels(h4,"Conc jumps"),
     classes,
     main_class:mainClass(classes),
-    weapons:parseWeaponKills(html)
+    weapons:parseWeaponKills(html),
+    kill_events:parseKillEvents(html,classes)
   };
 }
 
 function extractPlayerLinks(mainHtml,baseUrl){
   const links=[];
-  const re=/<a class="nav-link" href="([^"]*\/p\d+\.html)">/g;
+  const re=/<a class="nav-link" href="([^"]*\/p\d+\.html)">\s*([^<]+?)\s*<\/a>/g;
   let m;
   while((m=re.exec(mainHtml))){
     const href=m[1];
     const id=parsePlayerIdFromHref(href);
     if(!id)continue;
     const full=href.startsWith("http")?href:new URL(href,baseUrl).toString();
-    if(!links.some(x=>x.href===full))links.push({href:full,playerId:id});
+    const navName=textContent(m[2]||"");
+    if(!links.some(x=>x.href===full))links.push({href:full,playerId:id,navName});
   }
   return links;
 }
@@ -296,6 +422,43 @@ function parseFlagStats(mainHtml){
     map[playerId].flag_time_seconds+=timeToSec(flagTime);
   }
   return map;
+}
+
+
+async function getDiscordIdForSteam(steamId){
+  if(!steamId)return null;
+  const row=await getDb(
+    "SELECT discord_id FROM player_steam_ids WHERE steam_id=? ORDER BY is_primary DESC LIMIT 1",
+    [steamId]
+  );
+  return row?row.discord_id:null;
+}
+
+function normalizePlayerName(name){
+  return String(name||"").trim().toLowerCase();
+}
+
+function buildNameRoster(players){
+  const byName={};
+
+  for(const p of players){
+    const names=[p.display_name,p.nav_name].filter(Boolean);
+
+    for(const name of names){
+      const key=normalizePlayerName(name);
+      if(!key)continue;
+      byName[key]=byName[key]||[];
+      if(!byName[key].includes(p))byName[key].push(p);
+    }
+  }
+
+  return byName;
+}
+
+function resolveVictimByName(victimName,nameRoster){
+  const matches=nameRoster[normalizePlayerName(victimName)]||[];
+  if(matches.length!==1)return null;
+  return matches[0];
 }
 
 function parseTeamMembership(mainHtml){
@@ -514,6 +677,44 @@ async function ensureSchema(){
       PRIMARY KEY (match_id, round_num)
     )
   `);
+
+  await runDb(`
+    CREATE TABLE IF NOT EXISTS match_kill_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id TEXT NOT NULL,
+      source_url TEXT,
+      round_num INTEGER NOT NULL,
+      event_time_seconds INTEGER,
+      event_time_text TEXT,
+      attacker_key TEXT NOT NULL,
+      attacker_steam_id TEXT,
+      attacker_discord_id TEXT,
+      attacker_name TEXT,
+      attacker_team TEXT,
+      attacker_role TEXT,
+      attacker_class TEXT,
+      attacker_class_confidence TEXT,
+      weapon TEXT NOT NULL,
+      victim_name TEXT,
+      victim_key TEXT,
+      victim_steam_id TEXT,
+      victim_discord_id TEXT,
+      victim_team TEXT,
+      is_enemy_kill INTEGER DEFAULT 1,
+      is_team_kill INTEGER DEFAULT 0,
+      is_conced INTEGER DEFAULT 0,
+      is_flag_carrier_kill INTEGER DEFAULT 0,
+      source_confidence TEXT NOT NULL DEFAULT 'exact'
+    )
+  `);
+
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_attacker ON match_kill_events(attacker_steam_id)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_victim ON match_kill_events(victim_steam_id)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_match_round ON match_kill_events(match_id, round_num)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_weapon ON match_kill_events(weapon)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_class_weapon ON match_kill_events(attacker_class, weapon)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_attacker_discord ON match_kill_events(attacker_discord_id)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_victim_discord ON match_kill_events(victim_discord_id)`);
 }
 
 const matchId=process.argv[2];
@@ -526,6 +727,7 @@ if(!matchId||!url){
 }
 
 const db=new sqlite3.Database(DB_PATH);
+db.configure("busyTimeout",30000);
 
 (async()=>{
   await ensureSchema();
@@ -542,6 +744,7 @@ if(existing&&!FORCE){
 }
 
 if(FORCE){
+  await runDb("DELETE FROM match_kill_events WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_round_mvps WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_player_round_stats WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_rounds WHERE match_id=?",[matchId]);
@@ -562,8 +765,34 @@ if(existing&&FORCE){
   const flagStats=parseFlagStats(mainHtml);
   const matchRoundData=parseMatchRoundData(mainHtml);
   const importedRoundNums=new Set(matchRoundData.rounds.map(round=>round.round_num));
+  const teamMembership=parseTeamMembership(mainHtml);
+  const roundSummaryByHampId=matchRoundData.playerStats||{};
+  const roundInfoByNum={};
+  for(const round of matchRoundData.rounds){
+    roundInfoByNum[round.round_num]=round;
+  }
+
   const roundDurations={};
   const playerIdentityByHampId={};
+  const playersForRoster=[];
+
+  for(let i=0;i<links.length;i++){
+    const p=links[i];
+    const accountId=Number(p.playerId);
+    const fallbackSteam=`STEAM_0:${accountId%2}:${Math.floor(accountId/2)}`;
+    const steam=steamIds[i]||fallbackSteam;
+    playersForRoster.push({
+      hamp_id:p.playerId,
+      player_key:steam,
+      steam_id:steam,
+      discord_id:await getDiscordIdForSteam(steam),
+      display_name:null,
+      nav_name:p.navName||null,
+      team_name:teamMembership[p.playerId]||null
+    });
+  }
+
+  const rosterByHampId=Object.fromEntries(playersForRoster.map(p=>[p.hamp_id,p]));
 
   await runDb("BEGIN");
 
@@ -577,6 +806,9 @@ if(existing&&FORCE){
     const p=links[i];
     const html=await get(p.href);
     const stats=parsePlayerStats(html);
+    if(rosterByHampId[p.playerId]){
+      rosterByHampId[p.playerId].display_name=stats.display_name;
+    }
     const accountId=Number(p.playerId);
     const fallbackSteam=`STEAM_0:${accountId%2}:${Math.floor(accountId/2)}`;
     const steam=steamIds[i]||fallbackSteam;
@@ -623,6 +855,46 @@ if(existing&&FORCE){
         `INSERT OR REPLACE INTO match_player_weapons(match_id,player_key,weapon,kills)
          VALUES(?,?,?,?)`,
         [matchId,playerKey,weapon,kills]
+      );
+    }
+
+    const nameRoster=buildNameRoster(playersForRoster);
+    const attackerDiscordId=rosterByHampId[p.playerId]?rosterByHampId[p.playerId].discord_id:null;
+
+    for(const ev of stats.kill_events){
+      if(importedRoundNums.size&&!importedRoundNums.has(ev.round_num))continue;
+
+      const roundSummary=(roundSummaryByHampId[p.playerId]||{})[ev.round_num]||{};
+      const roundInfo=roundInfoByNum[ev.round_num]||{};
+      const attackerTeam=roundSummary.team_name||teamMembership[p.playerId]||null;
+      const attackerRole=roundSummary.role||null;
+
+      const victim=resolveVictimByName(ev.victim_name,nameRoster);
+      const victimTeam=victim?victim.team_name:null;
+
+      await runDb(
+        `INSERT INTO match_kill_events
+        (match_id,source_url,round_num,event_time_seconds,event_time_text,
+         attacker_key,attacker_steam_id,attacker_discord_id,attacker_name,attacker_team,attacker_role,
+         attacker_class,attacker_class_confidence,weapon,
+         victim_name,victim_key,victim_steam_id,victim_discord_id,victim_team,
+         is_enemy_kill,is_team_kill,is_conced,is_flag_carrier_kill,source_confidence)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          matchId,url,ev.round_num,ev.event_time_seconds,ev.event_time_text,
+          playerKey,steam,attackerDiscordId,stats.display_name,attackerTeam,attackerRole,
+          ev.attacker_class,ev.attacker_class_confidence,ev.weapon,
+          ev.victim_name,
+          victim?victim.player_key:null,
+          victim?victim.steam_id:null,
+          victim?victim.discord_id:null,
+          victimTeam,
+          1,
+          0,
+          ev.is_conced||0,
+          ev.is_flag_carrier_kill||0,
+          victim?"exact":"victim_name_unresolved"
+        ]
       );
     }
 
