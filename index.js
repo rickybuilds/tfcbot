@@ -38,7 +38,7 @@ const health    = require("./commands/health");
 // HLDS log listener + auto-recap
 const { startHldsLogReceiver } = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
-const { findLogsForMatch }     = require("./services/hldsManualTransfer"); // 👈 import
+const { runCasualLogs } = require("./services/hldsCasualLogs");
 
 // QoL / persistence / decay
 const { QueueStore } = require("./lib/queueStore");
@@ -505,49 +505,19 @@ client.on("messageCreate", async (message) => {
     }
 
     // 👇 your custom !logs command
-    if (command === "logs") {
-      const matchId = args[0];
-      if (!matchId) {
-        return message.reply("Usage: !logs <matchId> [numLogs]");
-      }
+  if (command === "logs") {
+    const mapName = args.join(" ").trim();
 
-      let limit = parseInt(args[1], 10);
-      if (isNaN(limit) || limit <= 0) limit = 20;
-      if (limit > 100) limit = 100;
-
-      let match = null;
-      try {
-        match = matchesStore.db.prepare(
-          "SELECT match_id, map_name FROM match_results WHERE match_id = ?"
-        ).get(matchId);
-      } catch (err) {
-        console.error("[!logs] DB lookup failed:", err);
-      }
-
-      if (!match) {
-        return message.reply(`No match found for ID ${matchId}`);
-      }
-
-      const map = match.map_name || "unknown";
-
-      try {
-        const logs = await findLogsForMatch(matchId, map, limit);
-        if (!logs.length) {
-          return message.reply(`Checked ${limit} logs but no map "${map}" found.`);
-        }
-
-        const lines = logs.map(l =>
-          `\`${l.file}\` → map=${l.map} (${l.sizeKb}KB, ${new Date(l.mtime).toLocaleString()})`
-        );
-
-        return message.reply(
-          `Logs for match ${matchId} (expected=${map}, checked=${limit}):\n${lines.join("\n")}`
-        );
-      } catch (err) {
-        console.error("[!logs error]", err);
-        return message.reply("Error while fetching logs.");
-      }
+    if (!mapName) {
+      return message.reply("Usage: !logs <mapname>");
     }
+
+    return runCasualLogs({
+      mapName,
+      message,
+      config,
+    });
+  }
 
     // ✅ normal registry commands
     const fn = registry.get(command);
