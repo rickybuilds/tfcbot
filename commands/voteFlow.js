@@ -59,7 +59,7 @@ const { WinStreakStore } = require("../lib/winstreak");
 function eligibleStreakPlayers(players, elo) {
   const STREAK_TRIGGER_WINS = Number(process.env.STREAK_TRIGGER_WINS || 5);
   const STREAK_MIN_RANK = Number(process.env.STREAK_MIN_RANK || 7);
-  const store = new WinStreakStore(); // reads from elo.db
+  const store = global.__winStreakStore || (global.__winStreakStore = new WinStreakStore("/root/tfcbot/elo.db")); // reads from elo.db
 
   const eligible = [];
 
@@ -619,7 +619,8 @@ async function finalizeMatch(
 		  (serverObj?.password ? `Password: **${serverObj.password}**\n` : "") +
 		  (serverObj?.url ? `[Click here to join server](${serverObj.url})\n` : "") +
 		  `Map: **${mapObj?.name || "Unknown Map"}** (${mirvLabel(mapObj?.mirv)})\n` +
-		  `Mode: **${MODE}**`
+		  `Mode: **${MODE}**\n\n` +
+		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`
 		)
 		.addFields(
 		  { name: "Blue Team 🔵", value: blueList, inline: true },

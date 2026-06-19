@@ -152,8 +152,31 @@ if (!isAuto) {
     const { sendRecapWithDemos } = require("../services/discordUpload");
     const { determineServerKey } = require("../services/autoRecap");
 
-    const mapNow = match.map || match.map_name || "unknown";
-    const serverKey = determineServerKey(match.server?.ip || match.server_name || "east");
+    const dbMatch = elo.db.prepare(`
+      SELECT match_id, server_name, map_name
+      FROM matches
+      WHERE match_id = ?
+    `).get(String(matchId));
+
+    const mapNow = dbMatch?.map_name || match.map || match.map_name || "unknown";
+    const serverInput = dbMatch?.server_name || match.server?.ip || match.server_name;
+
+    if (!serverInput) {
+      await message.channel.send(
+        `❌ Cannot determine server for match **${matchId}**. No DB server_name found.`
+      );
+      return;
+    }
+
+    const serverKey = determineServerKey(serverInput);
+    console.log("[!report server resolution]", {
+      matchId,
+      dbServer: dbMatch?.server_name,
+      memServer: match.server?.ip,
+      matchServerName: match.server_name,
+      serverInput,
+      serverKey,
+    });
 
     // 🟦 1️⃣ Fetch HLTV demos
     const zipResult = await fetchAndZipRecentDemos({
@@ -189,17 +212,59 @@ if (!isAuto) {
   } catch (uploadErr) {
     console.error("[!report silent recap failed]", uploadErr);
   }
-} // 👈 you were missing this closing brace!
+} 
 
     } catch (e) {
       console.error("[!report] failed:", e);
       await message.channel.send("Could not report that match.");
     }
-  } // 👈 closes doReport function properly
+  } 
 
   // ⬇️ Now we register the commands cleanly ⬇️
   reg.set("report",    (msg, args) => doReport(msg, args, false));
   reg.set("fixreport", (msg, args) => doReport(msg, args, true));
+
+reg.set("fixscores", async (message, args = []) => {
+  if (!isAdmin(message)) {
+    return message.channel.send("❌ You don’t have permission to use this command.");
+  }
+
+  const chId = message.channel?.id;
+  if (chId !== PICKUP_CH && chId !== ADMIN_CH) return;
+
+  const matchId = (args[0] || "").trim();
+  const blueScore = Number.parseInt(args[1], 10);
+  const redScore = Number.parseInt(args[2], 10);
+
+  if (
+    !matchId ||
+    !Number.isInteger(blueScore) ||
+    !Number.isInteger(redScore) ||
+    blueScore < 0 ||
+    redScore < 0
+  ) {
+    return message.channel.send("Usage: `!fixscores <matchId> <blueScore> <redScore>`");
+  }
+
+  try {
+    const info = elo.db.prepare(`
+      UPDATE matches
+      SET score_blue=?, score_red=?
+      WHERE match_id=?
+    `).run(blueScore, redScore, String(matchId));
+
+    if (!info.changes) {
+      return message.channel.send(`❌ No match found for **${matchId}**.`);
+    }
+
+    return message.channel.send(
+      `✅ Scores updated for **${matchId}**: Blue **${blueScore}** - Red **${redScore}**`
+    );
+  } catch (e) {
+    console.error("[!fixscores] failed:", e);
+    return message.channel.send("Failed to update scores.");
+  }
+});
 
   reg.set("delmatch", (message, args = []) => {
     if (!isAdmin(message)) {

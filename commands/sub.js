@@ -310,9 +310,10 @@ console.log("=======================================");
 		  `Server: **${dbMatch.server_name}**\n` +
 		  `IP: **${fullIp}**\n` +
 		  `Password: pickup\n` +
-		  `Join: ${joinUrl}\n\n` +
+		  `Join: ${joinUrl}\n` +
 		  `Map: **${dbMatch.map_name}**\n` +
-		  `Mode: **${dbMatch.mode || "STANDARD"}**`,
+		  `Mode: **${dbMatch.mode || "STANDARD"}**\n\n` +
+		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`,
 		fields: [
 		  {
 			name: "Blue Team 🔵",
