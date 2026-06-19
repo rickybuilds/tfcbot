@@ -244,50 +244,27 @@ function unlockServer(serverIp) {
 
 
 
-// 🔓 Unlock all players tied to a match (with in-memory fallback)
+// 🔓 Unlock all players tied to a match
 function unlockPlayersForMatch(matchId) {
   try {
     const { state } = require("../lib/state");
-    if (!state?.lockedPlayers) return;
 
-    const dbPath = path.resolve(process.env.DB_PATH || "elo.db");
-    const Database = require("better-sqlite3");
-    const db = new Database(dbPath);
-
-    const row = db.prepare("SELECT blue_ids, red_ids FROM matches WHERE match_id=?").get(matchId);
-    db.close();
-
-    let allPlayers = [];
-    if (row) {
-      try {
-        const blue = JSON.parse(row.blue_ids || "[]");
-        const red  = JSON.parse(row.red_ids  || "[]");
-        allPlayers = [...blue, ...red];
-        console.log(`[playerLock] Unlocking ${allPlayers.length} players from DB for match ${matchId}`);
-      } catch (err) {
-        console.warn("[playerLock] Failed to parse player arrays:", err);
-      }
-    }
-
-    // 🔁 fallback: use in-memory state if DB was empty
-    if (!row || allPlayers.length === 0) {
-      console.log(`[playerLock] No DB row found for match ${matchId}, using fallback unlock from state.`);
-      for (const [pid, lockedMatch] of state.lockedPlayers.entries()) {
-        if (lockedMatch === matchId) allPlayers.push(pid);
-      }
-    }
-
-    if (allPlayers.length === 0) {
-      console.log(`[playerLock] No players found to unlock for ${matchId}`);
+    if (!state?.lockedPlayers) {
+      console.warn(`[playerLock] Cannot unlock ${matchId}: state.lockedPlayers missing`);
       return;
     }
 
-    for (const pid of allPlayers) {
-      state.lockedPlayers.delete(String(pid));
-      console.log(`[playerLock] Unlocked ${pid} from match ${matchId}`);
+    let count = 0;
+
+    for (const [pid, lockedMatch] of state.lockedPlayers.entries()) {
+      if (String(lockedMatch) === String(matchId)) {
+        state.lockedPlayers.delete(pid);
+        count++;
+        console.log(`[playerLock] Unlocked ${pid} from match ${matchId}`);
+      }
     }
 
-    console.log(`[playerLock] ✅ Unlocked all players for match ${matchId}`);
+    console.log(`[playerLock] ✅ Unlocked ${count} players for match ${matchId}`);
   } catch (err) {
     console.warn("[unlockPlayersForMatch] failed:", err);
   }
