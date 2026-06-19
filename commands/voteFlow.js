@@ -6,6 +6,7 @@ const path = require("path");
 const { EmbedBuilder } = require("discord.js");
 const { guardChannel } = require("../lib/guards");
 const { startVote } = require("../lib/vote");
+const { randomInt } = require("crypto");
 const { pickUniqueMaps, buildMapOptionsFromList, recentMapExclusions } = require("../lib/maps");
 const { generateFairScenarios, buildTeamScenariosEmbed, summarizeSplit, getRating } = require("../lib/odds");
 const {
@@ -495,16 +496,30 @@ return startVote(state, message, {
 				  o.id === winner?.id || /new\s*maps?/i.test(o.name || "")
 				);
 				const newVotes = counts.get(newOpt?.id) || 0;
-			let top = null;
 			let topCount = 0;
+			let topChoices = [];
 
 			for (const opt of options) {
 			  if (opt.id === "N") continue;
+
 			  const c = counts.get(opt.id) || 0;
+
 			  if (c > topCount) {
-				top = opt;
 				topCount = c;
+				topChoices = [opt];
+			  } else if (c === topCount && c > 0) {
+				topChoices.push(opt);
 			  }
+			}
+
+			const top = topChoices.length
+			  ? topChoices[randomInt(0, topChoices.length)]
+			  : null;
+
+			if (topChoices.length > 1) {
+			  console.log(
+				`[mapVote] Carry-over tie (${topCount} votes): ${topChoices.map(o => o.ref?.name || o.name).join(", ")} → picked ${top?.ref?.name || top?.name}`
+			  );
 			}
 
 			const nextRerollCount = newVotes >= threshold ? rerollCount + 1 : maxRerolls;
