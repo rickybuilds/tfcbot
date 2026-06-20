@@ -94,11 +94,22 @@ function register(reg, deps) {
         match,
       });
 
-      elo.db.prepare(`
-        UPDATE matches
-        SET winner=?, status='completed', processed_at=?
-        WHERE match_id=?
-      `).run(result.toUpperCase(), Math.floor(Date.now()/1000), String(matchId));
+              elo.db.prepare(`
+          UPDATE matches
+          SET
+            winner=?,
+            status='completed',
+            processed_at=?,
+            hampalyzer_url=COALESCE(NULLIF(hampalyzer_url, ''), NULLIF(?, '')),
+            tfcstats_url=COALESCE(NULLIF(tfcstats_url, ''), NULLIF(?, ''))
+          WHERE match_id=?
+        `).run(
+          result.toUpperCase(),
+          Math.floor(Date.now()/1000),
+          match.hampalyzer_url || match.hampalyzerUrl || match.hampalyzer || "",
+          match.tfcstats_url || match.tfcstatsUrl || match.tfcstats || "",
+          String(matchId)
+        );
 
       // decrement bans for match players
       for (const p of [...blue, ...red]) {
@@ -196,6 +207,23 @@ if (!isAuto) {
 
     const hampUrl = resultUpload.upload?.url;
     const tfcUrl  = resultUpload.tfcstats?.url;
+	
+	    elo.db.prepare(`
+		  UPDATE matches
+		  SET
+			hampalyzer_url=COALESCE(NULLIF(hampalyzer_url, ''), NULLIF(?, '')),
+			tfcstats_url=COALESCE(NULLIF(tfcstats_url, ''), NULLIF(?, ''))
+		  WHERE match_id=?
+		`).run(
+		  hampUrl || "",
+		  tfcUrl || "",
+		  String(matchId)
+		);
+
+		console.log(`[!report] Saved Hampalyzer/TFCStats URLs for ${matchId}`, {
+		  hampUrl,
+		  tfcUrl,
+		});
 
     // 🟧 3️⃣ Upload demos (silent, no chat posts)
     if (zipResult?.zipPath) {
