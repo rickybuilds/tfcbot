@@ -2,6 +2,7 @@
 
 const https=require("https");
 const sqlite3=require("sqlite3").verbose();
+const { execFileSync } = require("child_process");
 
 const DB_PATH="/root/tfcbot/elo.db";
 
@@ -503,6 +504,58 @@ function parseFallbackRoundDuration(mainHtml){
   return m?Number(m[1])*60+Number(m[2]):0;
 }
 
+function parseFlagPace(mainHtml){
+  const section = mainHtml.match(/<h3[^>]*>\s*Flag pace\s*<\/h3>[\s\S]*?<svg[\s\S]*?<\/svg>/i)?.[0] || "";
+
+  const paths = [...section.matchAll(/<path[^>]+stroke="var\(--team-([ab])-color\)"[^>]+d="([^"]+)"/gi)]
+    .map(m => ({
+      team: m[1] === "a" ? "blue" : "red",
+      d: m[2],
+    }));
+
+  function xToSeconds(x){
+    return Math.round(((x - 25) / 800) * 900);
+  }
+
+  function yToScore(y){
+    return Math.round(((510 - y) / 480) * 50);
+  }
+
+  function timeText(seconds){
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  const caps = [];
+
+  for(const path of paths){
+    const points = [...path.d.matchAll(/[ML]([0-9.]+),([0-9.]+)/g)]
+      .map(m => ({ x:Number(m[1]), y:Number(m[2]) }))
+      .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+
+    for(let i=1;i<points.length;i++){
+      const prev = points[i - 1];
+      const cur = points[i];
+
+      const prevScore = yToScore(prev.y);
+      const curScore = yToScore(cur.y);
+
+      if(Math.abs(cur.x - prev.x) < 0.01 && curScore > prevScore){
+        const seconds = xToSeconds(cur.x);
+
+        caps.push({
+          team:path.team,
+          cap_num:caps.filter(c => c.team === path.team).length + 1,
+          time_seconds:seconds,
+          time_text:timeText(seconds),
+          score_after:curScore
+        });
+      }
+    }
+  }
+
+  return caps.sort((a,b)=>a.time_seconds-b.time_seconds);
+}
+
 function parseMatchRoundData(mainHtml){
   const teamMembership=parseTeamMembership(mainHtml);
   const playerStats={};
@@ -715,6 +768,23 @@ async function ensureSchema(){
   await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_class_weapon ON match_kill_events(attacker_class, weapon)`);
   await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_attacker_discord ON match_kill_events(attacker_discord_id)`);
   await runDb(`CREATE INDEX IF NOT EXISTS idx_mke_victim_discord ON match_kill_events(victim_discord_id)`);
+
+  await runDb(`
+  CREATE TABLE IF NOT EXISTS match_cap_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    source_url TEXT,
+    team TEXT NOT NULL,
+    cap_num INTEGER NOT NULL,
+    time_seconds INTEGER NOT NULL,
+    time_text TEXT NOT NULL,
+    score_after INTEGER,
+    imported_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    UNIQUE(match_id, team, cap_num)
+  )
+`);
+await runDb(`CREATE INDEX IF NOT EXISTS idx_match_cap_events_match ON match_cap_events(match_id)`);
+await runDb(`CREATE INDEX IF NOT EXISTS idx_match_cap_events_time ON match_cap_events(match_id, time_seconds)`);
 }
 
 const matchId=process.argv[2];
@@ -748,6 +818,7 @@ if(FORCE){
   await runDb("DELETE FROM match_round_mvps WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_player_round_stats WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_rounds WHERE match_id=?",[matchId]);
+  await runDb("DELETE FROM match_cap_events WHERE match_id=?",[matchId]);
 }
 
 if(existing&&FORCE){
@@ -764,6 +835,7 @@ if(existing&&FORCE){
   const steamIds=parseSteamIdsFromMain(mainHtml);
   const flagStats=parseFlagStats(mainHtml);
   const matchRoundData=parseMatchRoundData(mainHtml);
+  const capEvents = parseFlagPace(mainHtml);
   const importedRoundNums=new Set(matchRoundData.rounds.map(round=>round.round_num));
   const teamMembership=parseTeamMembership(mainHtml);
   const roundSummaryByHampId=matchRoundData.playerStats||{};
@@ -957,9 +1029,65 @@ if(existing&&FORCE){
     );
   }
 
+  for(const cap of capEvents){
+    await runDb(
+      `INSERT OR REPLACE INTO match_cap_events
+       (match_id, source_url, team, cap_num, time_seconds, time_text, score_after)
+       VALUES(?,?,?,?,?,?,?)`,
+      [
+        matchId,
+        url,
+        cap.team,
+        cap.cap_num,
+        cap.time_seconds,
+        cap.time_text,
+        cap.score_after
+      ]
+    );
+  }
+
+  console.log(`[hampalyzer] Imported ${capEvents.length} cap timeline events for ${matchId}`);
+
   await runDb("COMMIT");
-  db.close();
-  console.log(`Done. Imported ${links.length} players for ${matchId}`);
+  
+  const matchRow = await getDb(
+	  "SELECT tfcstats_url FROM matches WHERE match_id=?",
+	  [matchId]
+	);
+
+	if (matchRow?.tfcstats_url?.trim()) {
+	  try {
+		console.log(`[hampalyzer] Running TFCStats cap enrichment for ${matchId}`);
+
+		execFileSync(
+		  "node",
+		  [
+			"/root/tfcbot/importTfcstatsCaps.js",
+			matchId,
+			matchRow.tfcstats_url,
+			"--force"
+		  ],
+		  { stdio: "inherit" }
+		);
+
+		console.log(`[hampalyzer] TFCStats cap enrichment complete`);
+	  } catch (e) {
+		if (e.status === 2) {
+		  console.log(
+			`[hampalyzer] TFCStats cap enrichment skipped for ${matchId}: timeline mismatch`
+		  );
+		} else {
+		  console.error(
+			`[hampalyzer] TFCStats cap enrichment failed for ${matchId}:`,
+			e.message
+		  );
+		}
+	  }
+	}
+
+	db.close();
+	console.log(`Done. Imported ${links.length} players for ${matchId}`);
+  
 })().catch(async err=>{
   console.error(err);
   try{await runDb("ROLLBACK");}catch{}
