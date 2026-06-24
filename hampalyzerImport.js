@@ -556,6 +556,212 @@ function parseFlagPace(mainHtml){
   return caps.sort((a,b)=>a.time_seconds-b.time_seconds);
 }
 
+
+function parseSvgFlagEvents(mainHtml){
+  const svgs=[...String(mainHtml||"").matchAll(/<svg\b[\s\S]*?<\/svg>/gi)]
+    .map(m=>m[0])
+    .filter(svg=>/class="flag-\d+"/.test(svg)||/touch-labels/.test(svg));
+
+  function timeText(seconds){
+    seconds=Math.max(0,Number(seconds)||0);
+    return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,"0")}`;
+  }
+
+  function xToSeconds(x){
+    // Hampalyzer flag-pace SVG uses x=25..825 for a 15 minute round.
+    return Math.max(0,Math.round(((Number(x)-25)/800)*900));
+  }
+
+  function parseAttrs(attrText){
+    const attrs={};
+    for(const m of String(attrText||"").matchAll(/([a-zA-Z_:][-a-zA-Z0-9_:.]*)="([^"]*)"/g)){
+      attrs[m[1]]=m[2];
+    }
+    return attrs;
+  }
+
+  function parseTimedTitle(title,fallbackSeconds){
+    const clean=textContent(title);
+    const m=clean.match(/^\[(\d+:\d+)\]\s*(.*)$/);
+    if(m){
+      return {time_text:m[1],seconds:timeToSec(m[1]),body:m[2].trim(),raw:clean};
+    }
+    const seconds=Number.isFinite(fallbackSeconds)?fallbackSeconds:null;
+    return {time_text:seconds==null?null:timeText(seconds),seconds,body:clean,raw:clean};
+  }
+
+  function circleEvent(flagType,timed,attrs,roundNum){
+    const base={
+      round_num:roundNum,
+      game_time_seconds:timed.seconds,
+      event_time_text:timed.time_text,
+      source_confidence:timed.raw.startsWith("[")?"hampalyzer_svg_title":"hampalyzer_svg_x_fallback",
+      raw_title:timed.raw,
+      flag_class:`flag-${flagType}`,
+      display_name:null,
+      other_display_name:null,
+      touches:null,
+      team:null,
+      value:null,
+      meta:"none",
+      subtype:"none"
+    };
+
+    if(flagType===0){
+      const m=timed.body.match(/^Grabbed by (.+)$/i);
+      return {...base,flag_event_type:"pickup",subtype:"grabbed",display_name:m?m[1].trim():null};
+    }
+
+    if(flagType===1){
+      const m=timed.body.match(/^(.+?) fragged by (.+)$/i);
+      return {...base,flag_event_type:"frag",subtype:"carrier_fragged",display_name:m?m[1].trim():null,other_display_name:m?m[2].trim():null};
+    }
+
+    if(flagType===2){
+      const tossedBy=timed.body.match(/^Tossed by (.+)$/i);
+      const playerTossed=timed.body.match(/^(.+?) tossed(?: the flag)?(?: to (.+))?$/i);
+      return {
+        ...base,
+        flag_event_type:"toss",
+        subtype:"flag_tossed",
+        display_name:tossedBy?tossedBy[1].trim():(playerTossed?playerTossed[1].trim():null),
+        other_display_name:playerTossed&&playerTossed[2]?playerTossed[2].trim():null,
+        value:timed.body
+      };
+    }
+
+    if(flagType===3){
+      const droppedBy=timed.body.match(/^Dropped by (.+)$/i);
+      const endOfRound=/Dropped:\s*end of round/i.test(timed.body);
+      return {
+        ...base,
+        flag_event_type:"drop",
+        subtype:endOfRound?"end_of_round":"flag_dropped",
+        meta:endOfRound?"end_of_round":"none",
+        display_name:droppedBy?droppedBy[1].trim():null,
+        value:timed.body
+      };
+    }
+
+    if(flagType===4){
+      const returnedBy=timed.body.match(/^Returned by (.+)$/i);
+      const playerReturned=timed.body.match(/^(.+?) returned/i);
+      return {
+        ...base,
+        flag_event_type:"return",
+        subtype:"flag_returned",
+        display_name:returnedBy?returnedBy[1].trim():(playerReturned?playerReturned[1].trim():null),
+        value:timed.body
+      };
+    }
+
+    return {...base,flag_event_type:`flag-${flagType}`,value:timed.body};
+  }
+
+  const events=[];
+
+  svgs.forEach((svg,index)=>{
+    const roundNum=index+1;
+
+    for(const m of svg.matchAll(/<circle\b([^>]*)>\s*<title>([\s\S]*?)<\/title>\s*<\/circle>/gi)){
+      const attrs=parseAttrs(m[1]);
+      const flagClass=(attrs.class||"").match(/\bflag-(\d+)\b/);
+      if(!flagClass)continue;
+      const timed=parseTimedTitle(m[2],xToSeconds(attrs.cx));
+
+      // Ignore Hampalyzer's fake "Dropped: start of round" markers.
+      // They're just SVG placeholders, not actual game events.
+      if (/^Dropped:\s*start of round$/i.test(timed.raw)) {
+          continue;
+      }
+
+      const event = circleEvent(Number(flagClass[1]), timed, attrs, roundNum);
+
+      if (event) {
+          events.push(event);
+      }
+    }
+
+    for(const m of svg.matchAll(/<text\b([^>]*)>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<\/text>/gi)){
+      const attrs=parseAttrs(m[1]);
+      const timed=parseTimedTitle(m[2],xToSeconds(attrs.x));
+      const lines = (textContent(m[2]).match(/\[\d+:\d+\]\s+Captured by .+?\(\d+ touches?\)/gi) || []).map(s => s.trim());
+
+      for (const line of lines) {
+        const timedCap = parseTimedTitle(line, xToSeconds(attrs.x));
+        const cap = timedCap.body.match(/^Captured by (.+?) \((\d+) touches?\)$/i);
+        if (!cap) continue;
+
+        events.push({
+          round_num: roundNum,
+          game_time_seconds: timedCap.seconds,
+          event_time_text: timedCap.time_text,
+          flag_event_type: "cap",
+          subtype: "captured",
+          meta: "none",
+          display_name: cap[1].trim(),
+          other_display_name: null,
+          touches: Number(cap[2]),
+          team: null,
+          value: null,
+          source_confidence: "hampalyzer_svg_title",
+          raw_title: timedCap.raw,
+          flag_class: "touch-label"
+        });
+      }
+    }
+  });
+
+  // Hampalyzer cap labels live under <g class="touch-labels"> as <text><title>...</title></text>.
+  // Some labels can be missed by the SVG <text> regex above, so do a final global cap-title pass
+  // over the full page and de-dupe against caps already parsed.
+  const existingCaps = new Set(
+    events
+      .filter(e => e.flag_event_type === "cap")
+      .map(e => `${e.game_time_seconds}|${normalizePlayerName(e.display_name)}|${e.touches}`)
+  );
+
+  const capTitleRe = /\[(\d+:\d+)\]\s+Captured by\s+(.+?)\s+\((\d+)\s+touches?\)/gi;
+  let capMatch;
+
+  while ((capMatch = capTitleRe.exec(String(mainHtml || "")))) {
+    const eventTimeText = capMatch[1];
+    const capperName = capMatch[2].trim();
+    const touches = Number(capMatch[3]);
+    const seconds = timeToSec(eventTimeText);
+    const key = `${seconds}|${normalizePlayerName(capperName)}|${touches}`;
+
+    if (existingCaps.has(key)) continue;
+
+    events.push({
+      round_num: 1,
+      game_time_seconds: seconds,
+      event_time_text: eventTimeText,
+      flag_event_type: "cap",
+      subtype: "captured",
+      meta: "none",
+      display_name: capperName,
+      other_display_name: null,
+      touches,
+      team: null,
+      value: `[${eventTimeText}] Captured by ${capperName} (${touches} touches)`,
+      source_confidence: "hampalyzer_svg_title_global_fallback",
+      raw_title: `[${eventTimeText}] Captured by ${capperName} (${touches} touches)`,
+      flag_class: "touch-label"
+    });
+
+    existingCaps.add(key);
+  }
+
+  return events
+    .filter(e=>e.game_time_seconds!=null)
+    .sort((a,b)=>(a.round_num-b.round_num)||(a.game_time_seconds-b.game_time_seconds));
+}
+
+function resolveRosterPlayerByName(name,nameRoster){
+  return resolveVictimByName(name,nameRoster);
+}
+
 function parseMatchRoundData(mainHtml){
   const teamMembership=parseTeamMembership(mainHtml);
   const playerStats={};
@@ -785,6 +991,44 @@ async function ensureSchema(){
 `);
 await runDb(`CREATE INDEX IF NOT EXISTS idx_match_cap_events_match ON match_cap_events(match_id)`);
 await runDb(`CREATE INDEX IF NOT EXISTS idx_match_cap_events_time ON match_cap_events(match_id, time_seconds)`);
+
+  await runDb(`
+    CREATE TABLE IF NOT EXISTS match_flag_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_id TEXT NOT NULL,
+      pickup_id INTEGER,
+      round_id INTEGER,
+      round_num INTEGER,
+      game_time_seconds INTEGER,
+      event_time_text TEXT,
+      flag_event_type TEXT NOT NULL,
+      subtype TEXT,
+      meta TEXT,
+      player_id INTEGER,
+      player_key TEXT,
+      steam_id TEXT,
+      display_name TEXT,
+      team_id INTEGER,
+      team TEXT,
+      class_id INTEGER,
+      class_name TEXT,
+      conceded INTEGER DEFAULT 0,
+      value TEXT,
+      source TEXT NOT NULL DEFAULT 'tfcstats',
+      source_url TEXT,
+      other_display_name TEXT,
+      other_player_key TEXT,
+      other_steam_id TEXT,
+      touches INTEGER,
+      source_confidence TEXT
+    )
+  `);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_match_time ON match_flag_events(match_id, round_num, game_time_seconds)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_player ON match_flag_events(steam_id)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_type ON match_flag_events(flag_event_type, subtype, meta)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_source_match ON match_flag_events(source, match_id)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_match_source_time ON match_flag_events(match_id, source, round_num, game_time_seconds)`);
+  await runDb(`CREATE INDEX IF NOT EXISTS idx_flag_events_other_steam ON match_flag_events(other_steam_id)`);
 }
 
 const matchId=process.argv[2];
@@ -819,6 +1063,7 @@ if(FORCE){
   await runDb("DELETE FROM match_player_round_stats WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_rounds WHERE match_id=?",[matchId]);
   await runDb("DELETE FROM match_cap_events WHERE match_id=?",[matchId]);
+  await runDb("DELETE FROM match_flag_events WHERE match_id=? AND source='hampalyzer'",[matchId]);
 }
 
 if(existing&&FORCE){
@@ -836,6 +1081,7 @@ if(existing&&FORCE){
   const flagStats=parseFlagStats(mainHtml);
   const matchRoundData=parseMatchRoundData(mainHtml);
   const capEvents = parseFlagPace(mainHtml);
+  const svgFlagEvents = parseSvgFlagEvents(mainHtml);
   const importedRoundNums=new Set(matchRoundData.rounds.map(round=>round.round_num));
   const teamMembership=parseTeamMembership(mainHtml);
   const roundSummaryByHampId=matchRoundData.playerStats||{};
@@ -1046,7 +1292,62 @@ if(existing&&FORCE){
     );
   }
 
+
+  const flagNameRoster=buildNameRoster(playersForRoster);
+
+function inferFlagEventRound(ev, player, matchRoundData) {
+  if (!player) return ev.round_num || 1;
+
+  for (const round of matchRoundData.rounds) {
+    const row = (matchRoundData.playerStats[player.hamp_id] || {})[round.round_num];
+    if (row && row.team_name === round.offense_team) {
+      return round.round_num;
+    }
+  }
+
+  return ev.round_num || 1;
+}
+
+  for(const ev of svgFlagEvents){
+    const player=resolveRosterPlayerByName(ev.display_name,flagNameRoster);
+    const otherPlayer=resolveRosterPlayerByName(ev.other_display_name,flagNameRoster);
+
+    const inferredRoundNum = inferFlagEventRound(ev, player, matchRoundData);
+
+    await runDb(
+      `INSERT INTO match_flag_events
+       (match_id, source, source_url, round_num, game_time_seconds, event_time_text,
+        flag_event_type, subtype, meta,
+        player_key, steam_id, display_name, team,
+        other_player_key, other_steam_id, other_display_name,
+        touches, value, source_confidence)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        matchId,
+        "hampalyzer",
+        url,
+        inferredRoundNum,
+        ev.game_time_seconds,
+        ev.event_time_text,
+        ev.flag_event_type,
+        ev.subtype||"none",
+        ev.meta||"none",
+        player?player.player_key:null,
+        player?player.steam_id:null,
+        ev.display_name||null,
+        player?player.team_name:(ev.team||null),
+        otherPlayer?otherPlayer.player_key:null,
+        otherPlayer?otherPlayer.steam_id:null,
+        ev.other_display_name||null,
+        ev.touches==null?null:ev.touches,
+        ev.value||ev.raw_title||null,
+        ev.source_confidence||"hampalyzer_svg_title"
+      ]
+    );
+  }
+
   console.log(`[hampalyzer] Imported ${capEvents.length} cap timeline events for ${matchId}`);
+  console.log(`[hampalyzer] Imported ${svgFlagEvents.length} SVG flag events for ${matchId}`);
 
   await runDb("COMMIT");
   
@@ -1055,7 +1356,9 @@ if(existing&&FORCE){
 	  [matchId]
 	);
 
-	if (matchRow?.tfcstats_url?.trim()) {
+	if (svgFlagEvents.length) {
+	  console.log(`[hampalyzer] Skipping TFCStats cap enrichment for ${matchId}: Hampalyzer SVG flag events found`);
+	} else if (matchRow?.tfcstats_url?.trim()) {
 	  try {
 		console.log(`[hampalyzer] Running TFCStats cap enrichment for ${matchId}`);
 

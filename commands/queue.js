@@ -7,6 +7,8 @@ const { mention, formatPlayerName, clearAnyTimer, disableAllButtons } = require(
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
 const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
+const lockedReplyCooldown = new Map();
+const LOCKED_REPLY_COOLDOWN_MS = 60 * 1000; // 1 minute
 let lastStatusUsedAt = 0; // global cooldown timestamp
 
 const ADMIN_ROLE = process.env.ADMIN_ROLE_ID || "";
@@ -92,13 +94,22 @@ function register(reg, { client, config, state, elo, banStore, settings, privacy
     const id = message.author.id;
 	// 🚫 Prevent players currently in an active match from joining another queue
 	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
-	  const matchId = state.lockedPlayers.get(String(id));
-	  console.log(`[playerLock] ${id} tried to add but is locked in match ${matchId}`);
-	  try {
-		await message.reply(`🚫 You’re currently locked in **Match ${matchId}**. Wait until it finishes before re-adding.`);
-	  } catch {}
-	  return;
-	}
+  const matchId = state.lockedPlayers.get(String(id));
+  const now = Date.now();
+  const lastReply = lockedReplyCooldown.get(id) || 0;
+    if (now - lastReply > LOCKED_REPLY_COOLDOWN_MS) {
+    lockedReplyCooldown.set(id, now);
+      console.log(
+        `[playerLock] ${id} tried to add but is locked in match ${matchId}`
+      );
+      try {
+        await message.reply(
+          `🚫 You’re currently locked in **Match ${matchId}**. Wait until it finishes before re-adding.`
+        );
+      } catch {}
+    }
+  return;
+  }
 
 	// Stop overfilling
 	if (state.queue.length >= (state.MAX_PLAYERS || 8)) {

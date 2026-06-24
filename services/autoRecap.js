@@ -242,34 +242,35 @@ function unlockServer(serverIp) {
   }
 }
 
-
-
-// 🔓 Unlock all players tied to a match
 function unlockPlayersForMatch(matchId) {
   try {
     const { state } = require("../lib/state");
 
     if (!state?.lockedPlayers) {
       console.warn(`[playerLock] Cannot unlock ${matchId}: state.lockedPlayers missing`);
-      return;
+      return [];
     }
 
-    let count = 0;
+    const unlockedIds = [];
 
     for (const [pid, lockedMatch] of state.lockedPlayers.entries()) {
       if (String(lockedMatch) === String(matchId)) {
         state.lockedPlayers.delete(pid);
-        count++;
+        unlockedIds.push(pid);
         console.log(`[playerLock] Unlocked ${pid} from match ${matchId}`);
       }
     }
 
-    console.log(`[playerLock] ✅ Unlocked ${count} players for match ${matchId}`);
+    console.log(
+      `[playerLock] ✅ Unlocked ${unlockedIds.length} players for match ${matchId}`
+    );
+
+    return unlockedIds;
   } catch (err) {
     console.warn("[unlockPlayersForMatch] failed:", err);
+    return [];
   }
 }
-
 
   function disarm(serverIp) {
     const k = keyOf(serverIp);
@@ -763,7 +764,13 @@ setTimeout(() => {
       console.log(`[autoRecap] confirmed DB completed for ${a.matchId}, unlocking now`);
       disarm(evt.from);
       unlockServer(evt.from);
-      unlockPlayersForMatch(a.matchId);
+      const unlockedIds = unlockPlayersForMatch(a.matchId);
+        if (unlockedIds.length) {
+          post(
+            recapChannel,
+            `🔓 Match complete. Player locks have been cleared — queue is open again.`
+          ).catch?.(() => {});
+        }
     } else {
       console.log(`[autoRecap] ${a.matchId} still in progress in DB, skipping unlock`);
     }
