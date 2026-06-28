@@ -1,18 +1,19 @@
+//commands/idea.js
 "use strict";
 
 const config = require("../config");
-const { createInboxCard } = require("../services/trello");
+const { createInboxCard, applyProjectChecklist } = require("../services/trello");
 const { EmbedBuilder } = require("discord.js");
 
 const CATEGORIES = [
-  { name: "Speedruns", aliases: ["speedrun", "speedruns", "sr"], labelEnv: "TRELLO_LABEL_SPEEDRUNS_ID" },
-  { name: "Website", aliases: ["website", "web", "site"], labelEnv: "TRELLO_LABEL_WEBSITE_ID" },
-  { name: "TFCBot", aliases: ["bot", "tfcbot", "discord"], labelEnv: "TRELLO_LABEL_TFCBOT_ID" },
-  { name: "Database", aliases: ["db", "database", "sql"], labelEnv: "TRELLO_LABEL_DATABASE_ID" },
-  { name: "Infrastructure", aliases: ["infra", "infrastructure", "server"], labelEnv: "TRELLO_LABEL_INFRASTRUCTURE_ID" },
-  { name: "Analytics", aliases: ["analytics", "stats"], labelEnv: "TRELLO_LABEL_ANALYTICS_ID" },
-  { name: "Community", aliases: ["community"], labelEnv: "TRELLO_LABEL_COMMUNITY_ID" },
-  { name: "API", aliases: ["api", "endpoint", "endpoints"], labelEnv: "TRELLO_LABEL_API_ID" },
+  { name: "Speedruns", key: "speedruns", aliases: ["speedrun", "speedruns", "sr"], labelEnv: "TRELLO_LABEL_SPEEDRUNS_ID" },
+  { name: "Website", key: "website", aliases: ["website", "web", "site"], labelEnv: "TRELLO_LABEL_WEBSITE_ID" },
+  { name: "TFCBot", key: "tfcbot", aliases: ["bot", "tfcbot", "discord"], labelEnv: "TRELLO_LABEL_TFCBOT_ID" },
+  { name: "Database", key: "database", aliases: ["db", "database", "sql"], labelEnv: "TRELLO_LABEL_DATABASE_ID" },
+  { name: "Infrastructure", key: "infrastructure", aliases: ["infra", "infrastructure", "server"], labelEnv: "TRELLO_LABEL_INFRASTRUCTURE_ID" },
+  { name: "Analytics", key: "analytics", aliases: ["analytics", "stats"], labelEnv: "TRELLO_LABEL_ANALYTICS_ID" },
+  { name: "Community", key: "community", aliases: ["community"], labelEnv: "TRELLO_LABEL_COMMUNITY_ID" },
+  { name: "API", key: "api", aliases: ["api", "endpoint", "endpoints"], labelEnv: "TRELLO_LABEL_API_ID" },
 ];
 
 function parseIdea(args) {
@@ -22,6 +23,7 @@ function parseIdea(args) {
   if (category) {
     return {
       category: category.name,
+      categoryKey: category.key,
       ideaText: args.slice(1).join(" ").trim(),
       labelIds: category.labelEnv && process.env[category.labelEnv]
         ? [process.env[category.labelEnv]]
@@ -31,6 +33,7 @@ function parseIdea(args) {
 
   return {
     category: "General",
+    categoryKey: "general",
     ideaText: args.join(" ").trim(),
     labelIds: [],
   };
@@ -64,7 +67,7 @@ async function run(message, args) {
     return message.reply("💡 Please use <#1410076474014433392> for ideas and requests.");
   }
 
-  const { category, ideaText, labelIds } = parseIdea(args);
+  const { category, categoryKey, ideaText, labelIds } = parseIdea(args);
 
   if (!ideaText) {
     return message.reply("Usage: `!idea [category] <your idea>`");
@@ -99,7 +102,9 @@ async function run(message, args) {
     title: cardTitle,
     description,
     labelIds,
-    });
+  });
+
+  await applyProjectChecklist(card.id, categoryKey);
 
   const auditChannel = message.client.channels.cache.get(config.channels.audit);
 
