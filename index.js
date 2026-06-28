@@ -39,6 +39,8 @@ const health    = require("./commands/health");
 const { startHldsLogReceiver } = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
+const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
+const mysqlPool = require("./lib/mysql");
 
 // QoL / persistence / decay
 const { QueueStore } = require("./lib/queueStore");
@@ -343,6 +345,17 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   try { await refreshBotName(client, state); } catch {}
+
+  try {
+    await startSpeedrunWatcher({
+        client,
+        pool: mysqlPool,
+        config,
+        logger: console,
+    });
+} catch (e) {
+    console.error("[SPEEDRUN-WATCHER] failed:", e);
+}
 
   try { startJailWatcher(client, jailStore); } catch (e) { console.error("[JAIL-WATCHER] failed:", e); }
     // Auto-re-jail anyone who rejoins while still flagged

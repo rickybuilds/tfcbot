@@ -3,6 +3,7 @@
 const https=require("https");
 const sqlite3=require("sqlite3").verbose();
 const { execFileSync } = require("child_process");
+const SKIP_TFCSTATS = process.env.SKIP_TFCSTATS === "1";
 
 const DB_PATH="/root/tfcbot/elo.db";
 
@@ -1357,35 +1358,20 @@ function inferFlagEventRound(ev, player, matchRoundData) {
 	);
 
 	if (svgFlagEvents.length) {
-	  console.log(`[hampalyzer] Skipping TFCStats cap enrichment for ${matchId}: Hampalyzer SVG flag events found`);
-	} else if (matchRow?.tfcstats_url?.trim()) {
-	  try {
-		console.log(`[hampalyzer] Running TFCStats cap enrichment for ${matchId}`);
+  console.log(`[hampalyzer] Skipping TFCStats cap enrichment for ${matchId}: Hampalyzer SVG flag events found`);
+} else if (SKIP_TFCSTATS) {
+  console.log(`[hampalyzer] Skipping TFCStats cap enrichment for ${matchId}: SKIP_TFCSTATS=1`);
+} else if (matchRow?.tfcstats_url?.trim()) {
+  console.log(`[hampalyzer] Running TFCStats cap enrichment for ${matchId}`);
+  try {
+    const result = await importTfcstatsCaps(db, matchId, matchRow.tfcstats_url);
+    if (result?.reason) {
+      console.log(`[hampalyzer] TFCStats cap enrichment skipped for ${matchId}: ${result.reason}`);
+    }
+  } catch (err) {
+    console.warn(`[hampalyzer] TFCStats cap enrichment failed for ${matchId}: ${err.message}`);
+  }
 
-		execFileSync(
-		  "node",
-		  [
-			"/root/tfcbot/importTfcstatsCaps.js",
-			matchId,
-			matchRow.tfcstats_url,
-			"--force"
-		  ],
-		  { stdio: "inherit" }
-		);
-
-		console.log(`[hampalyzer] TFCStats cap enrichment complete`);
-	  } catch (e) {
-		if (e.status === 2) {
-		  console.log(
-			`[hampalyzer] TFCStats cap enrichment skipped for ${matchId}: timeline mismatch`
-		  );
-		} else {
-		  console.error(
-			`[hampalyzer] TFCStats cap enrichment failed for ${matchId}:`,
-			e.message
-		  );
-		}
-	  }
 	}
 
 	db.close();
