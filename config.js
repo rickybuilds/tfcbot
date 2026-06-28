@@ -17,18 +17,19 @@ module.exports = {
     maps: process.env.MAPS_CHANNEL_ID,
     audit: process.env.AUDIT_CHANNEL_ID,
     request: process.env.TFC_REQUEST_CHANNEL_ID,
-	rules: process.env.RULES_CHANNEL_ID,
-	settings: process.env.SETTINGS_CHANNEL_ID,
+    rules: process.env.RULES_CHANNEL_ID,
+    settings: process.env.SETTINGS_CHANNEL_ID,
+    wants: process.env.WANTS_CHANNEL_ID, // 👈 NEW
   },
 
   // Roles
   roles: {
     admin: process.env.ADMIN_ROLE_ID,
     privacy: process.env.PRIVACY_ROLE_ID, //currently not used
-    player: process.env.PRIVACY_ROLE_ID,           
+    player: process.env.PRIVACY_ROLE_ID,
     captain: process.env.CAPTAIN_ROLE_ID, //currently not used
     mapper: process.env.MAPPER_ROLE_ID,
-	notice: process.env.PRIVACY_ROLE_ID, // 👈 point notice to same ID
+    notice: process.env.PRIVACY_ROLE_ID,
     permaban: process.env.PERMABAN_ROLE_ID,
     tempban: process.env.TEMPBAN_ROLE_ID,
     jail: process.env.JAIL_ROLE_ID,

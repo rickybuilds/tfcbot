@@ -153,6 +153,7 @@ require("./commands/tfcmap").register(registry, deps);
 require("./commands/settings").register(registry, deps);
 require("./commands/ranks").register(registry, deps);
 require("./commands/mapcaps").register(registry, deps);
+require("./commands/idea").register(registry, deps);
 require("./commands/noticeRoles").register(registry, {
   state,
   elo,
