@@ -166,7 +166,7 @@ function buildWorldRecordEmbed(wr) {
     .setDescription(
       `**[${playerName}](${playerUrl})** • **${cls}**\n` +
       `**[${mapName}](${mapUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**\n\n` +
-      `🎬 Replay in-server command: \`/replay ${replayClass} 1\``
+      `Replay in-server command: \`/replay ${replayClass} 1\``
     )
     .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
     .setTimestamp(new Date());
