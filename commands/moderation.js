@@ -166,4 +166,37 @@ const { refreshBotName } = require("../lib/botName");
   });
 }
 
-module.exports = { register };
+/* ---------------- vote text-only moderation ---------------- */
+
+const MEDIA_URL_REGEX =
+  /(tenor\.com|giphy\.com|media\.discordapp\.net|cdn\.discordapp\.com|\.gif|\.jpg|\.jpeg|\.png|\.webp|\.mp4|\.mov)/i;
+
+function hasBlockedVoteMedia(message) {
+  if (message.attachments?.size > 0) return true;
+  if (message.stickers?.size > 0) return true;
+  if (message.embeds?.length > 0) return true;
+  if (MEDIA_URL_REGEX.test(message.content || "")) return true;
+
+  return false;
+}
+
+async function handleVoteMediaModeration(message, state, config) {
+  if (!message.guild) return false;
+  if (message.author.bot) return false;
+
+  // Only moderate the pickup channel
+  if (message.channel.id !== config.channels.pickup) return false;
+
+  // Only during voting
+  if (!state.isVotingInProgress) return false;
+
+  if (!hasBlockedVoteMedia(message)) return false;
+
+  await message.delete().catch(() => {});
+  return true;
+}
+
+module.exports = {
+  register,
+  handleVoteMediaModeration,
+};

@@ -46,6 +46,7 @@ const mysqlPool = require("./lib/mysql");
 const { QueueStore } = require("./lib/queueStore");
 const { BanStore }   = require("./lib/banStore");
 const { scheduleDecayIfNeeded } = require("./lib/eloDecay");
+const moderation = require("./commands/moderation");
 
 // ============================================================================
 // Shared service initialization
@@ -467,6 +468,10 @@ client.on("messageCreate", async (message) => {
         state.bannedUsers.add(String(message.author.id));
         return;
       }
+    }
+
+    if (await moderation.handleVoteMediaModeration(message, state, config)) {
+      return;
     }
 
     const raw = (message.content || "").trim();

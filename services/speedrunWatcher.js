@@ -1,7 +1,6 @@
 // services/speedrunWatcher.js
 
 const { EmbedBuilder } = require("discord.js");
-
 const DEFAULT_POLL_MS = 20_000;
 
 const CLASS_NAMES = {
@@ -141,8 +140,14 @@ function buildWorldRecordEmbed(wr) {
   const cls = className(wr.class_id, wr.class_name);
   const replayClass = cls.toLowerCase();
 
+  const baseUrl = (process.env.NONAME_URL || "https://nonamepickup.servehalflife.com")
+    .replace(/\/$/, "");
+
+  const mapUrl = `${baseUrl}/speedrun-map.html?map=${encodeURIComponent(wr.map)}`;
+
   return new EmbedBuilder()
-    .setTitle("🏆 NEW SPEEDRUN WORLD RECORD")
+    .setTitle("🏆 NEW NONAME SPEEDRUN RECORD")
+    .setURL(mapUrl)
     .setColor(0xffc107)
     .addFields(
       { name: "Player", value: String(wr.player_name || "Unknown"), inline: true },
