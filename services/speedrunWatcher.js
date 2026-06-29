@@ -164,9 +164,9 @@ function buildWorldRecordEmbed(wr) {
     .setURL(mapUrl)
     .setColor(0xffc107)
     .setDescription(
-      `👤 **[${playerName}](${playerUrl})** • 🪖 **${cls}**\n` +
-      `🗺️ **[${mapName}](${mapUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**\n\n` +
-      `🎬 Replay: \`/replay ${replayClass} 1\``
+      `**[${playerName}](${playerUrl})** • **${cls}**\n` +
+      `**[${mapName}](${mapUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**\n\n` +
+      `🎬 Replay in-server command: \`/replay ${replayClass} 1\``
     )
     .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
     .setTimestamp(new Date());
