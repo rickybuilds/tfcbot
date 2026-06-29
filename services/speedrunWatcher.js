@@ -49,8 +49,17 @@ async function ensureAnnouncementTable(pool, logger = console) {
 
 async function getCurrentWorldRecords(pool) {
   const [rows] = await pool.query(`
-    SELECT r.map, r.class_id, r.class_name, r.steamid, r.player_name, r.best_time_ms
+    SELECT
+      r.map,
+      r.class_id,
+      r.class_name,
+      r.steamid,
+      r.player_name,
+      r.best_time_ms,
+      l.discord_id
     FROM speedrun_records r
+    LEFT JOIN speedrun_player_links l
+      ON l.steamid = r.steamid
     INNER JOIN (
       SELECT map, class_id, MIN(best_time_ms) AS best_time_ms
       FROM speedrun_records
@@ -66,7 +75,6 @@ async function getCurrentWorldRecords(pool) {
     ORDER BY r.map, r.class_id, r.updated_at ASC
   `);
 
-  // If multiple players tie WR, only announce the first stable row per map/class.
   const seen = new Set();
   return rows.filter((row) => {
     const key = `${row.map}:${row.class_id}`;
@@ -145,18 +153,22 @@ function buildWorldRecordEmbed(wr) {
 
   const mapUrl = `${baseUrl}/speedrun-map.html?map=${encodeURIComponent(wr.map)}`;
 
+  const playerKey = wr.discord_id || wr.steamid;
+  const playerUrl = `${baseUrl}/speedrun-player.html?player=${encodeURIComponent(playerKey)}`;
+
+  const playerName = String(wr.player_name || "Unknown");
+  const mapName = String(wr.map || "Unknown");
+
   return new EmbedBuilder()
     .setTitle("🏆 NEW NONAME SPEEDRUN RECORD")
     .setURL(mapUrl)
     .setColor(0xffc107)
-    .addFields(
-      { name: "Player", value: String(wr.player_name || "Unknown"), inline: true },
-      { name: "Class", value: cls, inline: true },
-      { name: "Map", value: String(wr.map), inline: true },
-      { name: "Time", value: formatTime(wr.best_time_ms), inline: true },
-      { name: "SteamID", value: String(wr.steamid || "Unknown"), inline: false },
-      { name: "Replay", value: `\`/replay ${replayClass} 1\``, inline: false }
+    .setDescription(
+      `👤 **[${playerName}](${playerUrl})** • 🪖 **${cls}**\n` +
+      `🗺️ **[${mapName}](${mapUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**\n\n` +
+      `🎬 Replay: \`/replay ${replayClass} 1\``
     )
+    .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
     .setTimestamp(new Date());
 }
 
