@@ -154,7 +154,7 @@ function buildWorldRecordEmbed(wr) {
   const mapUrl = `${baseUrl}/speedrun-map.html?map=${encodeURIComponent(wr.map)}`;
 
   const playerKey = wr.discord_id || wr.steamid;
-  const playerUrl = `${baseUrl}/speedrun-player.html?player=${encodeURIComponent(playerKey)}`;
+  const playerUrl = `${baseUrl}/speedrun-player.html?id=${encodeURIComponent(playerKey)}`;
 
   const playerName = String(wr.player_name || "Unknown");
   const mapName = String(wr.map || "Unknown");
