@@ -22,6 +22,7 @@ const { PrivacyDB }    = require("./lib/privacy");
 const { MatchStore }   = require("./lib/matchStore");
 const { refreshBotName } = require("./lib/botName");
 const { scheduleBackups } = require("./lib/backup");
+const { startSpeedrunPlayerLinkSync } = require("./services/speedrunPlayerLinkSync");
 
 // Jail system
 const { JailStore } = require("./lib/jailStore");
@@ -358,6 +359,11 @@ client.once("clientReady", async () => {
 } catch (e) {
     console.error("[SPEEDRUN-WATCHER] failed:", e);
 }
+
+startSpeedrunPlayerLinkSync({
+  db: matchesStore.db,
+  speedrunDb: mysqlPool,
+});
 
   try { startJailWatcher(client, jailStore); } catch (e) { console.error("[JAIL-WATCHER] failed:", e); }
     // Auto-re-jail anyone who rejoins while still flagged

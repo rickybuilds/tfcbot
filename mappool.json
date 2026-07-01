@@ -126,12 +126,6 @@
     "tier": 3
   },
   {
-    "key": "mm-crossfaded2-b7-2e9e",
-    "name": "mm_crossfaded2_b9",
-    "mirv": 1,
-    "tier": 2
-  },
-  {
     "key": "toasted-b16-2827",
     "name": "toasted_b16",
     "mirv": 0,
@@ -198,9 +192,9 @@
     "tier": 3
   },
   {
-    "key": "hammer2-b4-aa1d",
-    "name": "hammer2_b4",
-    "mirv": 1,
-    "tier": 3
+    "key": "2trof-b4-5edc",
+    "name": "2trof_b4",
+    "mirv": 0,
+    "tier": 2
   }
 ]
