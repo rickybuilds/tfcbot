@@ -144,9 +144,16 @@ async function findSpeedrunChannel(client, config = {}) {
   return client.channels.cache.find((ch) => ch.name === name) || null;
 }
 
-function buildWorldRecordEmbed(wr) {
+function formatDelta(ms) {
+  const totalMs = Number(ms || 0);
+  const seconds = Math.floor(totalMs / 1000);
+  const millis = totalMs % 1000;
+
+  return `${seconds}.${String(millis).padStart(3, "0")}`;
+}
+
+function buildWorldRecordEmbed(wr, previous = null) {
   const cls = className(wr.class_id, wr.class_name);
-  const replayClass = cls.toLowerCase();
 
   const baseUrl = (process.env.NONAME_URL || "https://nonamepickup.servehalflife.com")
     .replace(/\/$/, "");
@@ -159,21 +166,29 @@ function buildWorldRecordEmbed(wr) {
   const playerName = String(wr.player_name || "Unknown");
   const mapName = String(wr.map || "Unknown");
 
+  const diffMs = previous
+    ? Number(previous.best_time_ms) - Number(wr.best_time_ms)
+    : 0;
+
+  const comparison =
+    previous && diffMs > 0
+      ? ` **(-${formatDelta(diffMs)}s vs ${previous.player_name})**`
+      : "";
+
   return new EmbedBuilder()
     .setTitle("🏆 NEW NONAME SPEEDRUN RECORD")
     .setURL(mapUrl)
     .setColor(0xffc107)
     .setDescription(
-      `**[${playerName}](${playerUrl})** • **${cls}**\n` +
-      `**[${mapName}](${mapUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**\n\n` +
-      `Replay in-server command: \`/replay ${replayClass} 1\``
+      `**[${mapName}](${mapUrl})** • **${cls}**\n` +
+      `**[${playerName}](${playerUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**${comparison}`
     )
     .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
     .setTimestamp(new Date());
 }
 
-async function announceWorldRecord({ client, channel, wr, logger = console }) {
-  const embed = buildWorldRecordEmbed(wr);
+async function announceWorldRecord({ client, channel, wr, previous = null, logger = console }) {
+  const embed = buildWorldRecordEmbed(wr, previous);
 
   await channel.send({ embeds: [embed] });
 
@@ -201,7 +216,7 @@ async function pollSpeedrunEvents({ client, pool, config = {}, logger = console 
 
       if (!isNewWorldRecord(wr, previous)) continue;
 
-      await announceWorldRecord({ client, channel, wr, logger });
+      await announceWorldRecord({ client, channel, wr, previous, logger });
       await saveAnnouncement(pool, wr);
     }
   } catch (err) {
@@ -265,4 +280,5 @@ module.exports = {
   stopSpeedrunWatcher,
   pollSpeedrunEvents,
   formatTime,
+  formatDelta,
 };
