@@ -82,15 +82,21 @@ function eligibleStreakPlayers(players, elo) {
 	function register(registry, { config, state, elo, privacy, matchesStore, settings, streaks }) {
 		if (!state.lockedServers) state.lockedServers = new Set();
 		if (!state.lockedPlayers) state.lockedPlayers = new Map();
-	 registry.set("fv", async (message) => {
-	  console.log("[!fv] triggered by", message.author.tag);
+
+	async function runFullVoteFlow(
+		message,
+		registry,
+		deps,
+		{ auto = false } = {}
+		) {
+	  console.log(`[!fv] triggered by ${message.author.tag}${auto ? " [auto]" : ""}`);
 
 	  const ADMIN_ROLE = config.roles.admin || "";
 	  const isAdmin = ADMIN_ROLE && message.member?.roles?.cache?.has(ADMIN_ROLE);
 	  console.log("[!fv] admin check =", isAdmin, "role:", ADMIN_ROLE);
 
 	  // 🚫 Block non-admins before touching state.voteLock
-	  if (!isAdmin) {
+	  if (!auto && !isAdmin) {
 		return message.reply("⚠️ You don’t have permission to use `!fv`.");
 	  }
 
@@ -328,7 +334,26 @@ function eligibleStreakPlayers(players, elo) {
       console.log("[!fv] voteLock released");
     }
 
-  });
+  }
+
+const fullVoteRunner = (message) =>
+  runFullVoteFlow(
+    message,
+    registry,
+    { config, state, elo, privacy, matchesStore, settings, streaks }
+  );
+
+registry.set("fv", fullVoteRunner);
+
+// lets queue.js trigger the same flow when queue hits 8/8
+global.runFullVoteFlow = (message) =>
+  runFullVoteFlow(
+    message,
+    registry,
+    { config, state, elo, privacy, matchesStore, settings, streaks },
+    { auto: true }
+  );
+console.log("[autoFullVote] full vote runner registered globally");
 
 registry.set("cancelvote", async (message) => {
   const ADMIN_ROLE = config.roles.admin || "";

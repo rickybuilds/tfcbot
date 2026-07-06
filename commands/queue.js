@@ -92,7 +92,7 @@ function register(reg, { client, config, state, elo, banStore, settings, privacy
   const add = async (message, isAdl = false) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
-	// 🚫 Prevent players currently in an active match from joining another queue
+	// Prevent players currently in an active match from joining another queue
 	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
   const matchId = state.lockedPlayers.get(String(id));
   const now = Date.now();
@@ -117,7 +117,7 @@ function register(reg, { client, config, state, elo, banStore, settings, privacy
 	  return;
 	}
 
-// 🚫 If player is already ghost-banned, notify them again and block add
+// If player is already ghost-banned, notify them again and block add
 if (state.ghostBans && state.ghostBans[id]) {
   const gb = state.ghostBans[id];
   console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
@@ -133,7 +133,7 @@ if (state.ghostBans && state.ghostBans[id]) {
   return; // stop them from being added
 }
 
-// 🚫 Enforce new bans by marking ghost
+// If player is banned, notify them and block add
 const ban = banStore?.getBan(id);
 if (ban) {
   state.ghostBans = state.ghostBans || {};
@@ -158,31 +158,54 @@ if (ban) {
       entry.lastSeenAt = Date.now();
     }
 
-    // 👇 NEW: mark ADL voters + register vote
+    // mark ADL voters + register vote
     if (isAdl) {
       entry.adlVote = true;
       try { adl.vote(String(id)); } catch {}
     }
 
-    // 👇 NEW: force Elo lookup so correct rank is shown
+    // force Elo lookup so correct rank is shown
     try { elo.getRating(id, name, { createIfMissing: true }); } catch {}
 
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}
+
+    console.log(
+      `[autoFullVote check] count=${state.queue.length}/${state.MAX_PLAYERS || 8} vote=${!!state.vote} voting=${!!state.isVotingInProgress} runner=${typeof global.runFullVoteFlow}`
+    );
+
+    if (
+    state.queue.length === (state.MAX_PLAYERS || 8) &&
+      !state.vote &&
+      !state.isVotingInProgress &&
+      typeof global.runFullVoteFlow === "function"
+    ) {
+      await message.channel.send("Queue is full! Starting vote in **2 seconds**...");
+
+      setTimeout(() => {
+        if (
+          state.queue.length === (state.MAX_PLAYERS || 8) &&
+          !state.vote &&
+          !state.isVotingInProgress
+        ) {
+          global.runFullVoteFlow(message).catch(console.error);
+        }
+      }, 2000);
+    }
   };
 
     const remove = async (message) => {
   if (String(message.channel?.id) !== String(config.channels.pickup)) return;
   const id = message.author.id;
 
-  // 🧩 NEW: block removes from people not actually in queue
+  // block removes from people not actually in queue
   if (!state.queue.some(p => String(p.id) === String(id))) {
     console.log(`[queue] Ignored remove from non-queued user ${id}`);
     return;
   }
 
-  // ✅ Handle active vote removal cleanly
+  // Handle active vote removal cleanly
   if (state.isVotingInProgress && state.vote) {
     try {
       await state.vote.cancelVote(
