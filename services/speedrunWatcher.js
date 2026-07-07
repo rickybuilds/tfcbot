@@ -166,6 +166,12 @@ function buildWorldRecordEmbed(wr, previous = null) {
   const playerName = String(wr.player_name || "Unknown");
   const mapName = String(wr.map || "Unknown");
 
+  const replayUrl =
+    `${baseUrl}/speedrun-replay.html` +
+    `?map=${encodeURIComponent(wr.map)}` +
+    `&classId=${encodeURIComponent(wr.class_id)}` +
+    `&steamid=${encodeURIComponent(wr.steamid)}`;
+
   const diffMs = previous
     ? Number(previous.best_time_ms) - Number(wr.best_time_ms)
     : 0;
@@ -180,8 +186,8 @@ function buildWorldRecordEmbed(wr, previous = null) {
     .setURL(mapUrl)
     .setColor(0xffc107)
     .setDescription(
-      `**[${mapName}](${mapUrl})** • **${cls}**\n` +
-      `**[${playerName}](${playerUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**${comparison}`
+        `**[${mapName}](${mapUrl})** • **${cls}** • **[View Replay](${replayUrl})**\n` +
+        `**[${playerName}](${playerUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**${comparison}`
     )
     .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
     .setTimestamp(new Date());
