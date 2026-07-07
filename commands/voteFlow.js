@@ -667,23 +667,34 @@ async function finalizeMatch(
 	});
   }
 
-	// 🔒 Lock server
-	if (state.lockedServers) {
-	  state.lockedServers.add(serverObj.ip);
-	  console.log(`[serverLock] Locked server ${serverObj.ip} for match ${matchId}`);
-	}
-	await channel.send(`🔒 **${serverObj.name}** is now locked until the match completes.`);
+  // 🔒 Lock server
+  if (state.lockedServers) {
+    state.lockedServers.add(serverObj.ip);
+    console.log(`[serverLock] Locked server ${serverObj.ip} for match ${matchId}`);
+  }
+  await channel.send(`🔒 **${serverObj.name}** is now locked until the match completes.`);
 
-	// 🔒 Lock all players in this match (store matchId for traceability)
-	if (state.lockedPlayers) {
-	  const allPlayers = [...bal.blue, ...bal.red];
-	  for (const p of allPlayers) {
-		state.lockedPlayers.set(String(p.id), matchId);
-	  }
-	  console.log(`[playerLock] Locked ${allPlayers.length} players for match ${matchId}`);
-	}
+  // 🔒 Lock all players in this match
+  if (state.lockedPlayers) {
+    const allPlayers = [...bal.blue, ...bal.red];
+    for (const p of allPlayers) {
+      state.lockedPlayers.set(String(p.id), matchId);
+    }
+    console.log(`[playerLock] Locked ${allPlayers.length} players for match ${matchId}`);
+  }
 
-  // 🟢 NEW: Arm autoRecap
+  // 🔄 Arm one-time in-game !rs restart for this match
+  state.restartRequest = {
+    matchId,
+    serverIp: serverObj.ip,
+    map: mapObj?.name || null,
+    used: false,
+    armedAt: Date.now(),
+  };
+
+  console.log(
+    `[!rs] armed match=${matchId} server=${serverObj.ip} map=${mapObj?.name || "unknown"}`
+  );
   try {
 	autoArmFromMatchReady({
   matchId,

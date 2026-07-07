@@ -106,6 +106,10 @@ async function runRconCommand(serverKey, command, retries = 2) {
       if (!authSent) {
         authSent = true;
         conn.send(command);
+
+        if (/^(changelevel|map|amx_map)\s+/i.test(command)) {
+          packetTimer = setTimeout(finish, 750);
+        }
       }
     });
 

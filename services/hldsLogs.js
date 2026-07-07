@@ -134,7 +134,21 @@ function parseLine(raw) {
 /* -------------------------------------------------------------------------- */
 /* until here*/
 /* -------------------------------------------------------------------------- */
-  return null;
+  const mSay = s.match(/"([^"]+)<(\d+)><([^>]+)><([^>]*)>" say "([^"]+)"/i);
+
+  if (mSay) {
+    return {
+      type: "say",
+      player: mSay[1],
+      userid: mSay[2],
+      steamid: mSay[3],
+      team: mSay[4],
+      text: mSay[5],
+      raw: s
+    };
+  }  
+
+return null;
 }
 /* -------------------------------------------------------------------------- */
 /* UDP Listener + Score Pairing */
@@ -181,6 +195,28 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
       onEvent?.(evt);
       return;
     }
+
+    if (evt.type === "say") {
+      const text = String(evt.text || "").trim().toLowerCase();
+
+      if (text === "!rs" || text === "/rs") {
+        console.log(
+          `[!rs] request player=${evt.player} steamid=${evt.steamid} team=${evt.team} from=${from}`
+        );
+
+        onEvent?.({
+          type: "restart_request",
+          from,
+          steamid: evt.steamid,
+          player: evt.player,
+          team: evt.team,
+          ts: evt.ts,
+          raw: evt.raw
+        });
+
+        return;
+      }
+    }
 	
     // ---------- FINAL SCORE → STOP RECORDING ----------
     if (evt.type === "score_pair") {
@@ -203,7 +239,7 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
       return;
     }
     // ---------- SCORE PAIRING LOGIC (unchanged) ----------
-let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
+  let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
     if (evt.type === "map") {
       last = { map: evt.name, blue: null, red: null, ts: evt.ts };
       lastScoresBySource.set(from, last);

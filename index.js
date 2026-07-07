@@ -23,6 +23,8 @@ const { MatchStore }   = require("./lib/matchStore");
 const { refreshBotName } = require("./lib/botName");
 const { scheduleBackups } = require("./lib/backup");
 const { startSpeedrunPlayerLinkSync } = require("./services/speedrunPlayerLinkSync");
+const { determineServerKey } = require("./services/autoRecap");
+const { runRconCommand } = require("./services/rconClient");
 
 // Jail system
 const { JailStore } = require("./lib/jailStore");
@@ -42,6 +44,7 @@ const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
 const mysqlPool = require("./lib/mysql");
+const { SteamLinks } = require("./lib/steamLinks");
 
 // QoL / persistence / decay
 const { QueueStore } = require("./lib/queueStore");
@@ -68,6 +71,7 @@ const privacy      = new PrivacyDB("elo.db");
 const matchesStore = new MatchStore("/root/tfcbot/elo.db");
 const queueStore   = new QueueStore("queue.json");
 const banStore     = new BanStore("bot.db");
+const steamLinks = new SteamLinks();
 
 // Jail system
 const jailStore    = new JailStore();
@@ -423,10 +427,83 @@ startSpeedrunPlayerLinkSync({
       relayToChannelId: null,
       pairScores: true,
       pairWindowMs: 8000,
-    }, (evt) => {
-      autoRecap.onEvent(evt);
-      global.lastHldsPacketAt = Date.now();
-    });
+      }, async (evt) => {
+    // If the armed match map changed manually before !rs was used,
+    // burn the one-time restart so it cannot be used mid-round later.
+    if (evt.type === "map" && state.restartRequest && !state.restartRequest.used) {
+      const rs = state.restartRequest;
+
+      const armedIp = String(rs.serverIp || "").split(":")[0];
+      const fromIp = String(evt.from || "").split(":")[0];
+      const newMap = String(evt.name || "").toLowerCase();
+      const armedMap = String(rs.map || "").toLowerCase();
+
+      if (armedIp === fromIp && newMap && armedMap && newMap !== armedMap) {
+        rs.used = true;
+        rs.disarmedReason = "manual_map_change";
+
+        console.log(
+          `[!rs] disarmed reason=manual_map_change armed=${armedMap} current=${newMap} from=${evt.from}`
+        );
+      }
+    }
+
+    if (evt.type === "restart_request") {
+      const rs = state.restartRequest;
+
+      if (!rs) {
+        console.log("[!rs] denied reason=no_restart_armed", evt);
+        return;
+      }
+
+      if (rs.used) {
+        console.log(`[!rs] denied reason=already_used detail=${rs.disarmedReason || "used"}`, evt);
+        return;
+      }
+
+      const armedIp = String(rs.serverIp || "").split(":")[0];
+      const evtIp = String(evt.from || "").split(":")[0];
+
+      if (armedIp !== evtIp) {
+        console.log(`[!rs] denied reason=wrong_server armed=${rs.serverIp} from=${evt.from}`);
+        return;
+      }
+
+      if (!rs.map || !/^[a-zA-Z0-9_-]+$/.test(rs.map)) {
+        console.log(`[!rs] denied reason=invalid_map map=${rs.map}`);
+        return;
+      }
+
+      const links = await steamLinks.getDiscordBySteam(evt.steamid);
+      const link = links?.[0];
+
+      if (!link?.discord_id) {
+        console.log(`[!rs] denied reason=steam_not_linked steamid=${evt.steamid}`);
+        return;
+      }
+
+      const discordId = String(link.discord_id);
+      const serverKey = determineServerKey(rs.serverIp);
+
+      console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
+      console.log(`🗺️ Restarting to **${rs.map}** | Triggered by <@${discordId}> (${evt.steamid})`);
+
+      rs.used = true;
+
+      try {
+        await runRconCommand(serverKey, `amx_map ${rs.map}`);
+        console.log(`[!rs] amx_map ${rs.map} sent OK to ${serverKey}`);
+      } catch (err) {
+        rs.used = false;
+        console.error(`[!rs] failed to restart ${rs.map} on ${serverKey}:`, err);
+      }
+
+      return;
+    }
+
+    autoRecap.onEvent(evt);
+    global.lastHldsPacketAt = Date.now();
+  });
   } catch (e) { console.error("[HLDS-LOG] failed:", e); }
 
   // TODO: keep your ban restore + backups + decay logic here
