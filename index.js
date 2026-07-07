@@ -106,7 +106,6 @@ console.log("[INIT] Lock sets initialized:", {
   servers: state.lockedServers.size,
   players: state.lockedPlayers.size
 });
-console.log("[DEBUG] STREAK vars:", process.env.STREAK_TRIGGER_WINS, process.env.STREAK_MIN_RANK);
 
 // ============================================================================
 // Command registry and shared dependencies
@@ -486,7 +485,17 @@ startSpeedrunPlayerLinkSync({
       const serverKey = determineServerKey(rs.serverIp);
 
       console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
-      console.log(`🗺️ Restarting to **${rs.map}** | Triggered by <@${discordId}> (${evt.steamid})`);
+      const restartMsg =
+        `🗺️ Restarting to **${rs.map}** | Triggered by <@${discordId}> (${evt.steamid})`;
+
+      console.log(restartMsg);
+
+      try {
+        const ch = await client.channels.fetch(config.channels.recap);
+        await ch?.send(restartMsg);
+      } catch (err) {
+        console.warn("[!rs] failed to post restart message:", err);
+      }
 
       rs.used = true;
 
