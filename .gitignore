@@ -102,3 +102,22 @@ hampalyzerBulkImport.js
 importU7TPLEPlayers.js
 reimportHampalyzerStats.js
 reimportOneHampalyzerMatch.js
+
+# Private Speedrun Viewer
+/assets/maps/
+/scripts/
+
+speedrun-replay.html
+speedrun-replay.css
+speedrun-replay.js
+
+EOFcat >> .gitignore << 'EOF'
+
+# Private Speedrun Viewer
+/assets/maps/
+/scripts/
+
+speedrun-replay.html
+speedrun-replay.css
+speedrun-replay.js
+

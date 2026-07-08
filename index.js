@@ -128,6 +128,35 @@ const deps = {
   jailStore
 };
 
+const pickupMute = require("./commands/mute");
+registry.set("mute", (m, a) => pickupMute.execute(m, a, deps));
+registry.set("pmute", (m, a) => pickupMute.execute(m, a, deps));
+registry.set("pickupmute", (m, a) => pickupMute.execute(m, a, deps));
+registry.set("unmute", (m, a) => pickupMute.execute(m, a, deps));
+registry.set("punmute", (m, a) => pickupMute.execute(m, a, deps));
+registry.set("mutelist", (m, a) => pickupMute.execute(m, a, deps));
+
+state.pickupMutedUsers = new Set();
+
+function loadPickupMutedUsers() {
+  matchesStore.db.all(
+    `SELECT discord_id FROM pickup_mutes`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error("[pickup_mute] cache load failed:", err);
+        return;
+      }
+
+      state.pickupMutedUsers = new Set(rows.map(r => String(r.discord_id)));
+      console.log(`[pickup_mute] loaded ${state.pickupMutedUsers.size} muted users`);
+    }
+  );
+}
+
+loadPickupMutedUsers();
+deps.loadPickupMutedUsers = loadPickupMutedUsers;
+
 // ============================================================================
 // Command registration
 // ============================================================================
@@ -541,6 +570,17 @@ client.on("messageCreate", (message) => {
   }
 });
 
+const ALLOWED_PICKUP_MUTED_MESSAGES = new Set([
+  "!add",
+  "!addadl",
+  "++",
+  "**",
+]);
+
+function isPickupMuted(discordId) {
+  return state.pickupMutedUsers?.has(String(discordId));
+}
+
 // ============================================================================
 // Message command router
 // ============================================================================
@@ -569,8 +609,19 @@ client.on("messageCreate", async (message) => {
     const raw = (message.content || "").trim();
     if (!raw) return;
 
-    // ✅ handle bare specials like ++, --, ++adl, --adl (case-insensitive)
     const rawLower = raw.toLowerCase();
+    if (message.guild && isPickupMuted(message.author.id)) {
+      if (!ALLOWED_PICKUP_MUTED_MESSAGES.has(rawLower)) {
+        try {
+          await message.delete();
+        } catch (err) {
+          console.warn("[pickup_mute] delete failed:", err.message);
+        }
+        return;
+      }
+    }
+
+    // ✅ handle bare specials like ++, --, ++adl, --adl (case-insensitive)
     const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**"]);
 
     if (BARE_SPECIAL.has(rawLower)) {
