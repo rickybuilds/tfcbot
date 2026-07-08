@@ -139,19 +139,17 @@ registry.set("mutelist", (m, a) => pickupMute.execute(m, a, deps));
 state.pickupMutedUsers = new Set();
 
 function loadPickupMutedUsers() {
-  matchesStore.db.all(
-    `SELECT discord_id FROM pickup_mutes`,
-    [],
-    (err, rows) => {
-      if (err) {
-        console.error("[pickup_mute] cache load failed:", err);
-        return;
-      }
+  try {
+    const rows = matchesStore.db
+      .prepare(`SELECT discord_id FROM pickup_mutes`)
+      .all();
 
-      state.pickupMutedUsers = new Set(rows.map(r => String(r.discord_id)));
-      console.log(`[pickup_mute] loaded ${state.pickupMutedUsers.size} muted users`);
-    }
-  );
+    state.pickupMutedUsers = new Set(rows.map(r => String(r.discord_id)));
+    console.log(`[pickup_mute] loaded ${state.pickupMutedUsers.size} muted users`);
+  } catch (err) {
+    console.error("[pickup_mute] cache load failed:", err);
+    state.pickupMutedUsers = new Set();
+  }
 }
 
 loadPickupMutedUsers();

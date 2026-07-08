@@ -1,8 +1,9 @@
-// commands/mute.js
+  // commands/mute.js
 
 const OWNER_IDS = new Set([
   "255834576742645761", // Ricky
   "468578577537826831", // Rufio
+  "562854514860752897", // Slick
 ]);
 
 async function sendAuditLog(message, context, content) {
@@ -33,7 +34,7 @@ module.exports = {
   async execute(message, args, context = {}) {
     const db = context.matchesStore?.db;
 
-    if (!db) {
+    if (!db?.prepare) {
       return message.reply("❌ DB not available for mute command.");
     }
 
@@ -45,31 +46,27 @@ module.exports = {
     const cmd = content.split(/\s+/)[0].toLowerCase();
 
     if (cmd === "!mutelist") {
-      db.all(
-        `SELECT discord_id, muted_by, reason, created_at
-         FROM pickup_mutes
-         ORDER BY created_at DESC`,
-        [],
-        (err, rows) => {
-          if (err) {
-            console.error("[pickup_mute] mutelist failed:", err);
-            return message.reply("❌ Failed to read mute list.");
-          }
+      try {
+        const rows = db.prepare(`
+          SELECT discord_id, muted_by, reason, created_at
+          FROM pickup_mutes
+          ORDER BY created_at DESC
+        `).all();
 
-          if (!rows.length) {
-            return message.reply("✅ Nobody is pickup-muted.");
-          }
-
-          const lines = rows.map(row => {
-            const reason = row.reason ? ` — ${row.reason}` : "";
-            return `<@${row.discord_id}> muted by <@${row.muted_by}>${reason}`;
-          });
-
-          return message.reply(`🔇 **Pickup-muted users:**\n${lines.join("\n")}`);
+        if (!rows.length) {
+          return message.reply("✅ Nobody is pickup-muted.");
         }
-      );
 
-      return;
+        const lines = rows.map(row => {
+          const reason = row.reason ? ` — ${row.reason}` : "";
+          return `<@${row.discord_id}> muted by <@${row.muted_by}>${reason}`;
+        });
+
+        return message.reply(`🔇 **Pickup-muted users:**\n${lines.join("\n")}`);
+      } catch (err) {
+        console.error("[pickup_mute] mutelist failed:", err);
+        return message.reply("❌ Failed to read mute list.");
+      }
     }
 
     const user = message.mentions.users.first();
@@ -83,65 +80,52 @@ module.exports = {
     }
 
     if (cmd === "!unmute" || cmd === "!punmute") {
-      db.run(
-        `DELETE FROM pickup_mutes WHERE discord_id = ?`,
-        [user.id],
-        async function (err) {
-          if (err) {
-            console.error("[pickup_mute] unmute failed:", err);
-            return message.reply("❌ Failed to unmute user.");
-          }
+      try {
+        db.prepare(`DELETE FROM pickup_mutes WHERE discord_id = ?`).run(user.id);
 
-          context.state.pickupMutedUsers?.delete(String(user.id));
+        context.state.pickupMutedUsers?.delete(String(user.id));
 
-          await sendAuditLog(
-            message,
-            context,
-            `🔊 **Pickup Unmute**\n` +
-              `**User:** ${user} (${user.tag})\n` +
-              `**By:** ${message.author} (${message.author.tag})`
-          );
+	await sendAuditLog(
+	  message,
+	  context,
+	  `🔊 **Pickup Unmute** | User: ${user} | By: ${message.author}`
+	);
 
-          return message.reply(`🔊 <@${user.id}> is no longer pickup-muted.`);
-        }
-      );
-
-      return;
+        return message.reply(`🔊 <@${user.id}> is no longer pickup-muted.`);
+      } catch (err) {
+        console.error("[pickup_mute] unmute failed:", err);
+        return message.reply("❌ Failed to unmute user.");
+      }
     }
 
     const reason = args.slice(1).join(" ").trim();
 
-    db.run(
-      `INSERT OR REPLACE INTO pickup_mutes
-       (discord_id, muted_by, reason, created_at)
-       VALUES (?, ?, ?, ?)`,
-      [
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO pickup_mutes
+        (discord_id, muted_by, reason, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(
         user.id,
         message.author.id,
         reason || null,
-        Math.floor(Date.now() / 1000),
-      ],
-      async err => {
-        if (err) {
-          console.error("[pickup_mute] mute failed:", err);
-          return message.reply("❌ Failed to mute user.");
-        }
+        Math.floor(Date.now() / 1000)
+      );
 
-        context.state.pickupMutedUsers?.add(String(user.id));
+      context.state.pickupMutedUsers?.add(String(user.id));
 
-        await sendAuditLog(
-          message,
-          context,
-          `🔇 **Pickup Mute**\n` +
-            `**User:** ${user} (${user.tag})\n` +
-            `**By:** ${message.author} (${message.author.tag})\n` +
-            `**Reason:** ${reason || "None provided"}`
-        );
+      await sendAuditLog(
+		  message,
+		  context,
+		  `🔇 **Pickup Mute** | User: ${user} | By: ${message.author} | Reason: ${reason || "None provided"}`
+		);
 
-        return message.reply(
-          `🔇 <@${user.id}> can now only use \`!add\`, \`!addadl\`, \`++\`, or \`**\`.`
-        );
-      }
-    );
+      return message.reply(
+        `🔇 <@${user.id}> can now only use \`!add\`, \`!addadl\`, \`++\`, or \`**\`.`
+      );
+    } catch (err) {
+      console.error("[pickup_mute] mute failed:", err);
+      return message.reply("❌ Failed to mute user.");
+    }
   },
 };
