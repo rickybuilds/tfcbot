@@ -19,7 +19,7 @@ module.exports = {
     request: process.env.TFC_REQUEST_CHANNEL_ID,
     rules: process.env.RULES_CHANNEL_ID,
     settings: process.env.SETTINGS_CHANNEL_ID,
-    wants: process.env.WANTS_CHANNEL_ID, // 👈 NEW
+    wants: process.env.WANTS_CHANNEL_ID,
   },
 
   // Roles

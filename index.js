@@ -509,6 +509,15 @@ startSpeedrunPlayerLinkSync({
       }
 
       const discordId = String(link.discord_id);
+
+      if (!state.lockedPlayers?.has(discordId)) {
+        console.log(
+          `[!rs] denied reason=not_in_current_pickup player=${evt.player || "unknown"} ` +
+          `steamid=${evt.steamid} discord_id=${discordId}`
+        );
+        return;
+      }
+
       const serverKey = determineServerKey(rs.serverIp);
 
       console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
