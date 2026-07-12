@@ -58,6 +58,28 @@ async function sendRecapWithDemos(client, channelId, options = {}) {
   const displayId = matchId || id || "N/A";
 console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
 
+  if (matchInfo.matchType === "1v1") {
+    const p1 = matchInfo.player1 || {};
+    const p2 = matchInfo.player2 || {};
+    const winnerName = String(matchInfo.winnerSteamId || "").toUpperCase() === String(p1.steamId || "").toUpperCase()
+      ? (p1.displayName || `<@${p1.discordId}>`) : (p2.displayName || `<@${p2.discordId}>`);
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`1v1 Match Complete — ${map || "Unknown Map"} — ${String(server || "unknown").toUpperCase()} — ID: ${displayId}`)
+      .addFields(
+        { name: "Winner", value: String(winnerName), inline: true },
+        { name: "Final Score", value: `**${p1.score ?? "?"}–${p2.score ?? "?"}**`, inline: true },
+        { name: "Match", value: `Duration: **${matchInfo.duration ?? "?"}s**\nKill goal: **${matchInfo.killGoal ?? "?"}**\nRounds: **${matchInfo.roundsWon ?? "?"}/${matchInfo.roundsRequired ?? "?"}**`, inline: false },
+        { name: "Links", value: `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "TFCStats unavailable"} • ${hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "Hampalyzer unavailable"}`, inline: false }
+      ).setTimestamp();
+    await ch.send({ content: mentionRoles || null, embeds: [embed] });
+    if (hampalyzer?.url && displayId !== "N/A") importHampalyzerStats(displayId, hampalyzer.url);
+    if (options.zipPath && fs.existsSync(options.zipPath)) {
+      await ch.send({ files: [new AttachmentBuilder(options.zipPath)] });
+    }
+    return;
+  }
+
   // 🧱 Build a consistent, informative title
   const embedTitleParts = ["Match Reported"];
   if (map) embedTitleParts.push(`— ${map}`);

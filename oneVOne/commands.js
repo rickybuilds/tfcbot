@@ -49,20 +49,33 @@ function registerCommands(registry, { config, manager }) {
       .setDescription(`<@${challenge.challengerId}> and <@${challenge.challengedId}>: choose a server. First vote wins during the dry-run milestone.`);
     const voteMessage = await message.channel.send({ embeds: [embed], components: [row] });
     const collector = voteMessage.createMessageComponentCollector({ time: 30_000 });
+    const votes = new Map();
     collector.on("collect", async interaction => {
       if (![challenge.challengerId, challenge.challengedId].includes(String(interaction.user.id))) {
         return interaction.reply({ content: "Only the two duel players can vote.", ephemeral: true });
       }
       const index = Number(interaction.customId.split("_").pop());
       const server = options[index];
-      const activated = manager.activate(challenge, server);
-      if (!activated.ok) return interaction.update({ content: "That server became unavailable. Start the challenge again.", embeds: [], components: [] });
+      votes.set(String(interaction.user.id), index);
+      await interaction.reply({ content: `Vote recorded for **${server.name}**.`, ephemeral: true });
+      if (votes.size < 2) return;
+      const counts = new Map();
+      for (const selected of votes.values()) counts.set(selected, (counts.get(selected) || 0) + 1);
+      const max = Math.max(...counts.values());
+      const tied = [...counts.entries()].filter(([, count]) => count === max).map(([selected]) => selected);
+      const winningIndex = tied[Math.floor(Math.random() * tied.length)];
+      const winner = options[winningIndex];
+      const activated = manager.activate(challenge, winner);
+      if (!activated.ok) {
+        collector.stop("unavailable");
+        return voteMessage.edit({ content: `The reservation failed (${activated.reason || "unavailable"}). Start the challenge again.`, embeds: [], components: [] });
+      }
       collector.stop("selected");
       const safety = config.dryRun ? " **DRY RUN:** no server commands were sent." : "";
-      return interaction.update({ content: `✅ **${server.name}** selected and reserved for the 1v1.${safety}`, embeds: [], components: [] });
+      return voteMessage.edit({ content: `✅ **${winner.name}** won the vote.${safety}`, embeds: [], components: [] });
     });
     collector.on("end", async (_, reason) => {
-      if (reason !== "selected") {
+      if (reason !== "selected" && reason !== "unavailable") {
         manager.cancel(challenge.id, "vote_timeout");
         await voteMessage.edit({ content: "⌛ 1v1 server vote expired.", embeds: [], components: [] }).catch(() => {});
       }

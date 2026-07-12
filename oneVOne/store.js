@@ -29,6 +29,17 @@ class OneVOneStore {
       addColumn("expected_players", "ALTER TABLE matches ADD COLUMN expected_players INTEGER NOT NULL DEFAULT 8");
       addColumn("scoring_mode", "ALTER TABLE matches ADD COLUMN scoring_mode TEXT NOT NULL DEFAULT 'rounds'");
       this.db.exec(`
+        CREATE TABLE IF NOT EXISTS one_v_one_challenges (
+          challenge_id TEXT PRIMARY KEY,
+          challenger_discord_id TEXT NOT NULL,
+          challenged_discord_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          accepted_at INTEGER,
+          cancelled_at INTEGER,
+          cancellation_reason TEXT
+        );
         CREATE TABLE IF NOT EXISTS one_v_one_matches (
           match_id TEXT PRIMARY KEY,
           challenger_discord_id TEXT NOT NULL,
@@ -62,6 +73,55 @@ class OneVOneStore {
     });
     tx();
     return this.schemaStatus();
+  }
+
+  saveChallenge(challenge) {
+    this.db.prepare(`INSERT INTO one_v_one_challenges
+      (challenge_id, challenger_discord_id, challenged_discord_id, status, created_at, expires_at)
+      VALUES (@id,@challengerId,@challengedId,@status,@createdAt,@expiresAt)
+      ON CONFLICT(challenge_id) DO UPDATE SET status=excluded.status, expires_at=excluded.expires_at`
+    ).run(challenge);
+  }
+
+  finishChallenge(id, status, reason = null) {
+    if (status === "accepted") {
+      this.db.prepare(`UPDATE one_v_one_challenges SET status=?, accepted_at=? WHERE challenge_id=?`)
+        .run(status, Date.now(), String(id));
+    } else {
+      this.db.prepare(`UPDATE one_v_one_challenges SET status=?, cancelled_at=?, cancellation_reason=? WHERE challenge_id=?`)
+        .run(status, Date.now(), reason, String(id));
+    }
+  }
+
+  pendingChallenges(now = Date.now()) {
+    return this.db.prepare(`SELECT challenge_id AS id, challenger_discord_id AS challengerId,
+      challenged_discord_id AS challengedId, status, created_at AS createdAt, expires_at AS expiresAt
+      FROM one_v_one_challenges WHERE status='pending' AND expires_at>?`).all(now);
+  }
+
+  activeDuels() {
+    return this.db.prepare(`SELECT * FROM one_v_one_matches
+      WHERE status NOT IN ('completed','cancelled') ORDER BY reserved_at`).all();
+  }
+
+  createReservedDuel(challenge, server, config) {
+    const now = Math.floor(Date.now() / 1000);
+    this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO matches
+        (match_id, created_at, map_name, server_name, blue_ids, red_ids, winner, processed_at, status,
+         match_type, player_format, expected_players, scoring_mode)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(challenge.id, now, config.map, server.name, JSON.stringify([challenge.challengerId]),
+          JSON.stringify([challenge.challengedId]), null, null, "reserved", "1v1", "1v1_dm", 2, "kill_goal");
+      this.db.prepare(`INSERT INTO one_v_one_matches
+        (match_id, challenger_discord_id, challenged_discord_id, player1_steam_id, player2_steam_id,
+         server_key, server_ip, kill_goal, rounds_required, scoring_mode, status, challenge_created_at,
+         accepted_at, reserved_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(challenge.id, challenge.challengerId, challenge.challengedId, challenge.player1SteamId,
+          challenge.player2SteamId, server.key || null, server.ip, config.killGoal, config.roundsToWin,
+          "kill_goal", "reserved", challenge.createdAt, Date.now(), Date.now());
+    })();
   }
 }
 

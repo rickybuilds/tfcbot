@@ -338,6 +338,8 @@ const client = new Client({
   ],
   partials: [Partials.Channel],
 });
+
+oneVOne.attachCompletion({ client, logsChannelId: config.channels.logs });
 registry.client = client;
 client.persistQueueSoon = persistQueueSoon;
 

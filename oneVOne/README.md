@@ -37,12 +37,14 @@ Implemented:
 - idempotent schema migration;
 - structured `1V1_MATCH_END` parsing;
 - Discord `!1v1`, `!accept`, and `!decline` commands behind the feature flag;
-- an isolated two-player server vote in dry-run mode;
+- an isolated two-player server vote with both votes counted and randomized tie resolution;
+- pending-challenge persistence and restart restoration when the migration is present;
+- reservation and SteamID verification for machine-readable match-end events;
+- reuse of log transfer, Hampalyzer/TFCStats links, one Discord result recap, and silent stats import;
 - pickup server filtering through the shared reservation service;
 - unit tests for those foundations.
 
 Not enabled yet:
 
 - RCON commands;
-- match completion/upload orchestration;
 - AMXX or server configuration changes.

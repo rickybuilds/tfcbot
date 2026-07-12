@@ -3,11 +3,12 @@
 const { randomUUID } = require("crypto");
 
 class DuelManager {
-  constructor({ config, state, steamLinks, reservations }) {
+  constructor({ config, state, steamLinks, reservations, store = null }) {
     this.config = config;
     this.state = state;
     this.steamLinks = steamLinks;
     this.reservations = reservations;
+    this.store = store;
     this.pending = new Map();
     this.pendingByPlayer = new Map();
     this.activeByPlayer = new Map();
@@ -44,6 +45,7 @@ class DuelManager {
     this.pendingByPlayer.set(p2, id);
     challenge.timer = setTimeout(() => this.cancel(id, "expired"), this.config.challengeTtlMs);
     challenge.timer.unref?.();
+    this.store?.saveChallenge(challenge);
     return { ok: true, challenge };
   }
 
@@ -60,6 +62,7 @@ class DuelManager {
     this.pending.delete(challenge.id);
     this.pendingByPlayer.delete(challenge.challengerId);
     this.pendingByPlayer.delete(challenge.challengedId);
+    this.store?.finishChallenge(challenge.id, reason, reason);
     return challenge;
   }
 
@@ -92,6 +95,7 @@ class DuelManager {
     challenge.status = "accepted";
     challenge.player1SteamId = p1.steamId;
     challenge.player2SteamId = p2.steamId;
+    this.store?.finishChallenge(challenge.id, "accepted");
     return { ok: true, challenge, availableServers: available };
   }
 
@@ -115,12 +119,54 @@ class DuelManager {
       status: "reserved",
     });
     if (!result.ok) return result;
+    try {
+      this.store?.createReservedDuel(challenge, server, this.config);
+    } catch (error) {
+      this.reservations.release(server.ip, challenge.id);
+      return { ok: false, reason: "persistence_failed", error };
+    }
     this.pending.delete(challenge.id);
     this.pendingByPlayer.delete(challenge.challengerId);
     this.pendingByPlayer.delete(challenge.challengedId);
     this.activeByPlayer.set(challenge.challengerId, challenge.id);
     this.activeByPlayer.set(challenge.challengedId, challenge.id);
     return result;
+  }
+
+  restorePending() {
+    if (!this.store) return 0;
+    let restored = 0;
+    for (const challenge of this.store.pendingChallenges()) {
+      if (this.pendingByPlayer.has(challenge.challengerId) || this.pendingByPlayer.has(challenge.challengedId)) continue;
+      const remaining = Math.max(1, challenge.expiresAt - Date.now());
+      challenge.timer = setTimeout(() => this.cancel(challenge.id, "expired"), remaining);
+      challenge.timer.unref?.();
+      this.pending.set(challenge.id, challenge);
+      this.pendingByPlayer.set(challenge.challengerId, challenge.id);
+      this.pendingByPlayer.set(challenge.challengedId, challenge.id);
+      restored++;
+    }
+    return restored;
+  }
+
+  findReservationForEvent(evt) {
+    const from = String(evt.from || "").split(":")[0];
+    for (const [serverIp, reservation] of this.state.serverReservations || []) {
+      if (String(serverIp).split(":")[0] !== from || reservation.mode !== "1v1") continue;
+      const expected = new Set((reservation.playerSteamIds || []).map(value => String(value).toUpperCase()));
+      if (expected.size !== 2 || !expected.has(String(evt.winner).toUpperCase()) || !expected.has(String(evt.loser).toUpperCase())) {
+        return { ok: false, reason: "steam_mismatch", reservation };
+      }
+      return { ok: true, serverIp, reservation };
+    }
+    return { ok: false, reason: "reservation_not_found" };
+  }
+
+  complete(serverIp, reservation) {
+    for (const playerId of reservation.playerDiscordIds || []) {
+      if (this.activeByPlayer.get(String(playerId)) === reservation.id) this.activeByPlayer.delete(String(playerId));
+    }
+    return this.reservations.release(serverIp, reservation.id);
   }
 }
 
