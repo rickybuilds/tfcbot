@@ -29,7 +29,8 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.js",
+    "1v1:migrate:check": "node scripts/migrate-one-v-one.js"
   },
   "keywords": [],
   "author": "",

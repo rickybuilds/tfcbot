@@ -3,6 +3,7 @@
 const dgram = require("dgram");
 const servers = require("../config/rcon");
 const net = require("net");
+const { parseOneVOneLogLine } = require("../oneVOne/logParser");
 let currentLogFile = null;
 /* -------------------------------------------------------------------------- */
 /* Match ID handoff */
@@ -85,6 +86,8 @@ function stopVoiceRecording() {
 function parseLine(raw) {
   let s = String(raw).trim();
   s = s.replace(/^[^\x20-\x7E]*/g, "");
+  const oneVOneEvent = parseOneVOneLogLine(s);
+  if (oneVOneEvent) return oneVOneEvent;
   const mFile = s.match(/Log file started \(file "([^"]+)"\)/i);
   if (mFile) {
     currentLogFile = mFile[1];

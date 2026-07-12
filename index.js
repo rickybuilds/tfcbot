@@ -45,6 +45,7 @@ const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
+const { createOneVOneSubsystem } = require("./oneVOne");
 
 // QoL / persistence / decay
 const { QueueStore } = require("./lib/queueStore");
@@ -127,6 +128,12 @@ const deps = {
   // 👇 JAIL SYSTEM
   jailStore
 };
+
+// Isolated and disabled by default. It does not register commands or send RCON
+// until ONEVONE_ENABLED is explicitly enabled.
+const oneVOne = createOneVOneSubsystem({ ...deps, steamLinks, registry });
+oneVOne.register();
+state.oneVOne = oneVOne;
 
 const pickupMute = require("./commands/mute");
 registry.set("mute", (m, a) => pickupMute.execute(m, a, deps));
@@ -546,6 +553,7 @@ startSpeedrunPlayerLinkSync({
       return;
     }
 
+    if (await oneVOne.onHldsEvent(evt)) return;
     autoRecap.onEvent(evt);
     global.lastHldsPacketAt = Date.now();
   });

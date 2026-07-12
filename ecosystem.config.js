@@ -4,7 +4,10 @@ module.exports = {
     script: "index.js",
     cwd: "/root/tfcbot",
     env: {
-      NODE_ENV: "production"
+      NODE_ENV: "production",
+      ONEVONE_ENABLED: "0",
+      ONEVONE_DRY_RUN: "1",
+      ONEVONE_SERVER_SETUP_ENABLED: "0"
     }
   }]
 };

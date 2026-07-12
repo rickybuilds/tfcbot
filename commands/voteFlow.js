@@ -172,7 +172,9 @@ function eligibleStreakPlayers(players, elo) {
 
 
 	// 🔒 Filter out any currently locked (in-progress) servers
-	const availableServers = state.servers.filter(s => !state.lockedServers.has(s.ip));
+	const availableServers = state.oneVOne?.reservations
+	  ? state.oneVOne.reservations.available(state.servers)
+	  : state.servers.filter(s => !state.lockedServers.has(s.ip));
 
 	if (!availableServers.length) {
 	  await message.channel.send("🚫 No available servers right now — all are in use!");
