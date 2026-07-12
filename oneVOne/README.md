@@ -22,11 +22,14 @@ Applying the migration is intentionally not an npm script. On the production
 host, first stop match activity and verify the database backup location, then run:
 
 ```text
-node scripts/migrate-one-v-one.js --apply
+./backup.sh
+gzip -t backups/elo_YYYYMMDD_HHMMSS.db.gz
+node scripts/migrate-one-v-one.js --apply --skip-backup
 ```
 
-The apply command creates a timestamped copy of `elo.db` before changing schema.
-Do not run it until the migration has been tested against a copied production DB.
+The apply command refuses to run unless `--skip-backup` explicitly acknowledges
+that a fresh SQLite-safe external/compressed backup was already created and verified.
+This avoids an unsafe raw copy and an extra 1.8GB temporary file on production.
 
 ## Current build boundary
 
