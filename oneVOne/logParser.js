@@ -13,10 +13,22 @@ function parseKeyValues(text) {
 
 function parseOneVOneLogLine(raw) {
   const text = String(raw || "").replace(/^[^\x20-\x7E]*/g, "").trim();
-  const marker = "[TFCBOT] 1V1_MATCH_END ";
-  const at = text.indexOf(marker);
-  if (at < 0) return null;
-  const fields = parseKeyValues(text.slice(at + marker.length));
+  const match = text.match(/\[TFCBOT\]\s+(1V1_[A-Z_]+)\s+(.*)$/);
+  if (!match) return null;
+  const eventName = match[1];
+  const fields = parseKeyValues(match[2]);
+  const simpleTypes = {
+    "1V1_PLAYER_JOIN": "one_v_one_player_join", "1V1_PLAYER_RECONNECT": "one_v_one_player_reconnect",
+    "1V1_PLAYER_READY": "one_v_one_player_ready", "1V1_PLAYER_DISCONNECT": "one_v_one_player_disconnect",
+    "1V1_MATCH_START": "one_v_one_match_start", "1V1_ROUND_END": "one_v_one_round_end",
+  };
+  if (eventName !== "1V1_MATCH_END") {
+    const type = simpleTypes[eventName];
+    if (!type) return null;
+    if (!fields.server) return { type: "one_v_one_invalid", reason: "missing_server", raw: text };
+    if (fields.steamid && !STEAM_ID.test(fields.steamid)) return { type: "one_v_one_invalid", reason: "invalid_steamid", raw: text };
+    return { type, ...fields, raw: text };
+  }
   const required = ["server", "map", "winner", "loser", "winner_score", "loser_score", "duration", "kill_goal", "rounds_won", "rounds_required"];
   if (required.some(key => fields[key] == null)) return { type: "one_v_one_invalid", reason: "missing_fields", raw: text };
   if (!STEAM_ID.test(fields.winner) || !STEAM_ID.test(fields.loser) || fields.winner.toUpperCase() === fields.loser.toUpperCase()) {

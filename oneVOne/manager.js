@@ -15,6 +15,7 @@ class DuelManager {
     this.pendingByPlayer = new Map();
     this.activeByPlayer = new Map();
     this.completing = new Set();
+    this.timers = new Map();
   }
 
   isPickupLocked(discordId) {
@@ -136,12 +137,13 @@ class DuelManager {
     this.pendingByPlayer.delete(challenge.challengedId);
     this.activeByPlayer.set(challenge.challengerId, challenge.id);
     this.activeByPlayer.set(challenge.challengedId, challenge.id);
-    const setup = await this.serverController.setup(result.reservation);
+    const setup = await this.serverController.beginSetup(result.reservation);
     if (!setup.ok) {
       this.complete(server.ip, result.reservation);
       return { ok: false, reason: "setup_failed", setup };
     }
-    return { ...result, setup };
+    this.setTimer(challenge.id, "setup", this.config.setupTimeoutMs, () => this.cancelActive(challenge.id, "setup_timeout"));
+    return { ...result, setup, waitingForMap: true };
   }
 
   status() {
@@ -190,6 +192,58 @@ class DuelManager {
     return false;
   }
 
+  reservationFromSource(from) {
+    const ip = String(from || "").split(":")[0];
+    return [...(this.state.serverReservations || [])].find(([serverIp, value]) => value.mode === "1v1" && String(serverIp).split(":")[0] === ip) || null;
+  }
+
+  async handleMap(evt) {
+    if (String(evt.name).toLowerCase() !== String(this.config.map).toLowerCase()) return false;
+    const entry = this.reservationFromSource(evt.from);
+    if (!entry) return false;
+    const [serverIp, reservation] = entry;
+    this.clearTimer(reservation.id, "setup");
+    const setup = await this.serverController.finishSetup(reservation);
+    if (!setup.ok) {
+      this.reservations.quarantine(serverIp, reservation, "post_map_setup_failed");
+      return true;
+    }
+    this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
+    this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
+    return true;
+  }
+
+  handleLifecycle(evt) {
+    const entry = this.reservationFromSource(evt.from);
+    if (!entry) return false;
+    const [serverIp, reservation] = entry;
+    const steam = String(evt.steamid || "").toUpperCase();
+    if (steam && !(reservation.playerSteamIds || []).map(String).map(s => s.toUpperCase()).includes(steam)) return true;
+    if (evt.type === "one_v_one_player_join" || evt.type === "one_v_one_player_reconnect") {
+      const joined = new Set(reservation.joined || []); joined.add(steam);
+      this.updateReservation(serverIp, { joined: [...joined], status: joined.size === 2 ? "waiting_for_ready" : "waiting_for_players" });
+      if (joined.size === 2) { this.clearTimer(reservation.id, "join"); this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout")); }
+      this.clearTimer(reservation.id, `disconnect:${steam}`);
+    } else if (evt.type === "one_v_one_player_ready") {
+      const ready = new Set(reservation.ready || []); ready.add(steam); this.updateReservation(serverIp, { ready: [...ready] });
+    } else if (evt.type === "one_v_one_player_disconnect") {
+      this.setTimer(reservation.id, `disconnect:${steam}`, this.config.disconnectGraceMs, () => this.cancelActive(reservation.id, "disconnect_timeout"));
+    } else if (evt.type === "one_v_one_match_start") {
+      this.clearTimer(reservation.id, "ready"); this.updateReservation(serverIp, { status: "active" });
+    }
+    return true;
+  }
+
+  updateReservation(serverIp, patch) {
+    const current = this.state.serverReservations.get(serverIp);
+    if (!current) return null;
+    const updated = Object.freeze({ ...current, ...patch }); this.state.serverReservations.set(serverIp, updated); return updated;
+  }
+
+  setTimer(id, name, ms, fn) { this.clearTimer(id, name); const key = `${id}:${name}`; const timer = setTimeout(fn, ms); timer.unref?.(); this.timers.set(key, timer); }
+  clearTimer(id, name) { const key = `${id}:${name}`; const timer = this.timers.get(key); if (timer) clearTimeout(timer); this.timers.delete(key); }
+  clearAllTimers(id) { for (const [key, timer] of this.timers) if (key.startsWith(`${id}:`)) { clearTimeout(timer); this.timers.delete(key); } }
+
   beginCompletion(id) {
     if (this.completing.has(String(id))) return false;
     this.completing.add(String(id));
@@ -234,6 +288,7 @@ class DuelManager {
   }
 
   complete(serverIp, reservation) {
+    this.clearAllTimers(reservation.id);
     for (const playerId of reservation.playerDiscordIds || []) {
       if (this.activeByPlayer.get(String(playerId)) === reservation.id) this.activeByPlayer.delete(String(playerId));
     }

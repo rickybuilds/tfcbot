@@ -6,21 +6,22 @@ class OneVOneServerController {
     this.runRconCommand = runRconCommand;
   }
 
-  commandsForSetup(reservation) {
+  commandsForFinishSetup(reservation) {
     const [p1, p2] = reservation.playerSteamIds;
     return [
-      "1v1_enabled 0",
+      "amx_pausecfg enable 1v1.amxx", "1v1_enabled 0",
       `1v1_player1 \"${p1}\"`,
       `1v1_player2 \"${p2}\"`,
+      `1v1_server_key \"${reservation.serverKey}\"`,
       `1v1_kill_goal ${this.config.killGoal}`,
-      `1v1_rounds_to_win ${this.config.roundsToWin}`,
-      `amx_map ${this.config.map}`,
+      `1v1_rounds_to_win ${this.config.roundsToWin}`, "1v1_enabled 1",
     ];
   }
 
   commandsForRestore() {
-    const commands = ["1v1_enabled 0", '1v1_player1 ""', '1v1_player2 ""'];
-    if (process.env.ONEVONE_RESTORE_COMMAND) commands.push(String(process.env.ONEVONE_RESTORE_COMMAND));
+    const commands = ["1v1_enabled 0", '1v1_player1 ""', '1v1_player2 ""', '1v1_server_key "unknown"'];
+    commands.push("amx_pausecfg pause 1v1.amxx");
+    commands.push("amx_map pushNN");
     return commands;
   }
 
@@ -38,7 +39,8 @@ class OneVOneServerController {
     return { ok: true, simulated: false, commands: completed };
   }
 
-  setup(reservation) { return this.execute(reservation.serverKey, this.commandsForSetup(reservation)); }
+  beginSetup(reservation) { return this.execute(reservation.serverKey, [`amx_map ${this.config.map}`]); }
+  finishSetup(reservation) { return this.execute(reservation.serverKey, this.commandsForFinishSetup(reservation)); }
   restore(reservation) { return this.execute(reservation.serverKey, this.commandsForRestore(reservation)); }
 }
 

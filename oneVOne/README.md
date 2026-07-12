@@ -45,6 +45,9 @@ Implemented:
 - duplicate match-end suppression and retained reservations on processing failure;
 - restore-before-release with quarantine on restoration failure;
 - active admin cancellation after successful restoration;
+- two-stage map handshake that configures assigned players only after `Started map`;
+- join, ready, setup, and disconnect-grace timers;
+- restoration to the established default map `pushNN`;
 - reuse of log transfer, Hampalyzer/TFCStats links, one Discord result recap, and silent stats import;
 - pickup server filtering through the shared reservation service;
 - unit tests for those foundations.

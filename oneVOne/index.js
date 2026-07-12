@@ -45,6 +45,8 @@ function createOneVOneSubsystem(deps) {
   async function onHldsEvent(evt) {
     if (!config.enabled) return false;
     if (evt.type === "logfile") { manager.recordLogFile(evt); return false; }
+    if (evt.type === "map") return manager.handleMap(evt);
+    if (["one_v_one_player_join","one_v_one_player_reconnect","one_v_one_player_ready","one_v_one_player_disconnect","one_v_one_match_start","one_v_one_round_end"].includes(evt.type)) return manager.handleLifecycle(evt);
     if (evt.type !== "one_v_one_match_end") return false;
     const match = manager.findReservationForEvent(evt);
     if (!match.ok) {
