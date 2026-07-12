@@ -131,7 +131,7 @@ const deps = {
 
 // Isolated and disabled by default. It does not register commands or send RCON
 // until ONEVONE_ENABLED is explicitly enabled.
-const oneVOne = createOneVOneSubsystem({ ...deps, steamLinks, registry });
+const oneVOne = createOneVOneSubsystem({ ...deps, steamLinks, registry, runRconCommand });
 oneVOne.register();
 state.oneVOne = oneVOne;
 

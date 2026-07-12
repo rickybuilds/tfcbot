@@ -3,12 +3,14 @@
 const { randomUUID } = require("crypto");
 
 class DuelManager {
-  constructor({ config, state, steamLinks, reservations, store = null }) {
+  constructor({ config, state, steamLinks, reservations, store = null, resolveServer, serverController }) {
     this.config = config;
     this.state = state;
     this.steamLinks = steamLinks;
     this.reservations = reservations;
     this.store = store;
+    this.resolveServer = resolveServer;
+    this.serverController = serverController;
     this.pending = new Map();
     this.pendingByPlayer = new Map();
     this.activeByPlayer = new Map();
@@ -99,7 +101,10 @@ class DuelManager {
     return { ok: true, challenge, availableServers: available };
   }
 
-  activate(challenge, server) {
+  async activate(challenge, server) {
+    const resolved = this.resolveServer(server);
+    if (!resolved.ok) return { ok: false, reason: resolved.reason };
+    server = { ...server, key: resolved.key };
     if (this.config.dryRun) {
       this.pending.delete(challenge.id);
       this.pendingByPlayer.delete(challenge.challengerId);
@@ -130,7 +135,16 @@ class DuelManager {
     this.pendingByPlayer.delete(challenge.challengedId);
     this.activeByPlayer.set(challenge.challengerId, challenge.id);
     this.activeByPlayer.set(challenge.challengedId, challenge.id);
-    return result;
+    const setup = await this.serverController.setup(result.reservation);
+    if (!setup.ok) {
+      this.complete(server.ip, result.reservation);
+      return { ok: false, reason: "setup_failed", setup };
+    }
+    return { ...result, setup };
+  }
+
+  status() {
+    return { pending: [...this.pending.values()], reservations: [...(this.state.serverReservations || new Map()).values()] };
   }
 
   restorePending() {

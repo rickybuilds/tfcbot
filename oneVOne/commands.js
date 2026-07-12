@@ -2,7 +2,7 @@
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require("discord.js");
 
-function registerCommands(registry, { config, manager }) {
+function registerCommands(registry, { config, manager, adminRoleId }) {
   const inChannel = message => !config.channelId || String(message.channel?.id) === config.channelId;
 
   registry.set("1v1", async message => {
@@ -65,7 +65,7 @@ function registerCommands(registry, { config, manager }) {
       const tied = [...counts.entries()].filter(([, count]) => count === max).map(([selected]) => selected);
       const winningIndex = tied[Math.floor(Math.random() * tied.length)];
       const winner = options[winningIndex];
-      const activated = manager.activate(challenge, winner);
+      const activated = await manager.activate(challenge, winner);
       if (!activated.ok) {
         collector.stop("unavailable");
         return voteMessage.edit({ content: `The reservation failed (${activated.reason || "unavailable"}). Start the challenge again.`, embeds: [], components: [] });
@@ -80,6 +80,25 @@ function registerCommands(registry, { config, manager }) {
         await voteMessage.edit({ content: "⌛ 1v1 server vote expired.", embeds: [], components: [] }).catch(() => {});
       }
     });
+  });
+
+  registry.set("1v1status", async message => {
+    if (!inChannel(message)) return;
+    const status = manager.status();
+    const pending = status.pending.map(c => `<@${c.challengerId}> → <@${c.challengedId}>`).join("\n") || "None";
+    const active = status.reservations.filter(r => r.mode === "1v1").map(r => `${r.serverKey || r.serverIp}: ${r.status}`).join("\n") || "None";
+    return message.channel.send(`**Pending 1v1 challenges**\n${pending}\n\n**Active reservations**\n${active}`);
+  });
+
+  registry.set("1v1cancel", async message => {
+    const isAdmin = adminRoleId && message.member?.roles?.cache?.has(adminRoleId);
+    if (!isAdmin) return message.reply("You do not have permission to cancel active 1v1s.");
+    const target = message.mentions?.users?.first();
+    const id = target ? manager.pendingByPlayer.get(String(target.id)) : String(message.content || "").trim().split(/\s+/)[1];
+    if (!id) return message.reply("Usage: `!1v1cancel @user` or `!1v1cancel <challengeId>`");
+    const cancelled = manager.cancel(id, "admin_cancelled");
+    if (!cancelled) return message.reply("No pending challenge was found. Active-server cancellation will be enabled with restoration handling.");
+    return message.channel.send(`✅ Cancelled 1v1 challenge **${cancelled.id}**.`);
   });
 }
 

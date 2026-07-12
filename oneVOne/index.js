@@ -7,6 +7,9 @@ const { DuelManager } = require("./manager");
 const { registerCommands } = require("./commands");
 const { OneVOneStore } = require("./store");
 const { createCompletionHandler } = require("./completion");
+const { resolveServerKey } = require("./serverResolver");
+const rconServers = require("../config/rcon");
+const { OneVOneServerController } = require("./serverController");
 
 function createOneVOneSubsystem(deps) {
   const config = loadOneVOneConfig();
@@ -18,7 +21,9 @@ function createOneVOneSubsystem(deps) {
     if (schema.duelTable) store = candidate;
     else console.warn("[1v1] database migration has not been applied; persistence disabled");
   }
-  const manager = new DuelManager({ config, state: deps.state, steamLinks: deps.steamLinks, reservations, store });
+  const serverController = new OneVOneServerController({ config, runRconCommand: deps.runRconCommand });
+  const manager = new DuelManager({ config, state: deps.state, steamLinks: deps.steamLinks, reservations, store,
+    resolveServer: server => resolveServerKey(server, rconServers), serverController });
   let completion = null;
   function attachCompletion({ client, logsChannelId }) {
     if (!config.enabled) return false;
@@ -32,7 +37,7 @@ function createOneVOneSubsystem(deps) {
       return;
     }
     console.log(`[1v1] enabled dryRun=${config.dryRun} serverSetup=${config.serverSetupEnabled}`);
-    registerCommands(deps.registry, { config, manager });
+    registerCommands(deps.registry, { config, manager, adminRoleId: deps.config.roles.admin });
     console.log(`[1v1] restored pending challenges=${manager.restorePending()}`);
   }
 

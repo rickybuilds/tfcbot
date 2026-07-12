@@ -7,6 +7,7 @@ const { ServerReservations } = require("../oneVOne/reservations");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
 const { OneVOneStore } = require("../oneVOne/store");
 const { DuelManager } = require("../oneVOne/manager");
+const { resolveServerKey } = require("../oneVOne/serverResolver");
 
 test("reservation is atomic and mirrors legacy pickup lock", () => {
   const state = { lockedServers: new Set() };
@@ -41,12 +42,24 @@ test("dry-run activation never locks a real server", () => {
   const reservations = new ServerReservations(state);
   const manager = new DuelManager({
     config: { dryRun: true, challengeTtlMs: 1000 }, state, reservations,
-    steamLinks: { getSteamIds: async () => [] },
+    steamLinks: { getSteamIds: async () => [] }, resolveServer: () => ({ ok: true, key: "east" }),
+    serverController: { setup: async () => ({ ok: true, simulated: true }) },
   });
   const challenge = { id: "dry", challengerId: "1", challengedId: "2" };
   manager.pending.set("dry", challenge);
   manager.pendingByPlayer.set("1", "dry");
   manager.pendingByPlayer.set("2", "dry");
-  assert.equal(manager.activate(challenge, { ip: "1.2.3.4:27015" }).simulated, true);
-  assert.equal(state.lockedServers.size, 0);
+  return manager.activate(challenge, { ip: "1.2.3.4:27015" }).then(result => {
+    assert.equal(result.simulated, true);
+    assert.equal(state.lockedServers.size, 0);
+  });
+});
+
+test("server resolver requires exact host and port", () => {
+  const result = resolveServerKey({ ip: "1.2.3.4:27016" }, {
+    east: { host: "1.2.3.4", port: 27015 }, west: { host: "1.2.3.4", port: 27016 },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.key, "west");
+  assert.equal(resolveServerKey({ ip: "1.2.3.4:27017" }, {}).ok, false);
 });
