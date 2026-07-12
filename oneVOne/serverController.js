@@ -9,7 +9,7 @@ class OneVOneServerController {
   commandsForFinishSetup(reservation) {
     const [p1, p2] = reservation.playerSteamIds;
     return [
-      "amx_pausecfg enable 1v1.amxx", "1v1_enabled 0",
+      "1v1_enabled 0",
       `1v1_player1 \"${p1}\"`,
       `1v1_player2 \"${p2}\"`,
       `1v1_server_key \"${reservation.serverKey}\"`,
@@ -20,7 +20,6 @@ class OneVOneServerController {
 
   commandsForRestore() {
     const commands = ["1v1_enabled 0", '1v1_player1 ""', '1v1_player2 ""', '1v1_server_key "unknown"'];
-    commands.push("amx_pausecfg pause 1v1.amxx");
     commands.push("amx_map pushNN");
     return commands;
   }
