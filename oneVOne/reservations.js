@@ -44,6 +44,14 @@ class ServerReservations {
     this.state.lockedServers.delete(ip);
     return { ok: !!current, reservation: current };
   }
+
+  quarantine(serverIp, reservation, reason) {
+    const ip = String(serverIp);
+    const record = Object.freeze({ ...reservation, serverIp: ip, locked: true, status: "quarantined", quarantineReason: reason });
+    this.state.serverReservations.set(ip, record);
+    this.state.lockedServers.add(ip);
+    return record;
+  }
 }
 
 module.exports = { ServerReservations };

@@ -97,8 +97,10 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     const id = target ? manager.pendingByPlayer.get(String(target.id)) : String(message.content || "").trim().split(/\s+/)[1];
     if (!id) return message.reply("Usage: `!1v1cancel @user` or `!1v1cancel <challengeId>`");
     const cancelled = manager.cancel(id, "admin_cancelled");
-    if (!cancelled) return message.reply("No pending challenge was found. Active-server cancellation will be enabled with restoration handling.");
-    return message.channel.send(`✅ Cancelled 1v1 challenge **${cancelled.id}**.`);
+    if (cancelled) return message.channel.send(`✅ Cancelled 1v1 challenge **${cancelled.id}**.`);
+    const active = await manager.cancelActive(id, "admin_cancelled");
+    if (!active.ok) return message.reply(active.reason === "restore_failed" ? "⚠️ Restoration failed; the server is quarantined and remains unavailable." : "No pending or active 1v1 was found.");
+    return message.channel.send(`✅ Cancelled active 1v1 **${id}** and restored its server.`);
   });
 }
 

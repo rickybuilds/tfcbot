@@ -39,18 +39,27 @@ function createOneVOneSubsystem(deps) {
     console.log(`[1v1] enabled dryRun=${config.dryRun} serverSetup=${config.serverSetupEnabled}`);
     registerCommands(deps.registry, { config, manager, adminRoleId: deps.config.roles.admin });
     console.log(`[1v1] restored pending challenges=${manager.restorePending()}`);
+    console.log(`[1v1] recovered active reservations=${manager.recoverActive()}`);
   }
 
   async function onHldsEvent(evt) {
-    if (!config.enabled || evt.type !== "one_v_one_match_end") return false;
+    if (!config.enabled) return false;
+    if (evt.type === "logfile") { manager.recordLogFile(evt); return false; }
+    if (evt.type !== "one_v_one_match_end") return false;
     const match = manager.findReservationForEvent(evt);
     if (!match.ok) {
       console.warn(`[1v1] rejected match end reason=${match.reason} from=${evt.from || "unknown"}`);
       return true;
     }
-    if (completion) await completion(evt, match);
-    else if (typeof deps.onOneVOneMatchEnd === "function") await deps.onOneVOneMatchEnd(evt, match);
-    else console.log(`[1v1] verified match end reservation=${match.reservation.id}; completion adapter not attached`);
+    if (!manager.beginCompletion(match.reservation.id)) { console.warn(`[1v1] duplicate match end ignored id=${match.reservation.id}`); return true; }
+    try {
+      if (completion) await completion(evt, match);
+      else if (typeof deps.onOneVOneMatchEnd === "function") await deps.onOneVOneMatchEnd(evt, match);
+      else console.log(`[1v1] verified match end reservation=${match.reservation.id}; completion adapter not attached`);
+    } catch (error) {
+      store?.updateStatus(match.reservation.id, "processing_failed", { cancellation_reason: String(error?.message || error) });
+      console.error(`[1v1] completion failed id=${match.reservation.id}; reservation retained for retry`, error);
+    } finally { manager.endCompletion(match.reservation.id); }
     return true;
   }
 

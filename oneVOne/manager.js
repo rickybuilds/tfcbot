@@ -14,6 +14,7 @@ class DuelManager {
     this.pending = new Map();
     this.pendingByPlayer = new Map();
     this.activeByPlayer = new Map();
+    this.completing = new Set();
   }
 
   isPickupLocked(discordId) {
@@ -176,11 +177,77 @@ class DuelManager {
     return { ok: false, reason: "reservation_not_found" };
   }
 
+  recordLogFile(evt) {
+    const from = String(evt.from || "").split(":")[0];
+    for (const [serverIp, reservation] of this.state.serverReservations || []) {
+      if (reservation.mode !== "1v1" || String(serverIp).split(":")[0] !== from) continue;
+      const files = new Set(reservation.logFiles || []);
+      files.add(evt.file);
+      const updated = Object.freeze({ ...reservation, logFiles: [...files] });
+      this.state.serverReservations.set(serverIp, updated);
+      return true;
+    }
+    return false;
+  }
+
+  beginCompletion(id) {
+    if (this.completing.has(String(id))) return false;
+    this.completing.add(String(id));
+    return true;
+  }
+
+  endCompletion(id) { this.completing.delete(String(id)); }
+
+  recoverActive() {
+    if (!this.store) return 0;
+    let count = 0;
+    for (const row of this.store.activeDuels()) {
+      if (!row.server_ip || this.state.serverReservations.has(row.server_ip)) continue;
+      const reservation = {
+        id: row.match_id, mode: "1v1", serverKey: row.server_key, serverIp: row.server_ip,
+        playerDiscordIds: [row.challenger_discord_id, row.challenged_discord_id],
+        playerSteamIds: [row.player1_steam_id, row.player2_steam_id], status: row.status,
+        locked: true, reservedAt: row.reserved_at,
+      };
+      this.state.serverReservations.set(row.server_ip, Object.freeze(reservation));
+      this.state.lockedServers.add(row.server_ip);
+      this.activeByPlayer.set(row.challenger_discord_id, row.match_id);
+      this.activeByPlayer.set(row.challenged_discord_id, row.match_id);
+      count++;
+    }
+    return count;
+  }
+
+  async cancelActive(id, reason) {
+    const entry = [...(this.state.serverReservations || [])].find(([, value]) => value.mode === "1v1" && String(value.id) === String(id));
+    if (!entry) return { ok: false, reason: "not_found" };
+    const [serverIp, reservation] = entry;
+    const restored = await this.serverController.restore(reservation);
+    if (!restored.ok) {
+      this.reservations.quarantine(serverIp, reservation, "restore_failed");
+      this.store?.updateStatus(id, "quarantined", { cancellation_reason: reason });
+      return { ok: false, reason: "restore_failed", restored };
+    }
+    this.store?.updateStatus(id, "cancelled", { cancelled_at: Date.now(), cancellation_reason: reason });
+    this.complete(serverIp, reservation);
+    return { ok: true, restored };
+  }
+
   complete(serverIp, reservation) {
     for (const playerId of reservation.playerDiscordIds || []) {
       if (this.activeByPlayer.get(String(playerId)) === reservation.id) this.activeByPlayer.delete(String(playerId));
     }
     return this.reservations.release(serverIp, reservation.id);
+  }
+
+  async restoreAndComplete(serverIp, reservation) {
+    const restored = await this.serverController.restore(reservation);
+    if (!restored.ok) {
+      this.reservations.quarantine(serverIp, reservation, "restore_failed_after_match");
+      this.store?.updateStatus(reservation.id, "quarantined", { cancellation_reason: "restore_failed_after_match" });
+      return { ok: false, quarantined: true, restored };
+    }
+    return { ok: true, restored, released: this.complete(serverIp, reservation) };
   }
 }
 

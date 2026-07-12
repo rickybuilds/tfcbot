@@ -19,7 +19,9 @@ class OneVOneServerController {
   }
 
   commandsForRestore() {
-    return ["1v1_enabled 0", '1v1_player1 ""', '1v1_player2 ""'];
+    const commands = ["1v1_enabled 0", '1v1_player1 ""', '1v1_player2 ""'];
+    if (process.env.ONEVONE_RESTORE_COMMAND) commands.push(String(process.env.ONEVONE_RESTORE_COMMAND));
+    return commands;
   }
 
   async execute(serverKey, commands) {

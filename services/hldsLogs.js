@@ -4,7 +4,6 @@ const dgram = require("dgram");
 const servers = require("../config/rcon");
 const net = require("net");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
-let currentLogFile = null;
 /* -------------------------------------------------------------------------- */
 /* Match ID handoff */
 /* -------------------------------------------------------------------------- */
@@ -83,7 +82,7 @@ function stopVoiceRecording() {
 /* -------------------------------------------------------------------------- */
 /* Log Parser — unchanged (still perfect) */
 /* -------------------------------------------------------------------------- */
-function parseLine(raw) {
+function parseLine(raw, currentLogFile = null) {
   let s = String(raw).trim();
   s = s.replace(/^[^\x20-\x7E]*/g, "");
   const oneVOneEvent = parseOneVOneLogLine(s);
@@ -157,6 +156,7 @@ return null;
 /* UDP Listener + Score Pairing */
 /* -------------------------------------------------------------------------- */
 const perSourceVoice = new Map();
+const currentLogFileBySource = new Map();
 function getVoiceState(ip) {
   let s = perSourceVoice.get(ip);
   if (!s) {
@@ -176,8 +176,10 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     const from = rinfo.address;
     global.lastHldsPacketAt = Date.now();
     if (allowedIPs.length && !allowedIPs.includes(from)) return;
-    const parsed = parseLine(msg);
+    const parsed = parseLine(msg, currentLogFileBySource.get(from) || null);
     if (!parsed) return;
+    if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
+    if (parsed.type === "log_closed") currentLogFileBySource.delete(from);
     const evt = { ...parsed, from, ts: Date.now() };
     // ---------- MAP EVENT → START RECORDING (FIXED) ----------
     if (evt.type === "map") {

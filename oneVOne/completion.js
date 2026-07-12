@@ -33,8 +33,8 @@ function createCompletionHandler({ client, matchesStore, logsChannelId, manager 
       },
       hampalyzer: { url: hampalyzerUrl }, tfcstats: { url: tfcstatsUrl }, zipPath: null,
     });
-    manager.complete(match.serverIp, reservation);
-    return { matchId, hampalyzerUrl, tfcstatsUrl };
+    const cleanup = await manager.restoreAndComplete(match.serverIp, reservation);
+    return { matchId, hampalyzerUrl, tfcstatsUrl, cleanup };
   };
 }
 

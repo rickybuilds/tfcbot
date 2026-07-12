@@ -104,6 +104,15 @@ class OneVOneStore {
       WHERE status NOT IN ('completed','cancelled') ORDER BY reserved_at`).all();
   }
 
+  updateStatus(matchId, status, fields = {}) {
+    const allowed = ["cancelled_at", "cancellation_reason", "started_at", "completed_at"];
+    const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
+    const sql = [`status=?`, ...entries.map(([key]) => `${key}=?`)].join(", ");
+    this.db.prepare(`UPDATE one_v_one_matches SET ${sql} WHERE match_id=?`)
+      .run(status, ...entries.map(([, value]) => value), String(matchId));
+    this.db.prepare("UPDATE matches SET status=? WHERE match_id=?").run(status, String(matchId));
+  }
+
   createReservedDuel(challenge, server, config) {
     const now = Math.floor(Date.now() / 1000);
     this.db.transaction(() => {

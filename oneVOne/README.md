@@ -40,6 +40,11 @@ Implemented:
 - an isolated two-player server vote with both votes counted and randomized tie resolution;
 - pending-challenge persistence and restart restoration when the migration is present;
 - reservation and SteamID verification for machine-readable match-end events;
+- per-source HLDS log filename tracking for simultaneous servers;
+- active reservation recovery after restart;
+- duplicate match-end suppression and retained reservations on processing failure;
+- restore-before-release with quarantine on restoration failure;
+- active admin cancellation after successful restoration;
 - reuse of log transfer, Hampalyzer/TFCStats links, one Discord result recap, and silent stats import;
 - pickup server filtering through the shared reservation service;
 - unit tests for those foundations.
