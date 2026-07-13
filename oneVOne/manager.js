@@ -47,10 +47,20 @@ class DuelManager {
     this.pending.set(id, challenge);
     this.pendingByPlayer.set(p1, id);
     this.pendingByPlayer.set(p2, id);
-    challenge.timer = setTimeout(() => this.cancel(id, "expired"), this.config.challengeTtlMs);
+    challenge.timer = setTimeout(() => {
+      const expired = this.cancel(id, "expired");
+      if (expired?.onExpire) Promise.resolve(expired.onExpire(expired)).catch(() => {});
+    }, this.config.challengeTtlMs);
     challenge.timer.unref?.();
     this.store?.saveChallenge(challenge);
     return { ok: true, challenge };
+  }
+
+  onChallengeExpire(id, handler) {
+    const challenge = this.pending.get(String(id));
+    if (!challenge || typeof handler !== "function") return false;
+    challenge.onExpire = handler;
+    return true;
   }
 
   incomingFor(discordId) {

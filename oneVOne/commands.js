@@ -2,6 +2,34 @@
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require("discord.js");
 
+const COLORS = Object.freeze({
+  challenge: 0xfaa61a,
+  expired: 0x747f8d,
+});
+
+function challengeEmbed(challenge, seconds) {
+  return new EmbedBuilder()
+    .setColor(COLORS.challenge)
+    .setTitle("⚔️ 1v1 Challenge")
+    .setDescription(`<@${challenge.challengedId}>, you have been challenged to a head-to-head duel.`)
+    .addFields(
+      { name: "Challenger", value: `<@${challenge.challengerId}>`, inline: true },
+      { name: "Challenged", value: `<@${challenge.challengedId}>`, inline: true },
+      { name: "Respond", value: "Use `!accept` or `!decline` in this channel.", inline: false },
+    )
+    .setFooter({ text: `Challenge expires in ${seconds} seconds` })
+    .setTimestamp();
+}
+
+function expiredChallengeEmbed(challenge) {
+  return new EmbedBuilder()
+    .setColor(COLORS.expired)
+    .setTitle("⌛ 1v1 Challenge Expired")
+    .setDescription(`The challenge between <@${challenge.challengerId}> and <@${challenge.challengedId}> was not accepted in time.`)
+    .setFooter({ text: "No match was created" })
+    .setTimestamp();
+}
+
 function registerCommands(registry, { config, manager, adminRoleId }) {
   const inChannel = message => !config.channelId || String(message.channel?.id) === config.channelId;
 
@@ -17,7 +45,19 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     };
     if (!result.ok) return message.reply(`❌ ${errors[result.reason] || "Challenge could not be created."}`);
     const seconds = Math.ceil(config.challengeTtlMs / 1000);
-    return message.channel.send(`⚔️ <@${target.id}>, <@${message.author.id}> challenged you to a 1v1. Use \`!accept\` or \`!decline\` within **${seconds}s**.`);
+    const challengeMessage = await message.channel.send({
+      content: `<@${target.id}>`,
+      embeds: [challengeEmbed(result.challenge, seconds)],
+      allowedMentions: { users: [String(target.id)] },
+    });
+    manager.onChallengeExpire(result.challenge.id, async challenge => {
+      await challengeMessage.edit({
+        content: "",
+        embeds: [expiredChallengeEmbed(challenge)],
+        allowedMentions: { parse: [] },
+      });
+    });
+    return challengeMessage;
   });
 
   registry.set("decline", async message => {
