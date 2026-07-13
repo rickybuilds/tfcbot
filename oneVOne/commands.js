@@ -120,27 +120,48 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       .setCustomId(`1v1_server_${challenge.id}_${index}`)
       .setLabel(server.name)
       .setStyle(ButtonStyle.Primary)));
-    const voteEndsUnix = Math.floor((Date.now() + 30_000) / 1000);
-    const embed = new EmbedBuilder().setColor(COLORS.info).setTitle("🗳️ 1v1 Server Vote")
-      .setDescription(`<@${challenge.challengerId}> and <@${challenge.challengedId}>, choose a server below.`)
-      .addFields(
-        { name: "Voting", value: "Both duelists vote. A tied result is selected at random." },
-        { name: "Time Remaining", value: `⏰ Voting ends <t:${voteEndsUnix}:R>` },
-      )
-      .setFooter({ text: "NoNamePUG 1v1" })
-      .setTimestamp();
-    const voteMessage = await message.channel.send({ embeds: [embed], components: [row] });
-    const collector = voteMessage.createMessageComponentCollector({ time: 30_000 });
     const votes = new Map();
+    const voterNames = new Map();
+    const voteEndsUnix = Math.floor((Date.now() + 30_000) / 1000);
+
+    function voteBreakdown() {
+      const lines = options.map((server, index) => {
+        const names = [...votes.entries()]
+          .filter(([, selected]) => selected === index)
+          .map(([userId]) => `**${voterNames.get(userId) || "Unknown"}**`);
+        const count = names.length;
+        return `**${index + 1}. ${server.name}**\n${names.length ? `${names.join(", ")} — ` : ""}${count} vote${count === 1 ? "" : "s"}`;
+      });
+      const waiting = [challenge.challengerId, challenge.challengedId].filter(id => !votes.has(String(id)));
+      lines.push(`**Waiting on**\n${waiting.length ? waiting.map(id => `<@${id}>`).join(", ") : "✅ All eligible votes are in."}`);
+      lines.push(`⏰ Voting ends <t:${voteEndsUnix}:R>`);
+      return lines.join("\n\n");
+    }
+
+    function liveVoteEmbed() {
+      return new EmbedBuilder()
+        .setColor(COLORS.info)
+        .setTitle("🗳️ 1v1 Server Vote")
+        .setDescription(voteBreakdown())
+        .setFooter({ text: "Both duelists vote • Ties are selected at random" })
+        .setTimestamp();
+    }
+
+    const voteMessage = await message.channel.send({ embeds: [liveVoteEmbed()], components: [row] });
+    const collector = voteMessage.createMessageComponentCollector({ time: 30_000 });
     collector.on("collect", async interaction => {
       if (![challenge.challengerId, challenge.challengedId].includes(String(interaction.user.id))) {
-        return interaction.reply({ embeds: [deniedEmbed("Vote Denied", "Only the two duelists can vote.")], ephemeral: true });
+        return interaction.deferUpdate().catch(() => {});
       }
       const index = Number(interaction.customId.split("_").pop());
-      const server = options[index];
-      votes.set(String(interaction.user.id), index);
-      await interaction.reply({ embeds: [successEmbed("Vote Recorded", `Your vote for **${server.name}** has been recorded.`)], ephemeral: true });
-      if (votes.size < 2) return;
+      const userId = String(interaction.user.id);
+      votes.set(userId, index);
+      voterNames.set(userId,
+        interaction.member?.displayName || interaction.user?.globalName || interaction.user?.username || "Unknown");
+      await interaction.deferUpdate();
+      if (votes.size < 2) {
+        return voteMessage.edit({ embeds: [liveVoteEmbed()], components: [row] });
+      }
       const counts = new Map();
       for (const selected of votes.values()) counts.set(selected, (counts.get(selected) || 0) + 1);
       const max = Math.max(...counts.values());
@@ -154,7 +175,9 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       }
       collector.stop("selected");
       const safety = config.dryRun ? "\n\n🛡️ **DRY RUN:** No server commands were sent." : "";
-      return voteMessage.edit({ content: "", embeds: [successEmbed("✅ Server Selected", `**${winner.name}** won the vote.${safety}`)], components: [] });
+      const finalEmbed = successEmbed("✅ Server Selected", `**${winner.name}** won the vote.${safety}`)
+        .addFields({ name: "Final Votes", value: voteBreakdown() });
+      return voteMessage.edit({ content: "", embeds: [finalEmbed], components: [] });
     });
     collector.on("end", async (_, reason) => {
       if (reason !== "selected" && reason !== "unavailable") {
