@@ -13,86 +13,6 @@ let lastStatusUsedAt = 0; // global cooldown timestamp
 
 const ADMIN_ROLE = process.env.ADMIN_ROLE_ID || "";
 
-/* ------------------ poll gate ------------------ */
-
-const REQUIRED_POLL_CHANNEL_ID = process.env.REQUIRED_POLL_CHANNEL_ID || "";
-const REQUIRED_POLL_MESSAGE_ID = "1524619536467365888";
-
-const POLL_CACHE_MS = 15_000;
-const POLL_WARN_COOLDOWN_MS = 60 * 60 * 1000;
-
-let pollVoterCache = {
-  fetchedAt: 0,
-  voters: new Set(),
-};
-
-const pollWarnCooldown = new Map();
-
-async function getRequiredPollVoters(client) {
-  const ts = Date.now();
-
-  if (ts - pollVoterCache.fetchedAt < POLL_CACHE_MS) {
-    return pollVoterCache.voters;
-  }
-
-  const voters = new Set();
-
-  try {
-    const channel = await client.channels.fetch(REQUIRED_POLL_CHANNEL_ID);
-    const pollMessage = await channel.messages.fetch(REQUIRED_POLL_MESSAGE_ID);
-
-    if (!pollMessage.poll?.answers) {
-      console.warn("[pollGate] Required message has no poll data");
-      pollVoterCache = { fetchedAt: ts, voters };
-      return voters;
-    }
-
-    for (const answer of pollMessage.poll.answers.values()) {
-      const answerVoters = await answer.voters.fetch({ limit: 100 });
-      for (const userId of answerVoters.keys()) {
-        voters.add(String(userId));
-      }
-    }
-
-    pollVoterCache = { fetchedAt: ts, voters };
-    console.log(`[pollGate] cached ${voters.size} poll voters`);
-  } catch (err) {
-    console.error("[pollGate] failed to fetch poll voters:", err);
-  }
-
-  return voters;
-}
-
-async function hasRequiredPollVote(message) {
-  if (!REQUIRED_POLL_CHANNEL_ID) {
-    console.warn("[pollGate] REQUIRED_POLL_CHANNEL_ID missing");
-    return true; // fail open so queue does not break
-  }
-
-  const voters = await getRequiredPollVoters(message.client);
-
-  if (voters.has(String(message.author.id))) {
-    return true;
-  }
-
-  const ts = Date.now();
-  const lastWarn = pollWarnCooldown.get(String(message.author.id)) || 0;
-
-  if (ts - lastWarn >= POLL_WARN_COOLDOWN_MS) {
-    pollWarnCooldown.set(String(message.author.id), ts);
-
-    try {
-		await message.reply(
-		  "🗳️ Before joining pickups, please take 10 seconds to vote in the current community poll.\n" +
-		  "Vote here: https://discord.com/channels/1102769054919426098/1432810350893338785/1524619536467365888\n" +
-		  "Once you've voted, simply type `++` again. Thanks! <3 kix"
-		);
-    } catch {}
-  }
-
-  return false;
-}
-
 /* ------------------ local helpers ------------------ */
 function isAdmin(message) {
   return ADMIN_ROLE && message.member?.roles?.cache?.has(ADMIN_ROLE);
@@ -169,15 +89,9 @@ async function postQueueBoard(channel, state, elo, privacy) {
 
 /* ------------------ register commands ------------------ */
 function register(reg, { client, config, state, elo, banStore, settings, privacy }) {
-	const add = async (message, isAdl = false) => {
-		if (String(message.channel?.id) !== String(config.channels.pickup)) return;
-
-		const id = message.author.id;
-
-		if (!(await hasRequiredPollVote(message))) {
-			return;
-		}
-
+  const add = async (message, isAdl = false) => {
+    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
+    const id = message.author.id;
 	// Prevent players currently in an active match from joining another queue
 	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
   const matchId = state.lockedPlayers.get(String(id));
