@@ -152,7 +152,7 @@ function eligibleStreakPlayers(players, elo) {
 
       // ADL decision on the frozen set
       const frozenIds = state.queueSnapshot.map(p => p.id);
-      const { useAdl } = adl.shouldUseAdl(state, frozenIds, process.env);
+      const { useAdl } = adl.shouldUseAdl(frozenIds, process.env);
       const MODE = useAdl ? "ADL" : "STANDARD";
       state.currentMode = MODE;
 

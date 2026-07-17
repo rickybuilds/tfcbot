@@ -10,6 +10,7 @@ const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
 const lockedReplyCooldown = new Map();
 const LOCKED_REPLY_COOLDOWN_MS = 60 * 1000; // 1 minute
 let lastStatusUsedAt = 0; // global cooldown timestamp
+const autoFullVoteTimers = new WeakMap();
 
 const ADMIN_ROLE = process.env.ADMIN_ROLE_ID || "";
 
@@ -18,6 +19,49 @@ function isAdmin(message) {
   return ADMIN_ROLE && message.member?.roles?.cache?.has(ADMIN_ROLE);
 }
 function now() { return Date.now(); }
+
+async function maybeStartAutoFullVote(
+  message,
+  state,
+  { delayMs = 2000, runner = global.runFullVoteFlow } = {}
+) {
+  const max = state.MAX_PLAYERS || 8;
+
+  console.log(
+    `[autoFullVote check] count=${state.queue.length}/${max} vote=${!!state.vote} voting=${!!state.isVotingInProgress} runner=${typeof runner}`
+  );
+
+  if (
+    state.queue.length !== max ||
+    state.vote ||
+    state.isVotingInProgress ||
+    state.isVoteStarting ||
+    state.voteLock ||
+    typeof runner !== "function" ||
+    autoFullVoteTimers.has(state)
+  ) {
+    return false;
+  }
+
+  await message.channel.send("Queue is full! Starting vote in **2 seconds**...");
+
+  const timer = setTimeout(() => {
+    autoFullVoteTimers.delete(state);
+
+    if (
+      state.queue.length === max &&
+      !state.vote &&
+      !state.isVotingInProgress &&
+      !state.isVoteStarting &&
+      !state.voteLock
+    ) {
+      Promise.resolve(runner(message)).catch(console.error);
+    }
+  }, delayMs);
+
+  autoFullVoteTimers.set(state, timer);
+  return true;
+}
 
 // inline getNumber so we don’t depend on settings.js exports
 function getNumber(settings, key, fb) {
@@ -171,28 +215,7 @@ if (ban) {
     try { await refreshBotName(message.client, state); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}
 
-    console.log(
-      `[autoFullVote check] count=${state.queue.length}/${state.MAX_PLAYERS || 8} vote=${!!state.vote} voting=${!!state.isVotingInProgress} runner=${typeof global.runFullVoteFlow}`
-    );
-
-    if (
-    state.queue.length === (state.MAX_PLAYERS || 8) &&
-      !state.vote &&
-      !state.isVotingInProgress &&
-      typeof global.runFullVoteFlow === "function"
-    ) {
-      await message.channel.send("Queue is full! Starting vote in **2 seconds**...");
-
-      setTimeout(() => {
-        if (
-          state.queue.length === (state.MAX_PLAYERS || 8) &&
-          !state.vote &&
-          !state.isVotingInProgress
-        ) {
-          global.runFullVoteFlow(message).catch(console.error);
-        }
-      }, 2000);
-    }
+    await maybeStartAutoFullVote(message, state);
   };
 
     const remove = async (message) => {
@@ -528,4 +551,9 @@ async function addPlayerToQueue(message, { state, config, elo, banStore, setting
   return entry; // 👈 return so addadl.js can tag adlVote
 }
 
-module.exports = { register, postQueueBoard, addPlayerToQueue };
+module.exports = {
+  register,
+  postQueueBoard,
+  addPlayerToQueue,
+  maybeStartAutoFullVote,
+};

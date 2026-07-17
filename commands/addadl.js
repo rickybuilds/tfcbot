@@ -1,7 +1,7 @@
 // commands/addadl.js
 "use strict";
 
-const { addPlayerToQueue } = require("./queue");
+const { addPlayerToQueue, maybeStartAutoFullVote } = require("./queue");
 const adl = require("../lib/adl");
 
 module.exports = {
@@ -29,14 +29,13 @@ module.exports = {
       return;
     }
 
-    // Respect max queue size
-    if (state.queue.length >= (state.MAX_PLAYERS || 8)) {
+    // Existing queued players may still cast an ADL vote when the queue is full.
+    let entry = state.queue.find(p => p.id === message.author.id);
+    if (!entry && state.queue.length >= (state.MAX_PLAYERS || 8)) {
       return;
     }
 
     // Find or create player entry manually first
-    let entry = state.queue.find(p => p.id === message.author.id);
-
     if (!entry) {
       entry = {
         id: message.author.id,
@@ -44,6 +43,8 @@ module.exports = {
         lastSeenAt: Date.now(),
       };
       state.queue.push(entry);
+    } else {
+      entry.lastSeenAt = Date.now();
     }
 
     // Mark ADL vote before rendering
@@ -68,5 +69,7 @@ module.exports = {
         `ADL Mode almost activated! **${remaining}** more ADL vote(s). (${votes}/${required})`
       );
     }
+
+    await maybeStartAutoFullVote(message, state);
   },
 };
