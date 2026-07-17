@@ -238,25 +238,6 @@ function eligibleStreakPlayers(players, elo) {
 				}).join(", ");
 				await message.channel.send(`Not all players voted. Kicked: ${kickedNames}`);
 
-				// 📝 Append kicked info to ./kicked.json
-				try {
-				  const kickedFile = path.join(process.cwd(), "kicked.json");
-				  const now = new Date();
-				  const timestamp = now.toLocaleString("en-US", { timeZone: "America/New_York" });
-				  const entry = { timestamp, names: kickedNames };
-
-				  let arr = [];
-				  if (fs.existsSync(kickedFile)) {
-					try { arr = JSON.parse(fs.readFileSync(kickedFile, "utf8") || "[]"); }
-					catch { arr = []; }
-				  }
-
-				  arr.push(entry);
-				  fs.writeFileSync(kickedFile, JSON.stringify(arr, null, 2));
-				  console.log(`[KICKED LOG] Added ${kickedNames} @ ${timestamp}`);
-				} catch (err) {
-				  console.error("[KICKED LOG] Failed to write kicked.json:", err);
-				}
             return postQueueBoard(message.channel, state, elo, privacy);
           }
 
