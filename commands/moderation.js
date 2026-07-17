@@ -169,7 +169,7 @@ const { refreshBotName } = require("../lib/botName");
 /* ---------------- vote text-only moderation ---------------- */
 
 const MEDIA_URL_REGEX =
-  /(tenor\.com|giphy\.com|media\.discordapp\.net|cdn\.discordapp\.com|\.gif|\.jpg|\.jpeg|\.png|\.webp|\.mp4|\.mov)/i;
+  /(tenor\.com|giphy\.com|klipy\.com|media\.discordapp\.net|cdn\.discordapp\.com|\bgifs?\b|\.jpg|\.jpeg|\.png|\.webp|\.mp4|\.mov)/i;
 
 function hasBlockedVoteMedia(message) {
   if (message.attachments?.size > 0) return true;
@@ -198,5 +198,6 @@ async function handleVoteMediaModeration(message, state, config) {
 
 module.exports = {
   register,
+  hasBlockedVoteMedia,
   handleVoteMediaModeration,
 };
