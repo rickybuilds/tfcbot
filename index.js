@@ -332,11 +332,12 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
 oneVOne.attachCompletion({ client, logsChannelId: config.channels.logs });
@@ -598,6 +599,45 @@ function isPickupMuted(discordId) {
   return state.pickupMutedUsers?.has(String(discordId));
 }
 
+function isAllowedPickupMutedMessage(content) {
+  return ALLOWED_PICKUP_MUTED_MESSAGES.has(String(content || "").trim().toLowerCase());
+}
+
+async function enforcePickupMuteMessage(message) {
+  if (!message?.guild || message.author?.bot) return false;
+  if (!isPickupMuted(message.author?.id)) return false;
+  if (isAllowedPickupMutedMessage(message.content)) return false;
+
+  try {
+    await message.delete();
+  } catch (err) {
+    console.warn("[pickup_mute] delete failed:", err.message);
+  }
+  return true;
+}
+
+// Prevent a muted user from posting an allowed command and editing extra text into it.
+client.on("messageUpdate", async (_oldMessage, newMessage) => {
+  try {
+    if (newMessage.partial) await newMessage.fetch();
+    await enforcePickupMuteMessage(newMessage);
+  } catch (err) {
+    console.warn("[pickup_mute] edited-message enforcement failed:", err.message);
+  }
+});
+
+// Muted users may not add reactions either.
+client.on("messageReactionAdd", async (reaction, user) => {
+  try {
+    if (!user || user.bot || !isPickupMuted(user.id)) return;
+    if (reaction.partial) await reaction.fetch();
+    if (!reaction.message?.guild) return;
+    await reaction.users.remove(user.id);
+  } catch (err) {
+    console.warn("[pickup_mute] reaction removal failed:", err.message);
+  }
+});
+
 // ============================================================================
 // Message command router
 // ============================================================================
@@ -623,20 +663,12 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
+    if (await enforcePickupMuteMessage(message)) return;
+
     const raw = (message.content || "").trim();
     if (!raw) return;
 
     const rawLower = raw.toLowerCase();
-    if (message.guild && isPickupMuted(message.author.id)) {
-      if (!ALLOWED_PICKUP_MUTED_MESSAGES.has(rawLower)) {
-        try {
-          await message.delete();
-        } catch (err) {
-          console.warn("[pickup_mute] delete failed:", err.message);
-        }
-        return;
-      }
-    }
 
     // ✅ handle bare specials like ++, --, ++adl, --adl (case-insensitive)
     const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**"]);
