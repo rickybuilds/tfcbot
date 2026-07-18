@@ -393,17 +393,6 @@ try {
 
 		  console.log(`[autoRecap] 🎧 Voice bots arming for match ${a.matchId}`);
 
-		  // 🔑 CRITICAL: tell spectator bot which matchId to use
-		  try {
-			const { setCurrentMatchId } = require("./hldsLogs");
-			if (typeof setCurrentMatchId === "function") {
-			  setCurrentMatchId(a.matchId);
-			  console.log(`[autoRecap] → Told spectator bot to use matchId ${a.matchId}`);
-			}
-		  } catch (err) {
-			console.warn("[autoRecap] Could not setCurrentMatchId:", err);
-		  }
-
 		  try {
 			await startVoiceBots();
 		  } catch (err) {
@@ -728,14 +717,9 @@ await sendRecapWithDemos(client, logsChannel, {
 }
     // ----- end: demo + logs upload helper -----
 
-    // 🎙️ Rule 6: match fully recorded, disarm voice bots
+    // 🎙️ Rule 6: match complete, disarm voice bots
 		if (a.voiceArmed) {
 		  console.log(`[autoRecap] 🎤 Voice bots disarming for match ${a.matchId}`);
-
-		  try {
-			const { stopVoiceRecording } = require("./hldsLogs");
-			if (typeof stopVoiceRecording === "function") stopVoiceRecording();
-		  } catch (_) {}
 
 		  await stopVoiceBots();
 		  a.voiceArmed = false;

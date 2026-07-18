@@ -2,7 +2,6 @@
 "use strict";
 
 const pm2 = require("pm2");
-const { execSync } = require("child_process");
 
 const BOT_SPECTATOR = "tfcbot-spectator";
 const BOT_BLUE = "tfcbot-blue";
@@ -40,53 +39,9 @@ function stopProcess(name) {
   });
 }
 
-/* -------------------------------------------------------------------------- */
-/* Graceful shutdown of spectator when ffmpeg conversion is running           */
-/* -------------------------------------------------------------------------- */
-
-async function waitForSpectatorToFinish() {
-  return new Promise((resolve) => {
-    pm2.list((err, list) => {
-      if (err) return resolve();
-
-      const spec = list.find((p) => p.name === BOT_SPECTATOR);
-      if (!spec) return resolve();
-
-      pm2.launchBus((err, bus) => {
-        if (err) return resolve();
-
-        let done = false;
-
-        bus.on("log:out", (packet) => {
-          if (packet.process.name !== BOT_SPECTATOR) return;
-
-          if (packet.data.includes("Safe to shutdown now")) {
-            if (!done) {
-              done = true;
-              setTimeout(resolve, 500);
-            }
-          }
-        });
-
-        // Safety fallback: max 10 seconds wait
-        setTimeout(() => {
-          if (!done) resolve();
-        }, 10000);
-      });
-    });
-  });
-}
-
-/* -------------------------------------------------------------------------- */
-
 async function startVoiceBots() {
   await connectPM2();
   console.log("[VoiceManager] 🚀 Arming voice bots...");
-
-  // Create named pipes fresh — spectator ffmpeg and blue/red bots all need these
-  try { execSync("rm -f /tmp/blue.pcm /tmp/red.pcm"); } catch {}
-  execSync("mkfifo /tmp/blue.pcm && mkfifo /tmp/red.pcm");
-  console.log("[VoiceManager] ✅ Named pipes created (/tmp/blue.pcm, /tmp/red.pcm)");
 
   // Wait for spectator READY before starting blue/red
   const readyPromise = new Promise((resolve) => {
@@ -127,8 +82,7 @@ async function startVoiceBots() {
   console.log("[VoiceManager] Waiting for spectator to say READY...");
   await readyPromise;
 
-  // Start blue and red — they will open the named pipes for writing
-  // spectator's ffmpeg is already waiting to read from them
+  // Start blue and red after the spectator is ready to accept their TCP streams.
   await Promise.all([startProcess(BOT_BLUE), startProcess(BOT_RED)]);
 
   pm2.disconnect();
@@ -139,18 +93,11 @@ async function stopVoiceBots() {
   await connectPM2();
   console.log("[VoiceManager] 🔻 Disarming voice bots...");
 
-  // Stop blue/red first so they stop writing to the pipes
+  // Stop blue/red first so they stop sending audio to the spectator.
   await stopProcess(BOT_BLUE);
   await stopProcess(BOT_RED);
 
-  // Clean up named pipes
-  try { execSync("rm -f /tmp/blue.pcm /tmp/red.pcm"); } catch {}
-  console.log("[VoiceManager] 🗑️ Named pipes removed");
-
-  // Wait for spectator's ffmpeg recording conversion to finish
-  await waitForSpectatorToFinish();
-
-  // Now safe to stop spectator
+  // No recording conversion is performed, so the spectator can stop immediately.
   await stopProcess(BOT_SPECTATOR);
 
   pm2.disconnect();

@@ -249,30 +249,6 @@ client.once("clientReady", async () => {
     makePcmServer(BLUE_PORT, "blue", bluePass);
     makePcmServer(RED_PORT,  "red",  redPass);
 
-    const CONTROL_PORT = Number(process.env.VOICE_CONTROL_PORT || 6200);
-    net.createServer((sock) => {
-      sock.on("error", (e) => tlog(`[Spectator] control socket error: ${e.message}`));
-      tlog("[Spectator] Control client connected");
-      let buf = "";
-      sock.on("data", (d) => {
-        buf += d.toString("utf8");
-        let idx;
-        while ((idx = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line) continue;
-          try {
-            const msg = JSON.parse(line);
-            tlog("[Spectator] Control msg:", msg.type);
-          } catch (e) {
-            tlog("[Spectator] Bad control msg:", e.message);
-          }
-        }
-      });
-    }).listen(CONTROL_PORT, "127.0.0.1", () => {
-      tlog(`[Spectator] Control port on 127.0.0.1:${CONTROL_PORT}`);
-    });
-
     connection.on(VoiceConnectionStatus.Ready, () => {
       tlog(`[Spectator] Joined voice: ${channel.name}`);
 
@@ -376,7 +352,7 @@ client.once("clientReady", async () => {
       }, 10000);
 
       startFfmpeg();
-      tlog("[Spectator] READY — audio live");
+      tlog("SPECTATOR READY — audio live");
     });
   }
 

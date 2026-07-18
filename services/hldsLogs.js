@@ -2,83 +2,7 @@
 "use strict";
 const dgram = require("dgram");
 const servers = require("../config/rcon");
-const net = require("net");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
-/* -------------------------------------------------------------------------- */
-/* Match ID handoff */
-/* -------------------------------------------------------------------------- */
-let pendingMatchId = null;
-function setCurrentMatchId(matchId) {
-  pendingMatchId = matchId;
-  console.log(`[hldsLogs] Pending matchId set: ${matchId}`);
-  // NEW: If map was armed already, start recording now.
-  for (const [ip, vs] of perSourceVoice.entries()) {
-    if (vs.armed && !vs.recording) {
-      const finalId = takeMatchId();
-      console.log(`[hldsLogs] matchId arrived late → starting voice recording for ${finalId}`);
-      startVoiceRecording(finalId);
-      vs.recording = true;
-    }
-  }
-}
-// Peek without consuming
-function peekMatchId() {
-  return pendingMatchId;
-}
-// Only consume when we REALLY start recording
-function takeMatchId() {
-  const id = pendingMatchId || `unknown_${Date.now()}`;
-  pendingMatchId = null;
-  return id;
-}
-/* -------------------------------------------------------------------------- */
-/* NEW: Simple forwarding to spectator bot via local TCP control */
-/* -------------------------------------------------------------------------- */
-const CONTROL_PORT = Number(process.env.VOICE_CONTROL_PORT || 6200);
-let controlSocket = null;
-let controlQueue = [];
-// ensure we have a socket, flush queued messages once connected
-function ensureControlSocket() {
-  if (controlSocket && !controlSocket.destroyed) return;
-  controlSocket = net.createConnection(
-    { host: "127.0.0.1", port: CONTROL_PORT },
-    () => {
-      console.log("[hldsLogs] Connected to spectator control port");
-      // flush any queued messages
-      for (const msg of controlQueue) {
-        controlSocket.write(msg);
-      }
-      controlQueue = [];
-    }
-  );
-  controlSocket.on("error", err => {
-    console.warn("[hldsLogs] Spectator control error:", err.message);
-    if (!controlSocket.destroyed) controlSocket.destroy();
-    controlSocket = null;
-  });
-  controlSocket.on("close", () => {
-    console.log("[hldsLogs] Spectator control connection closed");
-    controlSocket = null;
-  });
-}
-function sendControlMessage(obj) {
-  const line = JSON.stringify(obj) + "\n";
-  ensureControlSocket();
-  if (controlSocket && !controlSocket.destroyed && controlSocket.writable) {
-    controlSocket.write(line);
-  } else {
-    // queue until we connect
-    controlQueue.push(line);
-  }
-}
-function startVoiceRecording(matchId = "unknown") {
-  console.log(`[hldsLogs] Request → START voice recording for ${matchId}`);
-  sendControlMessage({ type: "start", matchId });
-}
-function stopVoiceRecording() {
-  console.log("[hldsLogs] Request → STOP voice recording");
-  sendControlMessage({ type: "stop" });
-}
 /* -------------------------------------------------------------------------- */
 /* Log Parser — unchanged (still perfect) */
 /* -------------------------------------------------------------------------- */
@@ -155,16 +79,7 @@ return null;
 /* -------------------------------------------------------------------------- */
 /* UDP Listener + Score Pairing */
 /* -------------------------------------------------------------------------- */
-const perSourceVoice = new Map();
 const currentLogFileBySource = new Map();
-function getVoiceState(ip) {
-  let s = perSourceVoice.get(ip);
-  if (!s) {
-    s = { armed: false, recording: false };
-    perSourceVoice.set(ip, s);
-  }
-  return s;
-}
 function startHldsLogReceiver(client, opts = {}, onEvent) {
   if (process.env.NO_HLDS_LISTENER === "1") {
     return { close: () => {} };
@@ -181,26 +96,6 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
     if (parsed.type === "log_closed") currentLogFileBySource.delete(from);
     const evt = { ...parsed, from, ts: Date.now() };
-    // ---------- MAP EVENT → START RECORDING (FIXED) ----------
-    if (evt.type === "map") {
-      const vs = getVoiceState(from);
-      vs.armed = true;
-      const matchId = peekMatchId();
-      if (matchId) {
-        // ONLY NOW do we actually consume it
-        const finalId = takeMatchId();
-        console.log(`[hldsLogs] Starting voice recording for ${finalId}`);
-        startVoiceRecording(finalId);
-        vs.recording = true;
-      } else {
-        console.log(`[hldsLogs] Armed but no matchId yet — will start recording as soon as matchId arrives`);
-        // No 5s grace timer anymore — we wait indefinitely until matchId is set
-        // This is safe because AutoRecap ALWAYS sets it before the real match
-      }
-      onEvent?.(evt);
-      return;
-    }
-
     if (evt.type === "say") {
       const text = String(evt.text || "").trim().toLowerCase();
 
@@ -221,27 +116,6 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
 
         return;
       }
-    }
-	
-    // ---------- FINAL SCORE → STOP RECORDING ----------
-    if (evt.type === "score_pair") {
-      onEvent?.(evt);
-      const vs = getVoiceState(from);
-      if (vs.recording) {
-        console.log("[hldsLogs] Final score detected → stopping voice recording");
-        stopVoiceRecording();
-        vs.recording = false;
-      }
-      return;
-    }
-    // ---------- LOG CLOSED → CLEANUP ----------
-    if (evt.type === "log_closed") {
-      const vs = getVoiceState(from);
-      if (vs.recording) stopVoiceRecording();
-      vs.recording = false;
-      vs.armed = false;
-      onEvent?.(evt);
-      return;
     }
     // ---------- SCORE PAIRING LOGIC (unchanged) ----------
   let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
@@ -281,7 +155,4 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
 /* -------------------------------------------------------------------------- */
 module.exports = {
   startHldsLogReceiver,
-  setCurrentMatchId,
-  startVoiceRecording,
-  stopVoiceRecording,
 };
