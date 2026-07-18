@@ -21,7 +21,28 @@ async function getHealth(server){
   return await res.json();
 }
 
-function statusLine(h){
+const REGIONS = ["east", "central", "west"];
+
+function getRegion(value){
+  const normalized=String(value||"").toLowerCase();
+  return REGIONS.find(region => normalized.includes(region));
+}
+
+function displayServerName(server,h){
+  const expectedRegion=getRegion(server.name);
+  const reportedName=h.server||"unknown";
+  const reportedRegion=getRegion(reportedName);
+
+  // A health agent can be cloned with a stale server name. Do not let one
+  // region identify itself as another region in the combined status embed.
+  if(expectedRegion && reportedRegion && expectedRegion!==reportedRegion){
+    return expectedRegion.toUpperCase();
+  }
+
+  return reportedName;
+}
+
+function statusLine(server,h){
 
   const udp=h.udp||{};
 
@@ -34,7 +55,7 @@ const bad =
   const icon=bad?"🔴":"🟢";
 
   return [
-`${icon} ${h.server||"unknown"}`,
+`${icon} ${displayServerName(server,h)}`,
 `Uptime: \`${h.uptime||"n/a"}\``,
 `Load: \`${h.load||"n/a"}\``,
 `Memory: \`${h.memory||"n/a"}\``,
@@ -69,7 +90,7 @@ module.exports={
 
         fields.push({
           name:server.name,
-          value:statusLine(health),
+          value:statusLine(server,health),
           inline:true
         });
 
@@ -98,3 +119,5 @@ module.exports={
   }
 
 };
+
+module.exports._private={ displayServerName, statusLine };
