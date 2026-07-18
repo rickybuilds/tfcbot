@@ -2,6 +2,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 const DEFAULT_POLL_MS = 20_000;
+const ACTIVE_SPEEDRUN_RULESET = 2;
 
 const CLASS_NAMES = {
   1: "Scout",
@@ -63,17 +64,19 @@ async function getCurrentWorldRecords(pool) {
     INNER JOIN (
       SELECT map, class_id, MIN(best_time_ms) AS best_time_ms
       FROM speedrun_records
-      WHERE best_time_ms IS NOT NULL
+      WHERE ruleset = ?
+        AND best_time_ms IS NOT NULL
         AND best_time_ms > 0
       GROUP BY map, class_id
     ) wr
       ON wr.map = r.map
      AND wr.class_id = r.class_id
      AND wr.best_time_ms = r.best_time_ms
-    WHERE r.best_time_ms IS NOT NULL
+    WHERE r.ruleset = ?
+      AND r.best_time_ms IS NOT NULL
       AND r.best_time_ms > 0
     ORDER BY r.map, r.class_id, r.updated_at ASC
-  `);
+  `, [ACTIVE_SPEEDRUN_RULESET, ACTIVE_SPEEDRUN_RULESET]);
 
   const seen = new Set();
   return rows.filter((row) => {
