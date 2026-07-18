@@ -56,7 +56,7 @@ function register(reg, { config }) {
             "`!report <id> (blue|red|tie)` — Report match result\n" +
             "`!fixreport <id> (blue|red|tie)` — Correct match result\n" +
             "`!delmatch <id>` — Delete match and revert Elo\n" +
-            "`!shuffle <matchId>` — Randomly reshuffle teams for a live match\n" +
+            "`!shuffle <matchId> [#]` — Apply the next or a numbered Elo scenario\n" +
             "`!setmap <matchId> <map>` — Manually correct the map name\n" +
             "`!unlock <matchId>` — Force-unlock a stuck server",
         },

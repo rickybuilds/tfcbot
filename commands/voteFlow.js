@@ -8,7 +8,7 @@ const { guardChannel } = require("../lib/guards");
 const { startVote } = require("../lib/vote");
 const { randomInt } = require("crypto");
 const { pickUniqueMaps, buildMapOptionsFromList, recentMapExclusions } = require("../lib/maps");
-const { generateFairScenarios, buildTeamScenariosEmbed, summarizeSplit, getRating } = require("../lib/odds");
+const { buildMatchScenarios, buildTeamScenariosEmbed } = require("../lib/odds");
 const {
   isRealDiscordId,
   mention,
@@ -693,6 +693,23 @@ async function finalizeMatch(
     console.error("[finalizeMatch] autoArmFromMatchReady failed:", e);
   }
 
+  // Build this once so the saved scenario numbers exactly match the posted card.
+  const teamScenarios = buildMatchScenarios(
+    bal.blue,
+    bal.red,
+    players,
+    elo,
+    4
+  );
+  const teamScenarioState = JSON.stringify({
+    version: 1,
+    selected: 1,
+    scenarios: teamScenarios.map(s => ({
+      blue: s.blue.map(p => String(p.id)),
+      red: s.red.map(p => String(p.id)),
+    })),
+  });
+
   // Post scenarios (force Scenario 1 = actual teams)
   try {
     const chanId = String(config.channels.odds || "").trim();
@@ -703,31 +720,12 @@ async function finalizeMatch(
       const need = ["ViewChannel", "SendMessages", "EmbedLinks"];
 
       if (perms && need.every(p => perms.has(p))) {
-        const ratings = new Map([...bal.blue, ...bal.red].map(p => [p.id, getRating(elo, p)]));
-        const scenarios = [];
-
-        // Scenario 1: actual teams
-        scenarios.push({
-          blue: bal.blue,
-          red: bal.red,
-          ...summarizeSplit(bal.blue, bal.red, ratings),
-          score: Math.abs(bal.avgBlue - bal.avgRed),
-        });
-
-        // Add 3 alternative scenarios
-        const extras = generateFairScenarios(players, elo, 4);
-        for (const s of extras) {
-          const key = s.blue.map(p => p.id).sort().join("|");
-          const baseKey = scenarios[0].blue.map(p => p.id).sort().join("|");
-          if (key !== baseKey) scenarios.push(s);
-        }
-
         const scenEmb = buildTeamScenariosEmbed({
           matchId,
           serverName: serverObj?.name,
           ip: serverObj?.ip,
           mapName: mapObj?.name,
-          scenarios,
+          scenarios: teamScenarios,
           kFactor: Number(process.env.ELO_K || 32),
           elo,
           match: null,
@@ -742,13 +740,17 @@ async function finalizeMatch(
 
   // DB insert
 	try {
+	  const matchColumns = elo.db.prepare("PRAGMA table_info(matches)").all();
+	  if (!matchColumns.some(c => c.name === "team_scenarios")) {
+		elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
+	  }
 	  elo.db.prepare(`
 	  INSERT INTO matches (
 		match_id, created_at, map_name, server_name,
 		mode, avg_blue, avg_red, rng_multiplier, bonus_elo,
-		blue_ids, red_ids, status
+		blue_ids, red_ids, team_scenarios, status
 	  )
-	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
+	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
 	  ON CONFLICT(match_id) DO UPDATE SET
 		map_name=excluded.map_name,
 		server_name=excluded.server_name,
@@ -759,6 +761,7 @@ async function finalizeMatch(
 		bonus_elo=excluded.bonus_elo,
 		blue_ids=excluded.blue_ids,
 		red_ids=excluded.red_ids,
+		team_scenarios=excluded.team_scenarios,
 		status='in_progress'
 	`).run(
 	  matchId,
@@ -773,7 +776,8 @@ async function finalizeMatch(
 
 	  // 👉 Save full objects instead of just IDs
 	  JSON.stringify(bal.blue.map(p => p.id)), // only IDs
-	  JSON.stringify(bal.red.map(p => p.id))   // only IDs
+	  JSON.stringify(bal.red.map(p => p.id)),  // only IDs
+	  teamScenarioState
 	);
 } catch (e) {
   console.error("[finalizeMatch] DB insert failed:", e);

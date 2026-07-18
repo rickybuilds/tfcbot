@@ -211,13 +211,30 @@ async function run(message, args, deps) {
 
 	const newBlueIds = scenario1.blue.map(p => String(p.id));
 	const newRedIds  = scenario1.red.map(p => String(p.id));
+	const teamScenarioState = JSON.stringify({
+	  version: 1,
+	  selected: 1,
+	  scenarios: scenarios.map(s => ({
+		blue: s.blue.map(p => String(p.id)),
+		red: s.red.map(p => String(p.id)),
+	  })),
+	});
 
 	// Update DB with REAL teams
+	const matchColumns = elo.db.prepare("PRAGMA table_info(matches)").all();
+	if (!matchColumns.some(c => c.name === "team_scenarios")) {
+	  elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
+	}
 	elo.db.prepare(`
 	  UPDATE matches
-	  SET blue_ids = ?, red_ids = ?
+	  SET blue_ids = ?, red_ids = ?, team_scenarios = ?
 	  WHERE match_id = ?
-	`).run(JSON.stringify(newBlueIds), JSON.stringify(newRedIds), matchId);
+	`).run(
+	  JSON.stringify(newBlueIds),
+	  JSON.stringify(newRedIds),
+	  teamScenarioState,
+	  matchId
+	);
 
 	// Update in-memory DB match object
 	dbMatch.blue_ids = JSON.stringify(newBlueIds);
