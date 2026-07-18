@@ -85,8 +85,6 @@ async function syncSpeedrunPlayerLinks({ db, speedrunDb, logger = console }) {
 
       await conn.commit();
 
-      logger.log(`[speedrun-link-sync] upserted=${upserted} deleted=${deleted}`);
-
       return { ok: true, upserted, deleted };
     } catch (err) {
       await conn.rollback();

@@ -230,11 +230,6 @@ module.exports = {
 	// --- Parse team IDs safely (they're stored as JSON strings in DB)
 	const idsBlue = new Set(safeParseIds(m.blue_ids));
 	const idsRed  = new Set(safeParseIds(m.red_ids));
-	if (mid === "MECWCS") {
-	  console.log("[elowith DEBUG] MECWCS blue_ids raw =", m.blue_ids);
-	  console.log("[elowith DEBUG] MECWCS parsed =", safeParseIds(m.blue_ids));
-	  console.log("[elowith DEBUG] uid =", uid, "partnerId =", partnerId);
-	}
 
 	const sameTeam =
 	  (idsBlue.has(uid) && idsBlue.has(partnerId)) ||

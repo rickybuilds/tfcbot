@@ -170,7 +170,7 @@ function attachAutoRecap(ctx, options = {}) {
         return;
       }
     }
-    console.log(`[DEBUG post] sending to channel ${channelId}:`, content);
+    console.log(`[autoRecap post] sending to channel ${channelId}:`, content);
     return ch.send(content);
   }
 

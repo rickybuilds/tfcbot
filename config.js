@@ -8,7 +8,6 @@ module.exports = {
   // Channels
   channels: {
     odds: process.env.ODDS_CHANNEL_ID,
-    oddsDebug: process.env.ODDS_DEBUG === "true",
     pickup: process.env.PICKUP_CHANNEL_ID,
     eloAdmin: process.env.ELO_ADMIN_CHANNEL_ID,
     recap: process.env.RECAP_CHANNEL_ID,

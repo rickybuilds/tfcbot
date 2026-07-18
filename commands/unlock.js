@@ -32,8 +32,6 @@ module.exports = {
         return message.reply("Usage: `!unlock <matchId>`");
       }
 
-      console.log("[!unlock DEBUG] Looking for matchId:", matchId);
-
       const dbPath = path.resolve("/root/tfcbot/elo.db");
       const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
 
@@ -48,8 +46,6 @@ module.exports = {
             return;
           }
 
-          console.log("[!unlock DEBUG] DB Row:", row);
-
           if (!row) {
             message.reply(`⚠️ No match found with ID **${matchId}**.`);
             db.close();
@@ -60,8 +56,6 @@ module.exports = {
           const server = state.servers.find(
             (s) => s.name.toLowerCase() === serverName.toLowerCase()
           );
-
-          console.log("[!unlock DEBUG] Found server:", server);
 
           if (!server) {
             message.reply(`⚠️ No server record found for **${serverName}** in state.`);

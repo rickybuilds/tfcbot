@@ -279,28 +279,6 @@ async function run(message, args, deps) {
 
   const pickupChannel = message.guild.channels.cache.get(process.env.PICKUP_CHANNEL_ID);
 
-  console.log("========== !sub PICKUP DEBUG ==========");
-console.log("[sub] PICKUP_CHANNEL_ID:", process.env.PICKUP_CHANNEL_ID);
-
-console.log(
-  "[sub] pickupChannel:",
-  pickupChannel
-    ? `FOUND (${pickupChannel.name} / ${pickupChannel.id})`
-    : "❌ NOT FOUND"
-);
-
-console.log(
-  "[sub] serverEntry:",
-  serverEntry
-    ? `FOUND (${serverEntry.name} @ ${serverEntry.host}:${serverEntry.port})`
-    : "❌ NOT FOUND"
-);
-
-console.log("[sub] dbMatch.server_name:", dbMatch.server_name);
-console.log("[sub] fullIp:", fullIp);
-console.log("=======================================");
-
-
 	if (pickupChannel) {
 	  const embed = {
 		color: 0x57f287,

@@ -219,7 +219,6 @@ function eligibleStreakPlayers(players, elo) {
         },
 
         onFinish: async ({ winner, eligible, voted }) => {
-			console.log("[DEBUG onFinish payload]", JSON.stringify({ winner, eligible, voted }, null, 2));
           const missing = eligible
             .filter(uid => isRealDiscordId(uid))
             .filter(uid => !voted.has(uid));

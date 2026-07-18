@@ -7,7 +7,6 @@
 
 require("dotenv").config();
 console.log("[MAIN] Loaded state file:", require.resolve("./lib/state"));
-console.log("[DEBUG] ADMIN_ROLE_ID =", process.env.ADMIN_ROLE_ID);
 
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
@@ -675,7 +674,6 @@ client.on("messageCreate", async (message) => {
 
     if (BARE_SPECIAL.has(rawLower)) {
       const fn = registry.get(rawLower); // registry keys are lowercase
-      if (!fn) console.log("[DEBUG] No handler for", rawLower);
       if (fn) return fn(message, []);
     }
 
