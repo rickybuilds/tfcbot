@@ -112,7 +112,7 @@ console.log("[INIT] Lock sets initialized:", {
 // ============================================================================
 
 const registry = new Map();
-function persistQueueSoon() { try { queueStore.save(state.queue); } catch {} }
+function persistQueueSoon(onError) { try { queueStore.save(state.queue, onError); } catch (e) { onError?.(e); } }
 global.persistQueueSoon = persistQueueSoon;
 
 const deps = { 

@@ -1,24 +1,9 @@
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const { armed } = require("../services/autoRecap");
 const { isAdmin } = require("../lib/guards");
 const { getMapList } = require("../lib/maps");
-
-const MAP_FILE = path.resolve(__dirname, "..", "mapCaptures.json");
-
-function loadCaps() {
-  try {
-    return JSON.parse(fs.readFileSync(MAP_FILE, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function saveCaps(data) {
-  fs.writeFileSync(MAP_FILE, JSON.stringify(data, null, 2));
-}
+const { loadMapCaptures: loadCaps, saveMapCaptures: saveCaps } = require("../lib/mapCapturesStore");
 
 function getCurrentMap() {
   const first = [...armed.values()][0];

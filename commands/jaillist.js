@@ -1,8 +1,6 @@
 // commands/jaillist.js
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const { EmbedBuilder } = require("discord.js");
 const { isAdmin } = require("../lib/guards");
 
@@ -12,23 +10,7 @@ async function register(reg, deps) {
   reg.set("jaillist", async (message) => {
     if (!isAdmin(message)) return;
 
-    let allJailed = {};
-
-    // ✅ Try reading from jailStore first
-    if (jailStore?.data && typeof jailStore.data === "object") {
-      allJailed = jailStore.data;
-    } else {
-      // ✅ Fallback to direct file read
-      const jailFile = path.join(__dirname, "../jails.json");
-      if (fs.existsSync(jailFile)) {
-        try {
-          const raw = fs.readFileSync(jailFile, "utf8");
-          allJailed = JSON.parse(raw);
-        } catch (err) {
-          console.error("[jaillist] Failed to read jails.json:", err);
-        }
-      }
-    }
+    const allJailed = jailStore.all();
 
     const ids = Object.keys(allJailed || {});
     if (ids.length === 0) {

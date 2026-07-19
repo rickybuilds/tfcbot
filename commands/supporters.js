@@ -1,23 +1,8 @@
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
+const { loadSupporters, saveSupporters } = require("../lib/supporters");
 
 const OWNER_ID = "255834576742645761";
-const SUPPORTERS_PATH = path.resolve(process.cwd(), "supporters.json");
-
-function loadSupporters(){
-  try{
-    if(!fs.existsSync(SUPPORTERS_PATH)) fs.writeFileSync(SUPPORTERS_PATH, "[]\n");
-    return JSON.parse(fs.readFileSync(SUPPORTERS_PATH, "utf8"));
-  }catch{
-    return [];
-  }
-}
-
-function saveSupporters(ids){
-  fs.writeFileSync(SUPPORTERS_PATH, JSON.stringify(ids.map(String), null, 2) + "\n");
-}
 
 function getTargetId(message,args){
   const mentioned = message.mentions.users.first();
@@ -45,7 +30,7 @@ module.exports = {
       return message.reply(remove ? "Usage: `!addsupport remove @user`" : "Usage: `!addsupport @user`");
     }
 
-    const supporters = loadSupporters().map(String);
+    const supporters = loadSupporters({ initialize: true }).map(String);
 
     if(remove){
       if(!supporters.includes(id)) return message.reply("That user is not currently a supporter.");

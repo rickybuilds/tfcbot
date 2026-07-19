@@ -10,6 +10,7 @@ const { runRconCommand } = require("./rconClient");
 const config = require("../config");
 const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
+const { loadMapCaptures } = require("../lib/mapCapturesStore");
 
 console.log("[AUTORECAP] Loaded state file:", require.resolve("../lib/state"));
 console.log("[AUTORECAP queueCheck] state.locks.servers =", state.locks?.servers);
@@ -17,8 +18,6 @@ console.log("[AUTORECAP queueCheck] state.lockedServers =", state.lockedServers)
 console.log("[AUTORECAP queueCheck] autoRecap.locks =", state.autoRecap?.state?.locks?.servers);
 
 const armed = new Map();
-
-const mapCapturesPath = path.resolve(__dirname, "..", "mapCaptures.json");
 
 function getLiveStatePath(serverKey){return `/root/tfcbot/live_${serverKey}.json`;}
 
@@ -85,21 +84,13 @@ function clearLiveState(serverKey) {
   }
 }
 
-function loadMapCaptures() {
-  try {
-    if (!fs.existsSync(mapCapturesPath)) return {};
-    return JSON.parse(fs.readFileSync(mapCapturesPath, "utf8"));
-  } catch (err) {
-    console.warn("[autoRecap] failed to load mapCaptures.json:", err.message);
-    return {};
-  }
-}
-
 function getCaptureRule(mapName, evt) {
   const triggerText = String(evt.trigger || evt.name || evt.raw || "").toLowerCase();
   const mapKey = normalize(mapName);
 
-  const json = loadMapCaptures();
+  const json = loadMapCaptures({
+    onError: err => console.warn("[autoRecap] failed to load mapCaptures.json:", err.message),
+  });
 
   const globalRules = json.global || [];
 
