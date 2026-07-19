@@ -11,6 +11,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const ensureDir = require("../lib/ensureDir");
 const SFTPClient = require("ssh2-sftp-client");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
@@ -32,11 +33,6 @@ const API_KEY = process.env.HAMPALYZER_API_KEY || "";
 /* -------------------------------------------------------------------------- */
 /* 🧱 Helpers                                                                 */
 /* -------------------------------------------------------------------------- */
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-  return p;
-}
-
 function detectMapInLog(filePath) {
   try {
     const firstLines = fs.readFileSync(filePath, "utf8")

@@ -161,4 +161,4 @@ function fmtUptime(sec) {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-module.exports = { gatherHealth, formatDiscord };
+module.exports = { gatherHealth, formatDiscord, fmtUptime };

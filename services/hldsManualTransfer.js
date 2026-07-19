@@ -3,12 +3,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const ensureDir = require("../lib/ensureDir");
 const SFTPClient = require("ssh2-sftp-client");
 
 const REMOTE_DIR = process.env.HL_REMOTE_LOG_DIR || "/root/steamcmd/tfc/tfc/logs";
 const TMP_DIR    = path.join(process.cwd(), "tmp", "hlds-manual");
-
-function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); return p; }
 
 async function sftpConnect() {
   const sftp = new SFTPClient();

@@ -1,7 +1,7 @@
 // commands/health.js
 "use strict";
 
-const { gatherHealth } = require("../services/health");
+const { gatherHealth, fmtUptime } = require("../services/health");
 const { EmbedBuilder } = require("discord.js");
 
 const OVERALL_TIMEOUT_MS = Number(process.env.HEALTH_TIMEOUT_MS || 12000);
@@ -12,14 +12,6 @@ function withTimeout(promise, ms, label = "health") {
     timer = setTimeout(() => reject(new Error(`[${label}] Timeout after ${ms}ms`)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-function fmtUptime(sec) {
-  sec = Math.floor(sec);
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  return `${h.toString().padStart(2,"0")}:${m.toString().padStart(2,"0")}:${s.toString().padStart(2,"0")}`;
 }
 
 module.exports = {

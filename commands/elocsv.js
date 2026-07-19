@@ -2,22 +2,11 @@
 "use strict";
 const { AttachmentBuilder } = require("discord.js");
 const config = require("../config");
+const { csvEscape, isoFrom } = require("../lib/csv");
 
 const ALLOWED_PUBLIC_CHANNEL = String(config.channels.pickup);
 
 /* ------------------------- helpers ------------------------- */
-const csvEscape = (s) => {
-  if (s == null) return "";
-  const str = String(s);
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-};
-
-function isoFrom(ts) {
-  if (!ts && ts !== 0) return new Date().toISOString();
-  if (typeof ts === "number") return new Date(ts * 1000).toISOString();
-  return new Date(ts).toISOString();
-}
-
 function headerLine() {
   return [
     "GameIndex",
