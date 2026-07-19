@@ -14,6 +14,7 @@
  */
 
 const { EmbedBuilder } = require("discord.js");
+const { sendAuditLog } = require("../lib/auditLog");
 
 // ---------- helpers ----------
 const safeArr = (x) => (Array.isArray(x) ? x : []);
@@ -107,19 +108,12 @@ module.exports = {
   async run(message, deps) {
     const { state, matchesStore, elo, config } = deps || {};
 	// ------------------ audit log ------------------
-	try {
-	  const channelId = config?.channels?.audit;
-	  if (message.client && channelId) {
-		const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-		if (auditCh && auditCh.isTextBased()) {
-		  await auditCh.send(
-			`🗺️ PERMAPELO: <@${message.author.id}> ran \`!permapelo ${message.content.split(/\s+/).slice(1).join(" ")}\``
-		  );
-		}
-	  }
-	} catch (err) {
-	  console.warn("[permapelo audit] failed:", err);
-	}
+	await sendAuditLog({
+	  client: message.client,
+	  channelId: config?.channels?.audit,
+	  payload: `🗺️ PERMAPELO: <@${message.author.id}> ran \`!permapelo ${message.content.split(/\s+/).slice(1).join(" ")}\``,
+	  errorMessage: "[permapelo audit] failed:",
+	});
 	// ------------------------------------------------
 
     const args = (message.content || "").split(/\s+/).slice(1);

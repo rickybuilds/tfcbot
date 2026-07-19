@@ -1,5 +1,7 @@
   // commands/mute.js
 
+const { sendAuditLog: sendSharedAuditLog } = require("../lib/auditLog");
+
 const OWNER_IDS = new Set([
   "255834576742645761", // Ricky
   "468578577537826831", // Rufio
@@ -7,24 +9,16 @@ const OWNER_IDS = new Set([
 ]);
 
 async function sendAuditLog(message, context, content) {
-  try {
-    const auditChannelId = context.config?.channels?.audit;
-    if (!auditChannelId) return;
-
-    let auditChannel = message.guild?.channels?.cache?.get(auditChannelId);
-
-    if (!auditChannel && message.client?.channels?.fetch) {
-      try {
-        auditChannel = await message.client.channels.fetch(auditChannelId);
-      } catch {}
-    }
-
-    if (auditChannel) {
-      await auditChannel.send({ content });
-    }
-  } catch (err) {
-    console.error("[pickup_mute] Failed to log audit:", err);
-  }
+  return sendSharedAuditLog({
+    client: message.client,
+    guild: message.guild,
+    channelId: context.config?.channels?.audit,
+    payload: { content },
+    cacheFirst: true,
+    requireTextBased: false,
+    errorMessage: "[pickup_mute] Failed to log audit:",
+    errorLevel: "error",
+  });
 }
 
 module.exports = {

@@ -3,6 +3,7 @@
 const { AttachmentBuilder } = require("discord.js");
 const config = require("../config");
 const { csvEscape, isoFrom } = require("../lib/csv");
+const { sendAuditLog } = require("../lib/auditLog");
 
 const ALLOWED_PUBLIC_CHANNEL = String(config.channels.pickup);
 
@@ -37,20 +38,12 @@ module.exports = {
   async run(message, deps) {
     const { elo } = deps || {};
 	// ------------------ audit log ------------------
-	try {
-	  const config = deps?.config;
-	  const channelId = config?.channels?.audit;
-	  if (message.client && channelId) {
-		const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-		if (auditCh && auditCh.isTextBased()) {
-		  await auditCh.send(
-			`📄 ELOCSV: <@${message.author.id}> ran \`!elocsv\``
-		  );
-		}
-	  }
-	} catch (err) {
-	  console.warn("[elocsv audit] failed:", err);
-	}
+	await sendAuditLog({
+	  client: message.client,
+	  channelId: deps?.config?.channels?.audit,
+	  payload: `📄 ELOCSV: <@${message.author.id}> ran \`!elocsv\``,
+	  errorMessage: "[elocsv audit] failed:",
+	});
 	// ------------------------------------------------
 
     const uid = String(message.author?.id || "");

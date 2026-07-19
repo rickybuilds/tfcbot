@@ -2,6 +2,7 @@
 "use strict";
 
 const { isAdmin } = require("../lib/guards");
+const { sendAuditLog } = require("../lib/auditLog");
 
 async function register(reg, deps) {
   const { jailStore, config } = deps;
@@ -40,19 +41,12 @@ async function register(reg, deps) {
       }
 
       // ------------------ audit log ------------------
-      try {
-        const channelId = config?.channels?.audit;
-        if (message.client && channelId) {
-          const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-          if (auditCh && auditCh.isTextBased()) {
-            await auditCh.send(
-              `✅ MANUAL UNJAIL: <@${message.author.id}> unjailed <@${target.id}>`
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("[unjail audit] failed:", err);
-      }
+      await sendAuditLog({
+        client: message.client,
+        channelId: config?.channels?.audit,
+        payload: `✅ MANUAL UNJAIL: <@${message.author.id}> unjailed <@${target.id}>`,
+        errorMessage: "[unjail audit] failed:",
+      });
       // ------------------------------------------------
 
     } catch (err) {

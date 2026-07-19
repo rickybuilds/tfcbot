@@ -2,6 +2,7 @@
 "use strict";
 
 const config = require("../config");
+const { sendAuditLog } = require("../lib/auditLog");
 
 function register(reg, { privacy }) {
   reg.set("privacy", async (message, args) => {
@@ -60,29 +61,19 @@ function register(reg, { privacy }) {
     }
 
     // 🧾 Log to audit channel (if available)
-    try {
-      const auditChannelId = config.channels.audit;
-      let auditChannel = null;
-
-      if (guild && guild.channels?.cache) {
-        auditChannel = guild.channels.cache.get(auditChannelId);
-      }
-
-      // If not found (e.g. command in DM), try global fetch
-      if (!auditChannel && message.client?.channels?.fetch) {
-        try { auditChannel = await message.client.channels.fetch(auditChannelId); } catch {}
-      }
-
-      if (auditChannel) {
-        await auditChannel.send({
-          content: `🕶️ **Privacy ${requestedHidden ? "ENABLED" : "DISABLED"}** by <@${id}> (${userTag})`,
-        });
-      } else {
-        console.warn("[privacy.js] ⚠️ Audit channel not found or not accessible.");
-      }
-    } catch (err) {
-      console.error("[privacy.js] Failed to log to audit channel:", err);
-    }
+    await sendAuditLog({
+      client: message.client,
+      guild,
+      channelId: config.channels.audit,
+      payload: {
+        content: `🕶️ **Privacy ${requestedHidden ? "ENABLED" : "DISABLED"}** by <@${id}> (${userTag})`,
+      },
+      cacheFirst: true,
+      requireTextBased: false,
+      missingMessage: "[privacy.js] ⚠️ Audit channel not found or not accessible.",
+      errorMessage: "[privacy.js] Failed to log to audit channel:",
+      errorLevel: "error",
+    });
   });
 }
 

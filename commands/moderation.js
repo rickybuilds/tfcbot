@@ -4,6 +4,7 @@
 const { PermissionsBitField } = require("discord.js");
 const { postQueueBoard } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
+const { sendAuditLog } = require("../lib/auditLog");
 
 	function isAdmin(message, config) {
 	  const m = message.member;
@@ -26,12 +27,11 @@ const { refreshBotName } = require("../lib/botName");
 	async function giveRole(member, roleId) { if (roleId) await member.roles.add(roleId).catch(() => {}); }
 	async function removeRole(member, roleId) { if (roleId) await member.roles.remove(roleId).catch(() => {}); }
 
-	async function audit(message, text, config) {
-	  try {
-		const ch = await message.client.channels.fetch(config.channels.audit).catch(() => null);
-		if (ch && ch.isTextBased()) await ch.send(text);
-	  } catch {}
-	}
+	const audit = (message, text, config) => sendAuditLog({
+	  client: message.client,
+	  channelId: config.channels.audit,
+	  payload: text,
+	});
 
 	function register(registry, deps) {
 	  const { state, elo, privacy, config, banStore } = deps;

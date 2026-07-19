@@ -2,6 +2,7 @@
 "use strict";
 
 const { isAdmin } = require("../lib/guards");
+const { sendAuditLog } = require("../lib/auditLog");
 
 async function register(reg, deps) {
   const { elo, config, state } = deps;
@@ -78,19 +79,12 @@ async function register(reg, deps) {
       }
 
       // --- Audit log ---
-      try {
-        const channelId = config?.channels?.audit;
-        if (message.client && channelId) {
-          const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-          if (auditCh && auditCh.isTextBased()) {
-            await auditCh.send(
-              `🗺️ **SETMAP:** <@${message.author.id}> changed map for **${matchId}** → **${newMap}**`
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("[setmap audit] failed:", err);
-      }
+      await sendAuditLog({
+        client: message.client,
+        channelId: config?.channels?.audit,
+        payload: `🗺️ **SETMAP:** <@${message.author.id}> changed map for **${matchId}** → **${newMap}**`,
+        errorMessage: "[setmap audit] failed:",
+      });
     } catch (err) {
       console.error("[!setmap error]", err);
       await message.reply("❌ Failed to update map. Check logs for details.");

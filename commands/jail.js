@@ -3,6 +3,7 @@
 
 const ms = require("ms");
 const { isAdmin } = require("../lib/guards");
+const { sendAuditLog } = require("../lib/auditLog");
 
 async function register(reg, deps) {
   const { config, jailStore } = deps;
@@ -60,19 +61,12 @@ for (const [, role] of target.roles.cache) {
       await message.channel.send(`${target} is now in Jail for ${durationStr} — "${reason}"`);
 
       // ------------------ audit log ------------------
-      try {
-        const channelId = config?.channels?.audit;
-        if (message.client && channelId) {
-          const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-          if (auditCh && auditCh.isTextBased()) {
-            await auditCh.send(
-              `⛓️ JAIL: <@${message.author.id}> jailed <@${target.id}> for ${durationStr} — "${reason}" (until ${until})`
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("[jail audit] failed:", err);
-      }
+      await sendAuditLog({
+        client: message.client,
+        channelId: config?.channels?.audit,
+        payload: `⛓️ JAIL: <@${message.author.id}> jailed <@${target.id}> for ${durationStr} — "${reason}" (until ${until})`,
+        errorMessage: "[jail audit] failed:",
+      });
       // ------------------------------------------------
       
     } catch (err) {

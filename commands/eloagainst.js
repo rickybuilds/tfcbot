@@ -2,6 +2,7 @@
 "use strict";
 
 const { EmbedBuilder, AttachmentBuilder } = require("discord.js");
+const { sendAuditLog } = require("../lib/auditLog");
 
 function formatTimestamp() {
   const now = new Date();
@@ -114,20 +115,12 @@ module.exports = {
     const { elo, matchesStore, state } = deps || {};
 
     // ------------------ audit log ------------------
-    try {
-      const config = deps?.config;
-      const channelId = config?.channels?.audit;
-      if (message.client && channelId) {
-        const auditCh = await message.client.channels.fetch(channelId).catch(() => null);
-        if (auditCh && auditCh.isTextBased()) {
-		await auditCh.send(
-		  `📊 **ELOAGAINST** — <@${message.author.id}> ran \`!eloagainst ${message.content.split(/\s+/)[1] || ""}\` • ${formatTimestamp()}`
-		);
-        }
-      }
-    } catch (err) {
-      console.warn("[eloagainst audit] failed:", err);
-    }
+    await sendAuditLog({
+      client: message.client,
+      channelId: deps?.config?.channels?.audit,
+      payload: `📊 **ELOAGAINST** — <@${message.author.id}> ran \`!eloagainst ${message.content.split(/\s+/)[1] || ""}\` • ${formatTimestamp()}`,
+      errorMessage: "[eloagainst audit] failed:",
+    });
     // ------------------------------------------------
 
     const uid = String(message.author?.id || "");
