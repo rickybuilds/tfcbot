@@ -150,12 +150,6 @@
     "tier": 2
   },
   {
-    "key": "pitfall-f816",
-    "name": "pitfall",
-    "mirv": 2,
-    "tier": 3
-  },
-  {
     "key": "proton-l-baf0",
     "name": "proton_l",
     "mirv": 1,
@@ -196,5 +190,11 @@
     "name": "2trof_b4",
     "mirv": 0,
     "tier": 2
+  },
+  {
+    "key": "foundry-b3-988e",
+    "name": "foundry_b3",
+    "mirv": 1,
+    "tier": 3
   }
 ]
