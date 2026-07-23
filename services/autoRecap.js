@@ -11,6 +11,12 @@ const config = require("../config");
 const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
 const { loadMapCaptures } = require("../lib/mapCapturesStore");
+const {
+  calculateMatchScores,
+  getTeamStartPlan,
+  logicalTeamForPhysical,
+  normalizeTeam1Starts,
+} = require("../lib/teamStart");
 
 console.log("[AUTORECAP] Loaded state file:", require.resolve("../lib/state"));
 console.log("[AUTORECAP queueCheck] state.locks.servers =", state.locks?.servers);
@@ -165,7 +171,7 @@ function attachAutoRecap(ctx, options = {}) {
     return ch.send(content);
   }
 
-  function arm({ matchId, map, serverIp, teams }) {
+  function arm({ matchId, map, serverIp, teams, team1Starts }) {
     const serverKey = determineServerKey(serverIp);
 const k = keyOf(serverIp);
 
@@ -178,6 +184,7 @@ const k = keyOf(serverIp);
       serverKey,
       serverName: rconCfg[serverKey]?.name || serverKey,
       teams: teams || null,
+      team1Starts: normalizeTeam1Starts(team1Starts),
       t0: Date.now(),
       lastMapSeen: null,
       half: 0,
@@ -195,7 +202,8 @@ const k = keyOf(serverIp);
 
 	post(
 	  recapChannel,
-	  `🟢 Armed **${matchId}** on ${serverKey.toUpperCase()} (${serverIp}) — map ${map} (TTL ${ttlMin}m)`
+	  `🟢 Armed **${matchId}** on ${serverKey.toUpperCase()} (${serverIp}) — ` +
+	  `map ${map}, Team 1 starts ${ctx.team1Starts} (TTL ${ttlMin}m)`
 	).catch?.(() => {});
 
   }
@@ -380,6 +388,17 @@ try {
 
       // 🎙️ Rule 1: arm voice bots when the correct match map loads
 		if (!a.voiceArmed && looseMapEqual(evt.name, a.map)) {
+		  const teamStartPlan = getTeamStartPlan(a.team1Starts);
+		  const label = a.serverKey?.toUpperCase() || "SERVER";
+		  try {
+		    await runRconCommand(
+		      a.serverKey,
+		      `hostname "fun stuff ${label} - T1 ${a.team1Starts.toUpperCase()} / T2 ${teamStartPlan.team2Starts.toUpperCase()}"`
+		    );
+		  } catch (err) {
+		    console.warn("[autoRecap] Failed to set starting-order hostname:", err);
+		  }
+
 		  a.voiceArmed = true;
 
 		  console.log(`[autoRecap] 🎧 Voice bots arming for match ${a.matchId}`);
@@ -424,8 +443,17 @@ try {
 a.liveCaps = (a.liveCaps || 0) + capValue;
 a.liveScore = (a.liveScore || 0) + scoreValue;
 
-const capTeam = rule.team === "Blue" ? "BLUE" : "RED";
-const capTeamLabel = rule.team === "Blue" ? "Team 1" : "Team 2";
+const physicalCapTeam =
+  rule.team === "Blue" || rule.team === "Red"
+    ? rule.team
+    : evt.team;
+const logicalCapTeam = logicalTeamForPhysical(
+  a.team1Starts,
+  Math.min((a.half || 0) + 1, 2),
+  physicalCapTeam
+);
+const capTeam = logicalCapTeam === "team1" ? "BLUE" : "RED";
+const capTeamLabel = logicalCapTeam === "team1" ? "Team 1" : "Team 2";
 const capPlayer = evt.player || "unknown";
 
   const capEvent = {
@@ -449,7 +477,7 @@ const capPlayer = evt.player || "unknown";
 
     await post(
       recapChannel,
-      `🏁 Capture ${a.liveCaps} — ${rule.team === "Blue" ? "🔵 Blue" : "🔴 Red"} (${evt.player || "unknown"})`
+      `🏁 Capture ${a.liveCaps} — ${capTeamLabel} (${physicalCapTeam || "unknown"} side, ${evt.player || "unknown"})`
     ).catch?.(() => {});
 
     return;
@@ -517,7 +545,16 @@ const capPlayer = evt.player || "unknown";
 		  if (!a) return;
 
 		  const label = serverKey.toUpperCase();
-		  await runRconCommand(serverKey, `hostname "fun stuff ${label} - Round 1 Score - ${blueScore}"`);
+		  const round1OffenseTeam =
+		    getTeamStartPlan(a.team1Starts).round1.offenseTeam === "team1"
+		      ? "Team 1"
+		      : "Team 2";
+		  const round1OffenseScore =
+		    round1OffenseTeam === "Team 1" ? blueScore : redScore;
+		  await runRconCommand(
+		    serverKey,
+		    `hostname "fun stuff ${label} - ${round1OffenseTeam} Round 1 Score - ${round1OffenseScore}"`
+		  );
 		  await runRconCommand(serverKey, `amx_map ${mapNow}`);
 
 		  post(recapChannel, `🔄 Restarting map **${mapNow}** for Half 2...`).catch?.(() => {});
@@ -534,8 +571,11 @@ const capPlayer = evt.player || "unknown";
 		const h1 = a.halfScores[0] || { blue: 0, red: 0 };
 		const h2 = a.halfScores[1] || { blue: 0, red: 0 };
 
-		const totalBlue = (h1.blue || 0) + (h2.red || 0);
-		const totalRed  = (h1.red  || 0) + (h2.blue || 0);
+		const { totalBlue, totalRed } = calculateMatchScores(
+		  h1,
+		  h2,
+		  a.team1Starts
+		);
 		const winner =
 		  totalBlue > totalRed ? "blue" :
 		  totalRed  > totalBlue ? "red"  : "tie";
@@ -760,7 +800,8 @@ setTimeout(() => {
   }
 
      return { 
-    armFromMatchReady: ({ matchId, map, serverIp, teams }) => arm({ matchId, map, serverIp, teams }),
+    armFromMatchReady: ({ matchId, map, serverIp, teams, team1Starts }) =>
+      arm({ matchId, map, serverIp, teams, team1Starts }),
     disarmByIp: ip => disarm(ip),
     disarmByMatchId,
     onEvent,

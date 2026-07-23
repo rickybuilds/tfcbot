@@ -23,6 +23,12 @@ const { postQueueBoard } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 // HLDS auto-recap
 const { autoArmFromMatchReady } = require("../lib/autoArm");
+const {
+  getTeamStartPlan,
+  normalizeTeam1Starts,
+  readTeam1Starts,
+  resolveTeam1Starts,
+} = require("../lib/teamStart");
 
 // ADL voting state
 const adl = require("../lib/adl");
@@ -42,6 +48,8 @@ console.log("[VOTEFLOW] Loaded state file:", require.resolve("../lib/state"));
 		  key: m.key || m.name || makeKey(m.name),
 		  name: m.name,
 		  mirv: m.mirv || 0,
+		  forceTeam1Starts:
+		    m.forceTeam1Starts || m.force_team1_starts || null,
 		  tier: m.tier || 1,
 		  author: m.author || ""
 		}));
@@ -181,6 +189,13 @@ function eligibleStreakPlayers(players, elo) {
 	  return;
 	}
 
+      // Snapshot this for the full server-vote -> map-vote transition. The
+      // dedicated pending value keeps !set locked even in the brief gap
+      // between the two collectors.
+      const team1Starts = readTeam1Starts(settings);
+      state.pendingTeam1Starts = team1Starts;
+      console.log(`[teamStart] Vote snapshot: Team 1 starts ${team1Starts}`);
+
 	const serverOptions = availableServers
 	  .slice(0, config.MAX_BUTTONS)
 	  .map((s, idx) => ({ id: String(idx + 1), name: s.name, ref: s }));
@@ -246,6 +261,7 @@ function eligibleStreakPlayers(players, elo) {
 		  await message.channel.send("⚠️ Could not finalize match — winner data missing or invalid.");
 		  state.isVotingInProgress = false;
 		  state.vote = null;
+		  state.pendingTeam1Starts = null;
 		  return;
 		}
 
@@ -280,6 +296,7 @@ function eligibleStreakPlayers(players, elo) {
 		  finalize: async (mapRef) => {
 
 			if (!mapRef || !state.serverWinner) {
+			  state.pendingTeam1Starts = null;
 			  return message.channel.send(
 				"⚠️ Could not finalize match."
 			  );
@@ -297,7 +314,9 @@ function eligibleStreakPlayers(players, elo) {
 			  matchesStore,
 			  config,
 			  MODE,
-			  streaks
+			  streaks,
+			  null,
+			  { team1Starts }
 			);
 
 		  }
@@ -307,6 +326,10 @@ function eligibleStreakPlayers(players, elo) {
 			  });
     } catch (err) {
       console.error("[!fv error]", err);
+      if (!state.vote) {
+        state.pendingTeam1Starts = null;
+        state.isVotingInProgress = false;
+      }
       await message.channel.send("❌ Something went wrong during the vote.");
     } finally {
       state.isVoteStarting = false;
@@ -400,6 +423,7 @@ async function cancelVote(message, config, state, elo, privacy) {
   if (Array.isArray(state.queueSnapshot)) state.queue = state.queueSnapshot.map(p => ({ ...p }));
   state.queueSnapshot = null;
   state.serverWinner = null;
+  state.pendingTeam1Starts = null;
 
   state.isVotingInProgress = false;
   try { await refreshBotName(message.client, state); } catch {}
@@ -437,6 +461,8 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
   const requeue = original.filter(p => !leaverSet.has(String(p.id)));
   state.queueSnapshot = null;
   state.serverWinner = null;
+  state.vote = null;
+  state.pendingTeam1Starts = null;
   state.isVotingInProgress = false;
 
   try { await refreshBotName(message.client, state); } catch {}
@@ -563,7 +589,8 @@ async function finalizeMatch(
   channel, registry, settings, state,
   serverObj, mapObj, elo, privacy, matchesStore, config,
   MODE, streaks, 
-  forceMatchId = null   // 👈 new arg
+  forceMatchId = null,   // 👈 new arg
+  options = {}
 ) {
   const players =
     Array.isArray(state.queueSnapshot) && state.queueSnapshot.length
@@ -581,6 +608,16 @@ async function finalizeMatch(
     : "_none_";
 
   const matchId = forceMatchId || genMatchId();
+  const requestedTeam1Starts = normalizeTeam1Starts(
+    options.team1Starts || readTeam1Starts(settings)
+  );
+  const teamStartResolution = resolveTeam1Starts(
+    requestedTeam1Starts,
+    mapObj,
+    MODE
+  );
+  const team1Starts = teamStartResolution.team1Starts;
+  const teamStartPlan = getTeamStartPlan(team1Starts);
 
 	// 🔥 Streak bonus (live from elo.db)
 	let bonus = null;
@@ -616,11 +653,22 @@ async function finalizeMatch(
 		  (serverObj?.url ? `[Click here to join server](${serverObj.url})\n` : "") +
 		  `Map: **${mapObj?.name || "Unknown Map"}** (${mirvLabel(mapObj?.mirv)})\n` +
 		  `Mode: **${MODE}**\n\n` +
+		  (teamStartResolution.overridden
+		    ? `⚠️ **Map override:** ${teamStartResolution.reason}.\n\n`
+		    : "") +
 		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`
 		)
 		.addFields(
-		  { name: "Blue Team 🔵", value: blueList, inline: true },
-		  { name: "Red Team 🔴",  value: redList,  inline: true }
+		  {
+		    name: `Team 1 🔵 — Join BLUE (${team1Starts})`,
+		    value: blueList,
+		    inline: true
+		  },
+		  {
+		    name: `Team 2 🔴 — Join RED (${teamStartPlan.team2Starts})`,
+		    value: redList,
+		    inline: true
+		  }
 		)
 		.setTimestamp();
 
@@ -675,7 +723,8 @@ async function finalizeMatch(
   teams: {
     blue: bal.blue.map(p => p.id), // Discord IDs
     red:  bal.red.map(p => p.id),
-  }
+  },
+  team1Starts,
 });
 
   } catch (e) {
@@ -780,6 +829,7 @@ const record = {
   map: mapObj?.name,
   blueTeam: bal.blue.map(p => ({ id: p.id, name: p.name })),
   redTeam : bal.red.map(p => ({ id: p.id, name: p.name })),
+  team1Starts,
   avgBlue: bal.avgBlue,
   avgRed : bal.avgRed,
   mode: MODE || "STANDARD",          // 👈 ensure mode is saved
@@ -801,6 +851,7 @@ const record = {
   state.queueSnapshot = null;
   state.serverWinner = null;
   state.isVotingInProgress = false;
+  state.pendingTeam1Starts = null;
 
   // 👇 Reset ADL votes so they don't carry over
   try { 

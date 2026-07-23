@@ -291,6 +291,7 @@ if (ban) {
     state.vote = null;
     state.queueSnapshot = null;
     state.serverWinner = null;
+    state.pendingTeam1Starts = null;
     state.isVotingInProgress = false;
     state.queue = [];
 

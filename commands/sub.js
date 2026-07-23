@@ -10,6 +10,11 @@ const {
 
 const servers = require("../config/rcon");
 const { finalizeMatch } = require("./voteFlow"); 
+const {
+  getTeamStartPlan,
+  readTeam1Starts,
+  resolveTeam1Starts,
+} = require("../lib/teamStart");
 
 /* ------------------------------------------------------------ */
 /* Utilities                                                    */
@@ -297,6 +302,15 @@ async function run(message, args, deps) {
   const pickupChannel = message.guild.channels.cache.get(process.env.PICKUP_CHANNEL_ID);
 
 	if (pickupChannel) {
+	  const mapConfig = [...(state.maps || []), ...(state.adlMaps || [])]
+	    .find(m => String(m.name).toLowerCase() === String(dbMatch.map_name).toLowerCase()) ||
+	    { name: dbMatch.map_name };
+	  const team1Starts = resolveTeam1Starts(
+	    readTeam1Starts(settings),
+	    mapConfig,
+	    dbMatch.mode
+	  ).team1Starts;
+	  const teamStartPlan = getTeamStartPlan(team1Starts);
 	  const embed = {
 		color: 0x57f287,
 		title: `Match Updated — ${dbMatch.server_name} — ${dbMatch.map_name}`,
@@ -311,12 +325,12 @@ async function run(message, args, deps) {
 		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`,
 		fields: [
 		  {
-			name: "Blue Team 🔵",
+			name: `Team 1 🔵 — Join BLUE (${team1Starts})`,
 			value: rebuiltBlue.map(p => p.name).join("\n") || "_empty_",
 			inline: true,
 		  },
 		  {
-			name: "Red Team 🔴",
+			name: `Team 2 🔴 — Join RED (${teamStartPlan.team2Starts})`,
 			value: rebuiltRed.map(p => p.name).join("\n") || "_empty_",
 			inline: true,
 		  },

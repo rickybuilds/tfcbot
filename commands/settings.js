@@ -2,6 +2,13 @@
 "use strict";
 
 const { PermissionsBitField, EmbedBuilder } = require("discord.js");
+const {
+  DEFAULT_TEAM1_STARTS,
+  TEAM1_STARTS_SETTING,
+  getTeamStartLockReason,
+  isValidTeam1Starts,
+  normalizeTeam1Starts,
+} = require("../lib/teamStart");
 
 function isAdmin(message, config) {
   try {
@@ -43,7 +50,7 @@ function canSendPlain(message) {
 }
 
 function register(registry, deps) {
-  const { settings, config } = deps;
+  const { settings, config, state } = deps;
 
   const DEFAULTS = {
     "queue:idle_min":       120,
@@ -54,6 +61,7 @@ function register(registry, deps) {
     "backup:time":          "04:00",
     "vote:server_duration": 120,
     "vote:map_duration":    60,
+    [TEAM1_STARTS_SETTING]: DEFAULT_TEAM1_STARTS,
   };
 
   const SETTINGS_CHANNEL = config.channels.settings || ""; // 👈 from .env
@@ -74,6 +82,7 @@ function register(registry, deps) {
         { name: "Backup Time",           value: settings.getString("backup:time", DEFAULTS["backup:time"]), inline: true },
         { name: "Server Vote Duration (sec)", value: String(settings.getNumber("vote:server_duration", DEFAULTS["vote:server_duration"])), inline: true },
         { name: "Map Vote Duration (sec)",    value: String(settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])), inline: true },
+        { name: "Team 1 Starts", value: settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING]), inline: true },
         { name: "Settings Channel",      value: SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_", inline: false },
       )
       .setFooter({ text: "Use !set <key> <value> (admin only)" })
@@ -91,6 +100,7 @@ function register(registry, deps) {
         `• Backup Time: ${settings.getString("backup:time", DEFAULTS["backup:time"])}\n` +
         `• Server Vote Duration (sec): ${settings.getNumber("vote:server_duration", DEFAULTS["vote:server_duration"])}\n` +
         `• Map Vote Duration (sec): ${settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])}\n` +
+        `• Team 1 Starts: ${settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING])}\n` +
         `• Settings Channel: ${SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_"}`);
     } else {
       const dm = await message.author.createDM();
@@ -118,11 +128,31 @@ function register(registry, deps) {
       "settings:channel_id",
       "vote:server_duration",
       "vote:map_duration",
+      TEAM1_STARTS_SETTING,
     ]);
     if (!allowed.has(key)) return message.channel.send("Unknown key.");
 
     let n;
-    if (key === "queue:idle_min") {
+    let savedValue = val;
+    if (key === TEAM1_STARTS_SETTING) {
+      const lockReason = getTeamStartLockReason(state);
+      if (lockReason) {
+        const current = normalizeTeam1Starts(
+          settings.getString(TEAM1_STARTS_SETTING, DEFAULT_TEAM1_STARTS),
+        );
+        return message.channel.send(
+          `⚠️ Team starting order cannot be changed while a ${lockReason} is active. ` +
+          `Current setting remains: Team 1 starts **${current}**.`
+        );
+      }
+      if (!isValidTeam1Starts(val)) {
+        return message.channel.send(
+          `\`${TEAM1_STARTS_SETTING}\` must be \`offense\` or \`defense\`.`
+        );
+      }
+      savedValue = normalizeTeam1Starts(val);
+      settings.setString(key, savedValue);
+    } else if (key === "queue:idle_min") {
       n = Number(val);
       if (!Number.isFinite(n) || n < 1 || n > 180) return message.channel.send("`queue:idle_min` must be 1–180.");
       settings.setNumber(key, n);
@@ -152,7 +182,7 @@ function register(registry, deps) {
       settings.setNumber(key, n);
     }
 
-    await message.channel.send(`✅ Saved: \`${key}\` = \`${val}\``);
+    await message.channel.send(`✅ Saved: \`${key}\` = \`${savedValue}\``);
   });
 
   registry.set("settings:set", registry.get("set"));
