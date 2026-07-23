@@ -4,6 +4,52 @@ const { EmbedBuilder } = require("discord.js");
 const DEFAULT_POLL_MS = 20_000;
 const ACTIVE_SPEEDRUN_RULESET = 2;
 
+// MySQL contains some legacy player names whose UTF-8 bytes were decoded as
+// Windows-1252 before they were stored (for example, "ă" became "Äƒ").
+// Recreate those original bytes at the read boundary without altering names
+// that are already valid Unicode.
+const WINDOWS_1252_BYTES = new Map([
+  ["€", 0x80], ["‚", 0x82], ["ƒ", 0x83], ["„", 0x84],
+  ["…", 0x85], ["†", 0x86], ["‡", 0x87], ["ˆ", 0x88],
+  ["‰", 0x89], ["Š", 0x8a], ["‹", 0x8b], ["Œ", 0x8c],
+  ["Ž", 0x8e], ["‘", 0x91], ["’", 0x92], ["“", 0x93],
+  ["”", 0x94], ["•", 0x95], ["–", 0x96], ["—", 0x97],
+  ["˜", 0x98], ["™", 0x99], ["š", 0x9a], ["›", 0x9b],
+  ["œ", 0x9c], ["ž", 0x9e], ["Ÿ", 0x9f],
+]);
+
+const MOJIBAKE_MARKERS = /[ÂÃÄÅÆÈÎÐâƒ™�]/g;
+
+function mojibakeScore(value) {
+  return (String(value).match(MOJIBAKE_MARKERS) || []).length;
+}
+
+function repairLegacyUtf8(value) {
+  const original = String(value || "");
+  if (!mojibakeScore(original)) return original;
+
+  const bytes = [];
+  for (const character of original) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0xff) {
+      bytes.push(codePoint);
+    } else if (WINDOWS_1252_BYTES.has(character)) {
+      bytes.push(WINDOWS_1252_BYTES.get(character));
+    } else {
+      return original;
+    }
+  }
+
+  try {
+    const repaired = new TextDecoder("utf-8", { fatal: true }).decode(
+      Uint8Array.from(bytes)
+    );
+    return mojibakeScore(repaired) < mojibakeScore(original) ? repaired : original;
+  } catch {
+    return original;
+  }
+}
+
 const CLASS_NAMES = {
   1: "Scout",
   2: "Sniper",
@@ -84,7 +130,10 @@ async function getCurrentWorldRecords(pool) {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).map((row) => ({
+    ...row,
+    player_name: repairLegacyUtf8(row.player_name),
+  }));
 }
 
 async function getAnnouncement(pool, map, classId) {
@@ -99,7 +148,12 @@ async function getAnnouncement(pool, map, classId) {
     [map, classId]
   );
 
-  return rows[0] || null;
+  if (!rows[0]) return null;
+
+  return {
+    ...rows[0],
+    player_name: repairLegacyUtf8(rows[0].player_name),
+  };
 }
 
 function isNewWorldRecord(current, previous) {
@@ -290,4 +344,5 @@ module.exports = {
   pollSpeedrunEvents,
   formatTime,
   formatDelta,
+  repairLegacyUtf8,
 };
