@@ -171,7 +171,15 @@ function attachAutoRecap(ctx, options = {}) {
     return ch.send(content);
   }
 
-  function arm({ matchId, map, serverIp, teams, team1Starts }) {
+  function arm({
+    matchId,
+    map,
+    serverIp,
+    teams,
+    team1Starts,
+    team1StartsForced = false,
+    team1StartsReason = null,
+  }) {
     const serverKey = determineServerKey(serverIp);
 const k = keyOf(serverIp);
 
@@ -185,6 +193,8 @@ const k = keyOf(serverIp);
       serverName: rconCfg[serverKey]?.name || serverKey,
       teams: teams || null,
       team1Starts: normalizeTeam1Starts(team1Starts),
+      team1StartsForced: Boolean(team1StartsForced),
+      team1StartsReason,
       t0: Date.now(),
       lastMapSeen: null,
       half: 0,
@@ -206,6 +216,87 @@ const k = keyOf(serverIp);
 	  `map ${map}, Team 1 starts ${ctx.team1Starts} (TTL ${ttlMin}m)`
 	).catch?.(() => {});
 
+  }
+
+  async function setStartingOrderHostname(a) {
+    const teamStartPlan = getTeamStartPlan(a.team1Starts);
+    const label = a.serverKey?.toUpperCase() || "SERVER";
+    await runRconCommand(
+      a.serverKey,
+      `hostname "fun stuff ${label} - T1 ${a.team1Starts.toUpperCase()} / T2 ${teamStartPlan.team2Starts.toUpperCase()}"`
+    );
+  }
+
+  async function updateTeam1Starts(value, targetMatchId = null) {
+    const team1Starts = normalizeTeam1Starts(value);
+    const candidates = [...armed.values()].filter(a =>
+      !a.done &&
+      (!targetMatchId || String(a.matchId) === String(targetMatchId))
+    );
+
+    if (!targetMatchId && candidates.length > 1) {
+      return {
+        updated: [],
+        blocked: [],
+        ambiguous: true,
+        matchIds: candidates.map(a => String(a.matchId)),
+      };
+    }
+
+    const updated = [];
+    const blocked = [];
+
+    for (const a of candidates) {
+      if (a.team1StartsForced && team1Starts !== a.team1Starts) {
+        blocked.push({
+          matchId: String(a.matchId),
+          reason: a.team1StartsReason || "the selected map forces the starting order",
+        });
+        continue;
+      }
+      if ((a.half || 0) > 0 || (a.liveCaps || 0) > 0) {
+        blocked.push({
+          matchId: String(a.matchId),
+          reason: "Round 1 has already started scoring",
+        });
+        continue;
+      }
+
+      a.team1Starts = team1Starts;
+      for (const match of state.matches || []) {
+        if (String(match.id || match.matchId) === String(a.matchId)) {
+          match.team1Starts = team1Starts;
+        }
+      }
+
+      try {
+        await setStartingOrderHostname(a);
+      } catch (err) {
+        console.warn("[autoRecap] Failed to update starting-order hostname:", err);
+      }
+      const teamStartPlan = getTeamStartPlan(team1Starts);
+      await post(
+        reportChannel,
+        `🔄 **${a.matchId} starting order updated** — ` +
+        `Team 1 joins **BLUE** and starts **${team1Starts.toUpperCase()}**; ` +
+        `Team 2 joins **RED** and starts **${teamStartPlan.team2Starts.toUpperCase()}**.`
+      ).catch?.(() => {});
+      updated.push(String(a.matchId));
+    }
+
+    if (targetMatchId && candidates.length === 0) {
+      blocked.push({
+        matchId: String(targetMatchId),
+        reason: "no armed match was found",
+      });
+    }
+
+    return {
+      updated,
+      blocked,
+      ambiguous: false,
+      matchIds: candidates.map(a => String(a.matchId)),
+    };
   }
 
 // 🔓 Unlock server when match ends or TTL expires
@@ -388,13 +479,8 @@ try {
 
       // 🎙️ Rule 1: arm voice bots when the correct match map loads
 		if (!a.voiceArmed && looseMapEqual(evt.name, a.map)) {
-		  const teamStartPlan = getTeamStartPlan(a.team1Starts);
-		  const label = a.serverKey?.toUpperCase() || "SERVER";
 		  try {
-		    await runRconCommand(
-		      a.serverKey,
-		      `hostname "fun stuff ${label} - T1 ${a.team1Starts.toUpperCase()} / T2 ${teamStartPlan.team2Starts.toUpperCase()}"`
-		    );
+		    await setStartingOrderHostname(a);
 		  } catch (err) {
 		    console.warn("[autoRecap] Failed to set starting-order hostname:", err);
 		  }
@@ -800,12 +886,29 @@ setTimeout(() => {
   }
 
      return { 
-    armFromMatchReady: ({ matchId, map, serverIp, teams, team1Starts }) =>
-      arm({ matchId, map, serverIp, teams, team1Starts }),
+    armFromMatchReady: ({
+      matchId,
+      map,
+      serverIp,
+      teams,
+      team1Starts,
+      team1StartsForced,
+      team1StartsReason,
+    }) =>
+      arm({
+        matchId,
+        map,
+        serverIp,
+        teams,
+        team1Starts,
+        team1StartsForced,
+        team1StartsReason,
+      }),
     disarmByIp: ip => disarm(ip),
     disarmByMatchId,
     onEvent,
     updateArmedMap,
+    updateTeam1Starts,
   };
 
 }

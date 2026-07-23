@@ -145,13 +145,44 @@ function register(registry, deps) {
           `Current setting remains: Team 1 starts **${current}**.`
         );
       }
-      if (!isValidTeam1Starts(val)) {
+      const valueParts = val.split(/\s+/).filter(Boolean);
+      const requestedStart = valueParts[0];
+      const targetMatchId = valueParts[1] || null;
+      if (valueParts.length > 2) {
+        return message.channel.send(
+          `Usage: \`!set ${TEAM1_STARTS_SETTING} <offense|defense> [matchId]\``
+        );
+      }
+      if (!isValidTeam1Starts(requestedStart)) {
         return message.channel.send(
           `\`${TEAM1_STARTS_SETTING}\` must be \`offense\` or \`defense\`.`
         );
       }
-      savedValue = normalizeTeam1Starts(val);
+      savedValue = normalizeTeam1Starts(requestedStart);
       settings.setString(key, savedValue);
+      const activeUpdate =
+        await state?.autoRecap?.updateTeam1Starts?.(
+          savedValue,
+          targetMatchId
+        );
+
+      if (activeUpdate?.ambiguous) {
+        await message.channel.send(
+          `ℹ️ Saved the default, but multiple matches are armed. ` +
+          `Run \`!set ${TEAM1_STARTS_SETTING} ${savedValue} <matchId>\` ` +
+          `to update one of them: ${activeUpdate.matchIds.join(", ")}`
+        );
+      } else if (activeUpdate?.updated?.length) {
+        await message.channel.send(
+          `🔄 Updated armed match${activeUpdate.updated.length === 1 ? "" : "es"} ` +
+          `${activeUpdate.updated.join(", ")}: Team 1 starts **${savedValue}**.`
+        );
+      } else if (activeUpdate?.blocked?.length) {
+        await message.channel.send(
+          `ℹ️ The default was saved, but the active match was not changed: ` +
+          activeUpdate.blocked.map(x => `${x.matchId} (${x.reason})`).join(", ")
+        );
+      }
     } else if (key === "queue:idle_min") {
       n = Number(val);
       if (!Number.isFinite(n) || n < 1 || n > 180) return message.channel.send("`queue:idle_min` must be 1–180.");

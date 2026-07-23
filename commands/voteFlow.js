@@ -725,6 +725,8 @@ async function finalizeMatch(
     red:  bal.red.map(p => p.id),
   },
   team1Starts,
+  team1StartsForced: teamStartResolution.forced,
+  team1StartsReason: teamStartResolution.reason,
 });
 
   } catch (e) {
@@ -830,6 +832,8 @@ const record = {
   blueTeam: bal.blue.map(p => ({ id: p.id, name: p.name })),
   redTeam : bal.red.map(p => ({ id: p.id, name: p.name })),
   team1Starts,
+  team1StartsForced: teamStartResolution.forced,
+  team1StartsReason: teamStartResolution.reason,
   avgBlue: bal.avgBlue,
   avgRed : bal.avgRed,
   mode: MODE || "STANDARD",          // 👈 ensure mode is saved
