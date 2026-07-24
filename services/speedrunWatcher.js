@@ -103,7 +103,20 @@ async function getCurrentWorldRecords(pool) {
       r.steamid,
       r.player_name,
       r.best_time_ms,
-      l.discord_id
+      l.discord_id,
+      (
+        SELECT sr.id
+        FROM speedrun_runs sr
+        JOIN speedrun_ghosts sg
+          ON sg.run_id = sr.id AND sg.is_complete = 1
+        WHERE sr.map = r.map
+          AND sr.class_id = r.class_id
+          AND sr.steamid = r.steamid
+          AND sr.ruleset = ?
+          AND sr.time_ms = r.best_time_ms
+        ORDER BY sr.created_at DESC, sr.id DESC
+        LIMIT 1
+      ) AS run_id
     FROM speedrun_records r
     LEFT JOIN speedrun_player_links l
       ON l.steamid = r.steamid
@@ -122,7 +135,11 @@ async function getCurrentWorldRecords(pool) {
       AND r.best_time_ms IS NOT NULL
       AND r.best_time_ms > 0
     ORDER BY r.map, r.class_id, r.updated_at ASC
-  `, [ACTIVE_SPEEDRUN_RULESET, ACTIVE_SPEEDRUN_RULESET]);
+  `, [
+    ACTIVE_SPEEDRUN_RULESET,
+    ACTIVE_SPEEDRUN_RULESET,
+    ACTIVE_SPEEDRUN_RULESET,
+  ]);
 
   const seen = new Set();
   return rows.filter((row) => {
@@ -223,11 +240,11 @@ function buildWorldRecordEmbed(wr, previous = null) {
   const playerName = String(wr.player_name || "Unknown");
   const mapName = String(wr.map || "Unknown");
 
-  const replayUrl =
-    `${baseUrl}/speedrun-replay.html` +
-    `?map=${encodeURIComponent(wr.map)}` +
-    `&classId=${encodeURIComponent(wr.class_id)}` +
-    `&steamid=${encodeURIComponent(wr.steamid)}`;
+  const runId = Number(wr.run_id ?? wr.runId);
+  const replayUrl = Number.isSafeInteger(runId) && runId > 0
+    ? `${baseUrl}/speedrun-replay.html?runId=${encodeURIComponent(runId)}`
+    : null;
+  const replayLink = replayUrl ? ` • **[View Replay](${replayUrl})**` : "";
 
   const diffMs = previous
     ? Number(previous.best_time_ms) - Number(wr.best_time_ms)
@@ -243,7 +260,7 @@ function buildWorldRecordEmbed(wr, previous = null) {
     .setURL(mapUrl)
     .setColor(0xffc107)
     .setDescription(
-        `**[${mapName}](${mapUrl})** • **${cls}** • **[View Replay](${replayUrl})**\n` +
+        `**[${mapName}](${mapUrl})** • **${cls}**${replayLink}\n` +
         `**[${playerName}](${playerUrl})** • ⏱️ **${formatTime(wr.best_time_ms)}**${comparison}`
     )
     .setFooter({ text: `SteamID: ${wr.steamid || "Unknown"}` })
@@ -345,4 +362,5 @@ module.exports = {
   formatTime,
   formatDelta,
   repairLegacyUtf8,
+  buildWorldRecordEmbed,
 };
