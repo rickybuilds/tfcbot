@@ -3,8 +3,31 @@
 const dgram = require("dgram");
 const servers = require("../config/rcon");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
+const { PlayerIdentityStore } = require("../lib/playerIdentityStore");
+
+const STEAM_ID_RE = /^STEAM_[0-5]:[01]:\d+$/i;
+
+function normalizeSteamId(value) {
+  const steamId = String(value || "").trim();
+  return STEAM_ID_RE.test(steamId) ? steamId.toUpperCase() : null;
+}
+
+function addressToIp(address) {
+  const value = String(address || "").trim();
+  const bracketed = value.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) return bracketed[1];
+  return value.replace(/:\d+$/, "");
+}
+
+function serverNameForSource(source) {
+  const sourceIp = addressToIp(source);
+  for (const [key, server] of Object.entries(servers)) {
+    if (addressToIp(server.host) === sourceIp) return server.name || key;
+  }
+  return sourceIp;
+}
 /* -------------------------------------------------------------------------- */
-/* Log Parser — unchanged (still perfect) */
+/* Log Parser */
 /* -------------------------------------------------------------------------- */
 function parseLine(raw, currentLogFile = null) {
   let s = String(raw).trim();
@@ -72,7 +95,34 @@ function parseLine(raw, currentLogFile = null) {
       text: mSay[5],
       raw: s
     };
-  }  
+  }
+
+  const mConnect = s.match(/"([^"]+)<(\d+)><([^>]+)><([^>]*)>" connected, address "([^"]+)"/i);
+
+  if (mConnect) {
+    return {
+      type: "connect",
+      player: mConnect[1],
+      userid: mConnect[2],
+      steamid: mConnect[3],
+      team: mConnect[4],
+      ip: addressToIp(mConnect[5]),
+      raw: s
+    };
+  }
+
+  const mDisconnect = s.match(/"([^"]+)<(\d+)><([^>]+)><([^>]*)>" disconnected/i);
+
+  if (mDisconnect) {
+    return {
+      type: "disconnect",
+      player: mDisconnect[1],
+      userid: mDisconnect[2],
+      steamid: mDisconnect[3],
+      team: mDisconnect[4],
+      raw: s
+    };
+  }
 
 return null;
 }
@@ -83,6 +133,16 @@ const currentLogFileBySource = new Map();
 function startHldsLogReceiver(client, opts = {}, onEvent) {
   if (process.env.NO_HLDS_LISTENER === "1") {
     return { close: () => {} };
+  }
+  let identityStore = opts.identityStore || null;
+  let ownsIdentityStore = false;
+  if (!identityStore) {
+    try {
+      identityStore = new PlayerIdentityStore(opts.identityDbPath);
+      ownsIdentityStore = true;
+    } catch (err) {
+      console.error("[HLDS identity] failed to initialize:", err);
+    }
   }
   const sock = dgram.createSocket("udp4");
   const allowedIPs = [...new Set(Object.values(servers).map(s => s.host?.split(":")[0]).filter(Boolean))];
@@ -96,6 +156,27 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
     if (parsed.type === "log_closed") currentLogFileBySource.delete(from);
     const evt = { ...parsed, from, ts: Date.now() };
+    const steamId = normalizeSteamId(evt.steamid);
+    if (identityStore && steamId && evt.type === "connect") {
+      try {
+        identityStore.recordConnect({
+          steamId,
+          alias: evt.player,
+          ip: evt.ip,
+          server: serverNameForSource(from),
+          timestamp: evt.ts,
+        });
+      } catch (err) {
+        console.error(`[HLDS identity] connect write failed for ${steamId}:`, err);
+      }
+    }
+    if (identityStore && steamId && evt.type === "disconnect") {
+      try {
+        identityStore.recordDisconnect(steamId, evt.ts);
+      } catch (err) {
+        console.error(`[HLDS identity] disconnect write failed for ${steamId}:`, err);
+      }
+    }
     if (evt.type === "say") {
       const text = String(evt.text || "").trim().toLowerCase();
 
@@ -148,11 +229,17 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     onEvent?.(evt);
   });
   sock.bind(27500, "0.0.0.0", () => console.log("[HLDS] listening on UDP 27500"));
-  return { close: () => sock.close() };
+  return {
+    close: () => {
+      sock.close();
+      if (ownsIdentityStore) identityStore?.close();
+    }
+  };
 }
 /* -------------------------------------------------------------------------- */
 /* Export */
 /* -------------------------------------------------------------------------- */
 module.exports = {
+  parseLine,
   startHldsLogReceiver,
 };
