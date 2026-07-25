@@ -87,6 +87,20 @@ async function ensureAnnouncementTable(pool, logger = console) {
       steamid VARCHAR(64) NOT NULL,
       player_name VARCHAR(128) NOT NULL,
       best_time_ms INT NOT NULL,
+      announced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (map, class_id)
+    )
+  `);
+
+  // The production Speedwatch user can CREATE tables but cannot ALTER this
+  // legacy table. Keep it intact and store the expanded state in a v2 table.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS speedrun_wr_announcements_v2 (
+      map VARCHAR(128) NOT NULL,
+      class_id INT NOT NULL,
+      steamid VARCHAR(64) NOT NULL,
+      player_name VARCHAR(128) NOT NULL,
+      best_time_ms INT NOT NULL,
       discord_message_id VARCHAR(32) NULL,
       discord_channel_id VARCHAR(32) NULL,
       replay_run_id BIGINT UNSIGNED NULL,
@@ -95,26 +109,20 @@ async function ensureAnnouncementTable(pool, logger = console) {
     )
   `);
 
-  const columns = [
-    ["discord_message_id", "VARCHAR(32) NULL"],
-    ["discord_channel_id", "VARCHAR(32) NULL"],
-    ["replay_run_id", "BIGINT UNSIGNED NULL"],
-  ];
+  await pool.query(`
+    INSERT IGNORE INTO speedrun_wr_announcements_v2
+      (map, class_id, steamid, player_name, best_time_ms, announced_at)
+    SELECT
+      map,
+      class_id,
+      steamid,
+      player_name,
+      best_time_ms,
+      announced_at
+    FROM speedrun_wr_announcements
+  `);
 
-  for (const [name, definition] of columns) {
-    const [rows] = await pool.query(
-      "SHOW COLUMNS FROM speedrun_wr_announcements LIKE ?",
-      [name]
-    );
-
-    if (!rows.length) {
-      await pool.query(
-        `ALTER TABLE speedrun_wr_announcements ADD COLUMN ${name} ${definition}`
-      );
-    }
-  }
-
-  logger.info?.("[speedrunWatcher] ensured speedrun_wr_announcements table");
+  logger.info?.("[speedrunWatcher] ensured speedrun_wr_announcements_v2 table");
 }
 
 async function getCurrentWorldRecords(pool) {
@@ -188,7 +196,7 @@ async function getAnnouncement(pool, map, classId) {
       discord_message_id,
       discord_channel_id,
       replay_run_id
-    FROM speedrun_wr_announcements
+    FROM speedrun_wr_announcements_v2
     WHERE map = ?
       AND class_id = ?
     LIMIT 1
@@ -216,7 +224,7 @@ function isNewWorldRecord(current, previous) {
 async function saveAnnouncement(pool, wr, message, channel) {
   await pool.query(
     `
-    INSERT INTO speedrun_wr_announcements
+    INSERT INTO speedrun_wr_announcements_v2
       (
         map,
         class_id,
@@ -254,7 +262,7 @@ async function saveAnnouncement(pool, wr, message, channel) {
 async function markReplayAvailable(pool, wr, runId) {
   await pool.query(
     `
-    UPDATE speedrun_wr_announcements
+    UPDATE speedrun_wr_announcements_v2
     SET replay_run_id = ?
     WHERE map = ?
       AND class_id = ?
@@ -501,9 +509,10 @@ async function startSpeedrunWatcher({ client, pool, config = {}, logger = consol
   try {
     await ensureAnnouncementTable(pool, logger);
   } catch (err) {
-    logger.warn?.(
-      `[speedrunWatcher] could not ensure announcement table, continuing anyway: ${err.message}`
+    logger.error?.(
+      `[speedrunWatcher] could not ensure announcement table; watcher not started: ${err.message}`
     );
+    return;
   }
 
   logger.info?.(`[speedrunWatcher] starting, poll=${pollMs}ms`);
