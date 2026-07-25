@@ -31,11 +31,26 @@ function challengeEmbed(challenge) {
     .addFields(
       { name: "Challenger", value: `<@${challenge.challengerId}>`, inline: true },
       { name: "Challenged", value: `<@${challenge.challengedId}>`, inline: true },
-      { name: "Respond", value: "Use `!accept` or `!decline` in this channel.", inline: false },
+      { name: "Respond", value: "Use the buttons below to accept or deny. `!accept` and `!decline` also work.", inline: false },
       { name: "Time Remaining", value: `⏰ Expires <t:${expiresUnix}:R>`, inline: false },
     )
     .setFooter({ text: "NoNamePUG 1v1" })
     .setTimestamp();
+}
+
+function challengeButtons(challengeId, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`1v1_accept_${challengeId}`)
+      .setLabel("Accept")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId(`1v1_deny_${challengeId}`)
+      .setLabel("Deny")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(disabled),
+  );
 }
 
 function expiredChallengeEmbed(challenge) {
@@ -65,16 +80,51 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     const challengeMessage = await message.channel.send({
       content: `<@${target.id}>`,
       embeds: [challengeEmbed(result.challenge)],
+      components: [challengeButtons(result.challenge.id)],
       allowedMentions: { users: [String(target.id)] },
     });
     challengeMessages.set(result.challenge.id, challengeMessage);
+    let challengeCollector;
     manager.onChallengeExpire(result.challenge.id, async challenge => {
+      challengeCollector?.stop("expired");
       challengeMessages.delete(challenge.id);
       await challengeMessage.edit({
         content: "",
         embeds: [expiredChallengeEmbed(challenge)],
+        components: [challengeButtons(challenge.id, true)],
         allowedMentions: { parse: [] },
       });
+    });
+    challengeCollector = challengeMessage.createMessageComponentCollector({
+      time: Math.max(1, result.challenge.expiresAt - Date.now()),
+    });
+    challengeCollector.on("collect", async interaction => {
+      const acceptId = `1v1_accept_${result.challenge.id}`;
+      const denyId = `1v1_deny_${result.challenge.id}`;
+      if (interaction.customId !== acceptId && interaction.customId !== denyId) return;
+      if (String(interaction.user.id) !== String(result.challenge.challengedId)) {
+        return interaction.deferUpdate().catch(() => {});
+      }
+      if (manager.incomingFor(interaction.user.id)?.id !== result.challenge.id) {
+        challengeCollector.stop("closed");
+        return interaction.reply({
+          content: "This 1v1 challenge is no longer pending.",
+          ephemeral: true,
+        }).catch(() => {});
+      }
+
+      await interaction.deferUpdate();
+      const interactionMessage = {
+        author: interaction.user,
+        channel: interaction.channel,
+        reply: payload => interaction.followUp({ ...payload, ephemeral: true }),
+      };
+      if (interaction.customId === denyId) {
+        challengeCollector.stop("denied");
+        return registry.get("decline")(interactionMessage);
+      }
+      await registry.get("accept")(interactionMessage);
+      if (result.challenge.status === "accepted") challengeCollector.stop("accepted");
     });
     return challengeMessage;
   });
@@ -90,7 +140,12 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       "❌ 1v1 Challenge Declined",
       `<@${challenge.challengedId}> declined the challenge from <@${challenge.challengerId}>.`,
     ).setFooter({ text: "No match was created" });
-    if (original) return original.edit({ content: "", embeds: [embed], allowedMentions: { parse: [] } });
+    if (original) return original.edit({
+      content: "",
+      embeds: [embed],
+      components: [challengeButtons(challenge.id, true)],
+      allowedMentions: { parse: [] },
+    });
     return message.channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
   });
 
@@ -112,6 +167,7 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       await original.edit({
         content: "",
         embeds: [successEmbed("✅ 1v1 Challenge Accepted", `<@${challenge.challengedId}> accepted <@${challenge.challengerId}>'s challenge.`)],
+        components: [challengeButtons(challenge.id, true)],
         allowedMentions: { parse: [] },
       }).catch(() => {});
     }
