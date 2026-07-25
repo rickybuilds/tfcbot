@@ -3,7 +3,7 @@
 const { EmbedBuilder } = require("discord.js");
 const DEFAULT_POLL_MS = 20_000;
 const ACTIVE_SPEEDRUN_RULESET = 2;
-const REPLAY_PENDING_LABEL = "⏳ **Replay coming soon…**";
+const REPLAY_PENDING_LABEL = "**Replay coming soon…**";
 
 // MySQL contains some legacy player names whose UTF-8 bytes were decoded as
 // Windows-1252 before they were stored (for example, "ă" became "Äƒ").
