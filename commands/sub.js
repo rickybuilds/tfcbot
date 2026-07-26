@@ -140,10 +140,14 @@ async function run(message, args, deps) {
     // Replace in DB
     elo.db.prepare(`
       UPDATE matches
-      SET blue_ids = REPLACE(blue_ids, ?, ?),
-          red_ids  = REPLACE(red_ids, ?, ?)
+      SET blue_ids = ?,
+          red_ids  = ?
       WHERE match_id=?
-    `).run(oldId, newId, oldId, newId, matchId);
+    `).run(
+      JSON.stringify(blueIds.map(id => (id === oldId ? newId : id))),
+      JSON.stringify(redIds.map(id => (id === oldId ? newId : id))),
+      matchId
+    );
 
     return message.channel.send(
       `✅ Forced substitution in completed match \`${matchId}\`: <@${oldId}> → <@${newId}>`

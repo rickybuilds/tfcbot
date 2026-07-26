@@ -140,6 +140,9 @@ function register(reg, { client, config, state, elo, banStore, settings, privacy
 	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
   const matchId = state.lockedPlayers.get(String(id));
   const now = Date.now();
+  for (const [userId, timestamp] of lockedReplyCooldown) {
+    if (now - timestamp > LOCKED_REPLY_COOLDOWN_MS) lockedReplyCooldown.delete(userId);
+  }
   const lastReply = lockedReplyCooldown.get(id) || 0;
     if (now - lastReply > LOCKED_REPLY_COOLDOWN_MS) {
     lockedReplyCooldown.set(id, now);

@@ -183,7 +183,8 @@ function attachAutoRecap(ctx, options = {}) {
     const serverKey = determineServerKey(serverIp);
 const k = keyOf(serverIp);
 
-    //disarm(serverIp);
+    const previous = armed.get(k);
+    if (previous?.timeout) clearTimeout(previous.timeout);
 
     const ctx = {
       matchId,

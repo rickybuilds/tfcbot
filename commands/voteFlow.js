@@ -85,7 +85,7 @@ function eligibleStreakPlayers(players, elo) {
 
 
 /* =============================== register =============================== */
-	function register(registry, { config, state, elo, privacy, matchesStore, settings, streaks }) {
+	function register(registry, { config, state, elo, privacy, matchesStore, settings, streaks, banStore }) {
 		if (!state.lockedServers) state.lockedServers = new Set();
 		if (!state.lockedPlayers) state.lockedPlayers = new Map();
 
@@ -134,9 +134,6 @@ function eligibleStreakPlayers(players, elo) {
 
 	//new 10/7/2025
 	// 👻 Remove ghost-banned players from this match
-	const { BanStore } = require("../lib/banStore");
-	const banStore = new BanStore("bot.db");
-
 	const ghosted = {};
 	for (const p of state.queue) {
 	  const ban = banStore.getBan(p.id);

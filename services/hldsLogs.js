@@ -151,10 +151,14 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     const from = rinfo.address;
     global.lastHldsPacketAt = Date.now();
     if (allowedIPs.length && !allowedIPs.includes(from)) return;
-    const parsed = parseLine(msg, currentLogFileBySource.get(from) || null);
+    const currentLogFile = currentLogFileBySource.get(from) || null;
+    const parsed = parseLine(msg, currentLogFile);
     if (!parsed) return;
     if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
-    if (parsed.type === "log_closed") currentLogFileBySource.delete(from);
+    if (parsed.type === "log_closed") {
+      currentLogFileBySource.delete(from);
+      if (currentLogFile && global._teamFileTrack) delete global._teamFileTrack[currentLogFile];
+    }
     const evt = { ...parsed, from, ts: Date.now() };
     const steamId = normalizeSteamId(evt.steamid);
     if (identityStore && steamId && evt.type === "connect") {
