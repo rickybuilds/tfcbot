@@ -369,6 +369,7 @@ function unlockPlayersForMatch(matchId) {
     if (a?.timeout) clearTimeout(a.timeout);
     armed.delete(k);
 	unlockServer(serverIp);
+    return a?.matchId ? unlockPlayersForMatch(a.matchId) : [];
   }
 
 //added new 1/31/26
@@ -864,20 +865,23 @@ setTimeout(() => {
 
     if (row && row.status === "completed") {
       console.log(`[autoRecap] confirmed DB completed for ${a.matchId}, unlocking now`);
-      disarm(evt.from);
-      unlockServer(evt.from);
-      const unlockedIds = unlockPlayersForMatch(a.matchId);
-        if (unlockedIds.length) {
-          post(
-            recapChannel,
-            `🔓 Match complete. Player locks have been cleared — queue is open again.`
-          ).catch?.(() => {});
-        }
     } else {
-      console.log(`[autoRecap] ${a.matchId} still in progress in DB, skipping unlock`);
+      console.log(`[autoRecap] ${a.matchId} still in progress in DB, unlocking after completed game`);
     }
   } catch (e) {
     console.warn("[autoRecap delayed unlock failed]", e);
+  }
+
+  const current = armed.get(keyOf(evt.from));
+  const unlockedIds =
+    String(current?.matchId) === String(a.matchId)
+      ? disarm(evt.from)
+      : unlockPlayersForMatch(a.matchId);
+  if (unlockedIds.length) {
+    post(
+      recapChannel,
+      `🔓 Match complete. Player locks have been cleared — queue is open again.`
+    ).catch?.(() => {});
   }
 }, 5000);
 

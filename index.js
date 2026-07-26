@@ -556,7 +556,11 @@ startSpeedrunPlayerLinkSync({
     }
 
     if (await oneVOne.onHldsEvent(evt)) return;
-    autoRecap.onEvent(evt);
+    try {
+      await autoRecap.onEvent(evt);
+    } catch (err) {
+      console.error("[autoRecap onEvent] failed:", err);
+    }
     global.lastHldsPacketAt = Date.now();
   });
   } catch (e) { console.error("[HLDS-LOG] failed:", e); }

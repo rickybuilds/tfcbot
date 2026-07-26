@@ -64,12 +64,25 @@ module.exports = {
           }
 
           const result = unlockServer(server.ip);
+          let unlockedPlayers = 0;
+          if (state.lockedPlayers) {
+            for (const [playerId, lockedMatchId] of state.lockedPlayers.entries()) {
+              if (String(lockedMatchId) === String(matchId)) {
+                state.lockedPlayers.delete(playerId);
+                unlockedPlayers++;
+              }
+            }
+          }
           db.close();
 
-          if (result) {
-            console.log(`[!unlock] ✅ Force-unlocked server ${server.ip} (${serverName})`);
+          if (result || unlockedPlayers > 0) {
+            console.log(
+              `[!unlock] ✅ Force-unlocked server ${server.ip} (${serverName}); ` +
+              `cleared ${unlockedPlayers} player locks`
+            );
             message.reply(
-              `✅ Server **${serverName}** (${server.ip}) unlocked successfully.`
+              `✅ Server **${serverName}** (${server.ip}) unlocked successfully. ` +
+              `Cleared **${unlockedPlayers}** player lock(s).`
             );
           } else {
             console.log(`[!unlock] ℹ️ Server ${server.ip} (${serverName}) was not locked.`);
