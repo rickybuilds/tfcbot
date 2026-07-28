@@ -23,6 +23,11 @@ const { refreshBotName } = require("./lib/botName");
 const { scheduleBackups } = require("./lib/backup");
 const { startSpeedrunPlayerLinkSync } = require("./services/speedrunPlayerLinkSync");
 const { determineServerKey } = require("./services/autoRecap");
+const {
+  disarmIfAlreadyOnRequestedMap,
+  normalizeIp,
+  recordMapEvent,
+} = require("./lib/restartRequestPolicy");
 const { runRconCommand } = require("./services/rconClient");
 
 // Jail system
@@ -463,22 +468,14 @@ startSpeedrunPlayerLinkSync({
       pairScores: true,
       pairWindowMs: 8000,
       }, async (evt) => {
-    // If the armed match map changed manually before !rs was used,
-    // burn the one-time restart so it cannot be used mid-round later.
-    if (evt.type === "map" && state.restartRequest && !state.restartRequest.used) {
-      const rs = state.restartRequest;
-
-      const armedIp = String(rs.serverIp || "").split(":")[0];
-      const fromIp = String(evt.from || "").split(":")[0];
-      const newMap = String(evt.name || "").toLowerCase();
-      const armedMap = String(rs.map || "").toLowerCase();
-
-      if (armedIp === fromIp && newMap && armedMap && newMap !== armedMap) {
-        rs.used = true;
-        rs.disarmedReason = "manual_map_change";
-
+    // Track each server's current map. Any map load burns the pending restart:
+    // once the selected map is live, !rs must not restart it again.
+    if (evt.type === "map") {
+      const disarmed = recordMapEvent(state, evt);
+      if (disarmed) {
         console.log(
-          `[!rs] disarmed reason=manual_map_change armed=${armedMap} current=${newMap} from=${evt.from}`
+          `[!rs] disarmed reason=${disarmed.reason} armed=${disarmed.armedMap || "unknown"} ` +
+          `current=${disarmed.currentMap} from=${evt.from}`
         );
       }
     }
@@ -496,11 +493,19 @@ startSpeedrunPlayerLinkSync({
         return;
       }
 
-      const armedIp = String(rs.serverIp || "").split(":")[0];
-      const evtIp = String(evt.from || "").split(":")[0];
+      const armedIp = normalizeIp(rs.serverIp);
+      const evtIp = normalizeIp(evt.from);
 
       if (armedIp !== evtIp) {
         console.log(`[!rs] denied reason=wrong_server armed=${rs.serverIp} from=${evt.from}`);
+        return;
+      }
+
+      const currentMap = disarmIfAlreadyOnRequestedMap(state, rs);
+      if (currentMap) {
+        console.log(
+          `[!rs] denied reason=map_already_loaded map=${currentMap} from=${evt.from}`
+        );
         return;
       }
 
@@ -527,6 +532,10 @@ startSpeedrunPlayerLinkSync({
         return;
       }
 
+      // Reserve the one-time request before posting to Discord or issuing RCON,
+      // so simultaneous chat packets cannot both trigger a restart.
+      rs.used = true;
+
       const serverKey = determineServerKey(rs.serverIp);
 
       console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
@@ -541,8 +550,6 @@ startSpeedrunPlayerLinkSync({
       } catch (err) {
         console.warn("[!rs] failed to post restart message:", err);
       }
-
-      rs.used = true;
 
       try {
         await runRconCommand(serverKey, `amx_map ${rs.map}`);

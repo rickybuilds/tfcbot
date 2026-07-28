@@ -185,10 +185,6 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
       const text = String(evt.text || "").trim().toLowerCase();
 
       if (text === "!rs") {
-        console.log(
-          `[!rs] request player=${evt.player} steamid=${evt.steamid} team=${evt.team} from=${from}`
-        );
-
         onEvent?.({
           type: "restart_request",
           from,
