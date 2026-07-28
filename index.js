@@ -126,9 +126,11 @@ const deps = {
   settings, 
   elo, 
   privacy, 
-  matchesStore, 
-  banStore, 
-  streaks, 
+  matchesStore,
+  banStore,
+  steamLinks,
+  runRconCommand,
+  streaks,
   // 👇 JAIL SYSTEM
   jailStore
 };
@@ -468,6 +470,14 @@ startSpeedrunPlayerLinkSync({
       pairScores: true,
       pairWindowMs: 8000,
       }, async (evt) => {
+    if (
+      (evt.type === "say" || evt.type === "disconnect") &&
+      typeof registry.handleHldsQueueEvent === "function"
+    ) {
+      const handled = await registry.handleHldsQueueEvent(evt);
+      if (handled) return;
+    }
+
     // Track each server's current map. Any map load burns the pending restart:
     // once the selected map is live, !rs must not restart it again.
     if (evt.type === "map") {

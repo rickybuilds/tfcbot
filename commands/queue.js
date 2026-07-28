@@ -13,12 +13,33 @@ let lastStatusUsedAt = 0; // global cooldown timestamp
 const autoFullVoteTimers = new WeakMap();
 
 const ADMIN_ROLE = process.env.ADMIN_ROLE_ID || "";
+const HLDS_QUEUE_COMMANDS = new Map([
+  ["!add", { action: "add", adl: false }],
+  ["++", { action: "add", adl: false }],
+  ["!addadl", { action: "add", adl: true }],
+  ["++adl", { action: "add", adl: true }],
+  ["**", { action: "add", adl: true }],
+  ["!remove", { action: "remove", adl: false }],
+  ["--", { action: "remove", adl: false }],
+]);
 
 /* ------------------ local helpers ------------------ */
 function isAdmin(message) {
   return ADMIN_ROLE && message.member?.roles?.cache?.has(ADMIN_ROLE);
 }
 function now() { return Date.now(); }
+
+function parseHldsQueueCommand(text) {
+  return HLDS_QUEUE_COMMANDS.get(String(text || "").trim().toLowerCase()) || null;
+}
+
+function safeRconText(text) {
+  return String(text || "")
+    .replace(/[\r\n"]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
 
 async function maybeStartAutoFullVote(
   message,
@@ -132,7 +153,17 @@ async function postQueueBoard(channel, state, elo, privacy) {
 }
 
 /* ------------------ register commands ------------------ */
-function register(reg, { client, config, state, elo, banStore, settings, privacy }) {
+function register(reg, {
+  client,
+  config,
+  state,
+  elo,
+  banStore,
+  settings,
+  privacy,
+  steamLinks,
+  runRconCommand,
+}) {
   const add = async (message, isAdl = false) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
@@ -450,6 +481,209 @@ reg.set("addadl", (msg) => add(msg, true));
 reg.set("++adl", (msg) => add(msg, true));
 reg.set("**", (msg) => add(msg, true));
 
+  const sendHldsMessage = async (evt, text) => {
+    if (!evt?.serverKey || typeof runRconCommand !== "function") {
+      console.warn(
+        `[hlds queue] Cannot send RCON response; unknown server for ${evt?.from || "unknown source"}`
+      );
+      return;
+    }
+
+    try {
+      await runRconCommand(evt.serverKey, `say "[Queue] ${safeRconText(text)}"`);
+    } catch (err) {
+      console.warn(`[hlds queue] RCON message failed for ${evt.serverKey}:`, err.message);
+    }
+  };
+
+  const pickupChannel = async () => {
+    const realClient = reg.client || client;
+    if (!realClient) return null;
+    const channel = await realClient.channels.fetch(config.channels.pickup);
+    return channel?.isTextBased?.() ? channel : null;
+  };
+
+  const removeHldsEntry = async (entry, reason) => {
+    const id = String(entry.id);
+    try { adl.unvote(id); } catch {}
+
+    if (state.isVotingInProgress && state.vote?.cancelVote) {
+      await state.vote.cancelVote(reason, id);
+    } else {
+      state.queue = state.queue.filter(p => String(p.id) !== id);
+      if (Array.isArray(state.queueSnapshot)) {
+        state.queueSnapshot = state.queueSnapshot.filter(p => String(p.id) !== id);
+      }
+    }
+
+    try { reg.persistQueueSoon?.(); } catch {}
+
+    const channel = await pickupChannel().catch(() => null);
+    if (channel) {
+      await channel.send(reason);
+      await postQueueBoard(channel, state, elo, privacy);
+      try { await refreshBotName(reg.client || client, state); } catch {}
+    }
+  };
+
+  reg.handleHldsQueueEvent = async (evt) => {
+    if (evt?.type === "disconnect") {
+      const steamId = String(evt.steamid || "").trim().toUpperCase();
+      const entry = state.queue.find(p =>
+        p.queueOrigin === "hlds" &&
+        String(p.steamId || "").toUpperCase() === steamId &&
+        (
+          (p.sourceServerKey && evt.serverKey && p.sourceServerKey === evt.serverKey) ||
+          (!p.sourceServerKey && p.sourceServerIp === evt.from)
+        )
+      );
+
+      if (!entry) return false;
+
+      await removeHldsEntry(
+        entry,
+        `⚠️ <@${entry.id}> disconnected from ${entry.sourceServerKey || "the game server"} and was removed from the queue.`
+      );
+      return false;
+    }
+
+    if (evt?.type !== "say") return false;
+    const command = parseHldsQueueCommand(evt.text);
+    if (!command) return false;
+
+    if (!evt.serverKey) {
+      console.warn(
+        `[hlds queue] Ignored ${evt.text} from unconfigured source ${evt.from}:${evt.sourcePort || "?"}`
+      );
+      return true;
+    }
+
+    const steamId = String(evt.steamid || "").trim().toUpperCase();
+    let links;
+    try {
+      links = await steamLinks?.getDiscordBySteam(steamId);
+    } catch (err) {
+      console.error(`[hlds queue] Steam link lookup failed for ${steamId}:`, err);
+      await sendHldsMessage(evt, `${evt.player}: account lookup failed; please try again.`);
+      return true;
+    }
+
+    const discordIds = [...new Set(
+      (links || []).map(link => String(link.discord_id || "").trim()).filter(Boolean)
+    )];
+
+    if (discordIds.length !== 1) {
+      const reason = discordIds.length
+        ? "your Steam ID has multiple Discord links; ask an admin to fix them."
+        : "link your Steam ID to Discord before joining the queue.";
+      await sendHldsMessage(evt, `${evt.player}: ${reason}`);
+      return true;
+    }
+
+    const discordId = discordIds[0];
+    const existing = state.queue.find(p => String(p.id) === discordId);
+
+    if (command.action === "remove") {
+      if (!existing) {
+        await sendHldsMessage(evt, `${evt.player}: you are not in the queue.`);
+        return true;
+      }
+
+      await removeHldsEntry(
+        existing,
+        `➖ <@${discordId}> left the queue from ${evt.serverKey}.`
+      );
+      await sendHldsMessage(evt, `${evt.player}: removed from the queue.`);
+      return true;
+    }
+
+    if (state.lockedPlayers?.has(discordId)) {
+      await sendHldsMessage(evt, `${evt.player}: you are already locked into an active match.`);
+      return true;
+    }
+
+    if (state.bannedUsers?.has(discordId) || state.ghostBans?.[discordId] || banStore?.getBan(discordId)) {
+      await sendHldsMessage(evt, `${evt.player}: you cannot join the queue right now.`);
+      return true;
+    }
+
+    if (!existing && state.queue.length >= (state.MAX_PLAYERS || 8)) {
+      await sendHldsMessage(evt, `${evt.player}: the queue is already full.`);
+      return true;
+    }
+
+    const channel = await pickupChannel().catch(() => null);
+    if (!channel) {
+      await sendHldsMessage(evt, `${evt.player}: the Discord pickup channel is unavailable.`);
+      return true;
+    }
+
+    let member = null;
+    try {
+      member = await channel.guild?.members?.fetch(discordId);
+    } catch {}
+    if (!member) {
+      await sendHldsMessage(
+        evt,
+        `${evt.player}: your Discord link was found, but you must be in the Discord server to queue.`
+      );
+      return true;
+    }
+
+    const name = member.displayName || evt.player || `Player#${discordId.slice(-4)}`;
+    const entry = existing || { id: discordId, name, lastSeenAt: Date.now() };
+    if (!existing) state.queue.push(entry);
+
+    entry.name = name;
+    entry.lastSeenAt = Date.now();
+    entry.queueOrigin = "hlds";
+    entry.sourceServerKey = evt.serverKey;
+    entry.sourceServerIp = evt.from;
+    entry.steamId = steamId;
+
+    if (command.adl) {
+      entry.adlVote = true;
+      try { adl.vote(discordId); } catch {}
+    }
+
+    try { elo.getRating(discordId, name, { createIfMissing: true }); } catch {}
+    try { reg.persistQueueSoon?.(); } catch {}
+
+    await postQueueBoard(channel, state, elo, privacy);
+    try { await refreshBotName(reg.client || client, state); } catch {}
+
+    await sendHldsMessage(
+      evt,
+      `${evt.player}: added to the ${command.adl ? "ADL " : ""}queue (${state.queue.length}/${state.MAX_PLAYERS || 8}).`
+    );
+
+    const syntheticMessage = {
+      channel,
+      client: reg.client || client,
+      guild: channel.guild,
+      member,
+      author: member.user,
+      reply: (...args) => channel.send(...args),
+    };
+    await maybeStartAutoFullVote(syntheticMessage, state);
+    return true;
+  };
+
+  reg.notifyHldsQueueServers = (phase) => {
+    const serverKeys = [...new Set(
+      (state.queueSnapshot || state.queue)
+        .filter(p => p.queueOrigin === "hlds" && p.sourceServerKey)
+        .map(p => p.sourceServerKey)
+    )];
+    const label = phase === "map" ? "Map" : "Server";
+    const text = `[Queue] ${label} vote is live in Discord #pickup. Join Discord and vote now.`;
+
+    for (const serverKey of serverKeys) {
+      Promise.resolve(runRconCommand?.(serverKey, `say "${safeRconText(text)}"`))
+        .catch(err => console.warn(`[hlds queue] ${label} vote notice failed for ${serverKey}:`, err.message));
+    }
+  };
+
 
 /* ---------------- scheduled cleanup ---------------- */
 setInterval(async () => {
@@ -560,4 +794,6 @@ module.exports = {
   postQueueBoard,
   addPlayerToQueue,
   maybeStartAutoFullVote,
+  parseHldsQueueCommand,
+  safeRconText,
 };

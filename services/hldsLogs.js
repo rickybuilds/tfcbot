@@ -26,6 +26,21 @@ function serverNameForSource(source) {
   }
   return sourceIp;
 }
+
+function serverKeyForSource(source, sourcePort = null) {
+  const sourceIp = addressToIp(source);
+  const matches = Object.entries(servers)
+    .filter(([, server]) => addressToIp(server.host) === sourceIp);
+
+  if (matches.length === 1) return matches[0][0];
+  if (matches.length === 0) return null;
+
+  const exact = matches.find(([, server]) => {
+    const expectedPort = Number(server.logSourcePort || server.port);
+    return Number(sourcePort) === expectedPort;
+  });
+  return exact?.[0] || null;
+}
 /* -------------------------------------------------------------------------- */
 /* Log Parser */
 /* -------------------------------------------------------------------------- */
@@ -145,7 +160,13 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     }
   }
   const sock = dgram.createSocket("udp4");
-  const allowedIPs = [...new Set(Object.values(servers).map(s => s.host?.split(":")[0]).filter(Boolean))];
+  const configuredIPs = Object.values(servers)
+    .map(s => addressToIp(s.host))
+    .filter(Boolean);
+  const requestedIPs = Array.isArray(opts.allowedSources)
+    ? opts.allowedSources.map(addressToIp).filter(Boolean)
+    : [];
+  const allowedIPs = [...new Set([...configuredIPs, ...requestedIPs])];
   const lastScoresBySource = new Map();
   sock.on("message", (msg, rinfo) => {
     const from = rinfo.address;
@@ -159,7 +180,13 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
       currentLogFileBySource.delete(from);
       if (currentLogFile && global._teamFileTrack) delete global._teamFileTrack[currentLogFile];
     }
-    const evt = { ...parsed, from, ts: Date.now() };
+    const evt = {
+      ...parsed,
+      from,
+      sourcePort: rinfo.port,
+      serverKey: serverKeyForSource(from, rinfo.port),
+      ts: Date.now(),
+    };
     const steamId = normalizeSteamId(evt.steamid);
     if (identityStore && steamId && evt.type === "connect") {
       try {
@@ -228,7 +255,10 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     }
     onEvent?.(evt);
   });
-  sock.bind(27500, "0.0.0.0", () => console.log("[HLDS] listening on UDP 27500"));
+  const listenPort = Number(opts.port || 27500);
+  sock.bind(listenPort, "0.0.0.0", () => {
+    console.log(`[HLDS] listening on UDP ${listenPort}`);
+  });
   return {
     close: () => {
       sock.close();
@@ -241,5 +271,6 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
 /* -------------------------------------------------------------------------- */
 module.exports = {
   parseLine,
+  serverKeyForSource,
   startHldsLogReceiver,
 };

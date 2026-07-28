@@ -199,6 +199,7 @@ function eligibleStreakPlayers(players, elo) {
 
 
 	console.log("[!fv] starting server vote…", serverOptions.length, "options");
+	registry.notifyHldsQueueServers?.("server");
 	await startVote(state, message, {
 	  title: "Server Vote",
 	  duration: serverVoteDur,
@@ -475,6 +476,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
+registry.notifyHldsQueueServers?.("map");
 return startVote(state, message, {
   title,
   duration: mapVoteDur,
