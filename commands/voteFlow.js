@@ -290,6 +290,7 @@ function eligibleStreakPlayers(players, elo) {
 		  maxSelectionsPerUser: config.mapMaxSelectionsPerUser,
 		  elo,
 		  privacy,
+		  notifyHldsQueueServers: registry.notifyHldsQueueServers,
 
 		  finalize: async (mapRef) => {
 
@@ -472,11 +473,11 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
   await postQueueBoard(message.channel, state, elo, privacy);
 }
 
-	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, finalize }) {
+	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, notifyHldsQueueServers, finalize }) {
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
-registry.notifyHldsQueueServers?.("map");
+notifyHldsQueueServers?.("map");
 return startVote(state, message, {
   title,
   duration: mapVoteDur,
@@ -574,6 +575,7 @@ return startVote(state, message, {
 			  maxSelectionsPerUser,
 			  elo,
 			  privacy,
+			  notifyHldsQueueServers,
 			  finalize
 			});
 		  }
