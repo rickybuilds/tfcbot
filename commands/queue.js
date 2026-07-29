@@ -41,6 +41,33 @@ function safeRconText(text) {
     .slice(0, 180);
 }
 
+async function notifyHldsVoteStarted(players, runRconCommand) {
+  if (typeof runRconCommand !== "function") return 0;
+
+  const serverKeys = [...new Set(
+    (players || [])
+      .filter(p => p.queueOrigin === "hlds" && p.sourceServerKey)
+      .map(p => String(p.sourceServerKey))
+  )];
+
+  const results = await Promise.allSettled(
+    serverKeys.map(serverKey =>
+      runRconCommand(serverKey, 'say "[Queue] Vote started! Vote in Discord now."')
+    )
+  );
+
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn(
+        `[hlds queue] Vote notice failed for ${serverKeys[index]}:`,
+        result.reason?.message || result.reason
+      );
+    }
+  });
+
+  return results.filter(result => result.status === "fulfilled").length;
+}
+
 async function maybeStartAutoFullVote(
   message,
   state,
@@ -124,8 +151,14 @@ function queueLines(state, elo, privacy) {
       );
 
       const name = `${base}${supporterBadge(p.id)}`;
+      const playerLine = p.adlVote ? `${name} (ADL)` : name;
 
-      return p.adlVote ? `${name} (ADL)` : name;
+      if (p.queueOrigin === "hlds" && p.sourceServerKey) {
+        const serverKey = String(p.sourceServerKey).replace(/`/g, "");
+        return `${playerLine}\n↳ Added to queue via: \`${serverKey}\``;
+      }
+
+      return playerLine;
     } catch (e) {
       console.error("[queueLines] failed formatting", p, e);
       return mention(p.id);
@@ -574,8 +607,8 @@ reg.set("**", (msg) => add(msg, true));
 
     if (discordIds.length !== 1) {
       const reason = discordIds.length
-        ? "your Steam ID has multiple Discord links; ask an admin to fix them."
-        : "link your Steam ID to Discord before joining the queue.";
+        ? "multiple Discord links found; contact an admin."
+        : "link Steam to Discord first.";
       await sendHldsMessage(evt, `${evt.player}: ${reason}`);
       return true;
     }
@@ -778,6 +811,7 @@ module.exports = {
   postQueueBoard,
   addPlayerToQueue,
   maybeStartAutoFullVote,
+  notifyHldsVoteStarted,
   parseHldsQueueCommand,
   safeRconText,
 };

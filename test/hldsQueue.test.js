@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   register,
+  notifyHldsVoteStarted,
   parseHldsQueueCommand,
   safeRconText,
 } = require("../commands/queue");
@@ -66,6 +67,33 @@ test("RCON queue notices cannot inject quotes or new commands", () => {
   );
 });
 
+test("vote start notifies each server represented by in-game players once", async () => {
+  const sent = [];
+  const players = [
+    { queueOrigin: "hlds", sourceServerKey: "east" },
+    { queueOrigin: "hlds", sourceServerKey: "east" },
+    { queueOrigin: "hlds", sourceServerKey: "west" },
+    { queueOrigin: "discord" },
+  ];
+
+  const count = await notifyHldsVoteStarted(
+    players,
+    async (serverKey, command) => sent.push({ serverKey, command })
+  );
+
+  assert.equal(count, 2);
+  assert.deepEqual(sent, [
+    {
+      serverKey: "east",
+      command: 'say "[Queue] Vote started! Vote in Discord now."',
+    },
+    {
+      serverKey: "west",
+      command: 'say "[Queue] Vote started! Vote in Discord now."',
+    },
+  ]);
+});
+
 test("linked HLDS players join by Discord ID and leave on disconnect", async () => {
   const discordId = "123456789012345678";
   const sentToDiscord = [];
@@ -112,12 +140,27 @@ test("linked HLDS players join by Discord ID and leave on disconnect", async () 
     settings: { getNumber: (_key, fallback) => fallback },
     privacy: { isHidden: () => false },
     steamLinks: {
-      getDiscordBySteam: async () => [{ discord_id: discordId }],
+      getDiscordBySteam: async steamId =>
+        steamId === "STEAM_0:1:99999" ? [] : [{ discord_id: discordId }],
     },
     runRconCommand: async (serverKey, command) => {
       sentToRcon.push({ serverKey, command });
     },
   });
+
+  const missingLinkHandled = await registry.handleHldsQueueEvent({
+    type: "say",
+    text: "!add",
+    player: "ricky",
+    steamid: "STEAM_0:1:99999",
+    from: "192.0.2.10",
+    serverKey: "mm1",
+  });
+
+  assert.equal(missingLinkHandled, true);
+  assert.equal(sentToRcon[0].command, 'say "[Queue] ricky: link Steam to Discord first."');
+  assert.ok(sentToRcon[0].command.length < 64);
+  sentToRcon.length = 0;
 
   const addHandled = await registry.handleHldsQueueEvent({
     type: "say",
@@ -136,6 +179,9 @@ test("linked HLDS players join by Discord ID and leave on disconnect", async () 
   assert.equal(state.queue[0].steamId, "STEAM_0:1:12345");
   assert.match(sentToRcon[0].command, /added to the queue/i);
   assert.ok(sentToDiscord.length >= 1);
+  const queueBoard = sentToDiscord.find(payload => payload.embeds)?.embeds[0];
+  assert.match(queueBoard.data.description, /Linked Player/);
+  assert.match(queueBoard.data.description, /Added to queue via: `mm1`/);
 
   const disconnectHandled = await registry.handleHldsQueueEvent({
     type: "disconnect",

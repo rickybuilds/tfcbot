@@ -19,7 +19,7 @@ const {
   formatPlayerName,
 } = require("../lib/util");
 const { makeBalancedTeams } = require("../lib/balance");
-const { postQueueBoard } = require("./queue");
+const { postQueueBoard, notifyHldsVoteStarted } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 // HLDS auto-recap
 const { autoArmFromMatchReady } = require("../lib/autoArm");
@@ -85,7 +85,7 @@ function eligibleStreakPlayers(players, elo) {
 
 
 /* =============================== register =============================== */
-	function register(registry, { config, state, elo, privacy, matchesStore, settings, streaks, banStore }) {
+	function register(registry, { config, state, elo, privacy, matchesStore, settings, streaks, banStore, runRconCommand }) {
 		if (!state.lockedServers) state.lockedServers = new Set();
 		if (!state.lockedPlayers) state.lockedPlayers = new Map();
 
@@ -185,6 +185,8 @@ function eligibleStreakPlayers(players, elo) {
 	  try { await refreshBotName(message.client, state); } catch {}
 	  return;
 	}
+
+	await notifyHldsVoteStarted(state.queueSnapshot, runRconCommand);
 
       // Snapshot this for the full server-vote -> map-vote transition. The
       // dedicated pending value keeps !set locked even in the brief gap
