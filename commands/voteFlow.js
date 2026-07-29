@@ -199,7 +199,6 @@ function eligibleStreakPlayers(players, elo) {
 
 
 	console.log("[!fv] starting server vote…", serverOptions.length, "options");
-	registry.notifyHldsQueueServers?.("server");
 	await startVote(state, message, {
 	  title: "Server Vote",
 	  duration: serverVoteDur,
@@ -290,7 +289,6 @@ function eligibleStreakPlayers(players, elo) {
 		  maxSelectionsPerUser: config.mapMaxSelectionsPerUser,
 		  elo,
 		  privacy,
-		  notifyHldsQueueServers: registry.notifyHldsQueueServers,
 
 		  finalize: async (mapRef) => {
 
@@ -473,11 +471,10 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
   await postQueueBoard(message.channel, state, elo, privacy);
 }
 
-	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, notifyHldsQueueServers, finalize }) {
+	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, finalize }) {
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
-notifyHldsQueueServers?.("map");
 return startVote(state, message, {
   title,
   duration: mapVoteDur,
@@ -575,7 +572,6 @@ return startVote(state, message, {
 			  maxSelectionsPerUser,
 			  elo,
 			  privacy,
-			  notifyHldsQueueServers,
 			  finalize
 			});
 		  }

@@ -669,22 +669,6 @@ reg.set("**", (msg) => add(msg, true));
     return true;
   };
 
-  reg.notifyHldsQueueServers = (phase) => {
-    const serverKeys = [...new Set(
-      (state.queueSnapshot || state.queue)
-        .filter(p => p.queueOrigin === "hlds" && p.sourceServerKey)
-        .map(p => p.sourceServerKey)
-    )];
-    const label = phase === "map" ? "Map" : "Server";
-    const text = `[Queue] ${label} vote is live in Discord #pickup. Join Discord and vote now.`;
-
-    for (const serverKey of serverKeys) {
-      Promise.resolve(runRconCommand?.(serverKey, `say "${safeRconText(text)}"`))
-        .catch(err => console.warn(`[hlds queue] ${label} vote notice failed for ${serverKey}:`, err.message));
-    }
-  };
-
-
 /* ---------------- scheduled cleanup ---------------- */
 setInterval(async () => {
   // 🚫 Do not AFK kick anyone while a vote is already in progress

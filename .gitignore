@@ -128,3 +128,7 @@ test_api.js
 !/test/restartRequestPolicy.test.js
 !/test/hldsQueue.test.js
 /test
+!/test/
+!/test/voteTransition.test.js
+test/hldsQueue.test.js
+test/voteTransition.test.js
