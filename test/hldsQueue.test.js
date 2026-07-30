@@ -184,7 +184,7 @@ test("linked HLDS players join by Discord ID and leave on disconnect", async () 
   assert.doesNotMatch(queueBoard.data.description, /Added to queue via/);
   assert.equal(
     sentToDiscord[0],
-    `➕ <@${discordId}> joined the queue from mm1.`
+    `<@${discordId}> joined the queue from mm1.`
   );
 
   const disconnectHandled = await registry.handleHldsQueueEvent({

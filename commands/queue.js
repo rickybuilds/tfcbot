@@ -618,7 +618,7 @@ reg.set("**", (msg) => add(msg, true));
 
       await removeHldsEntry(
         existing,
-        `➖ <@${discordId}> left the queue from ${evt.serverKey}.`
+        `<@${discordId}> left the queue from ${evt.serverKey}.`
       );
       await sendHldsMessage(evt, `${evt.player}: removed from the queue.`);
       return true;
@@ -677,7 +677,7 @@ reg.set("**", (msg) => add(msg, true));
     try { reg.persistQueueSoon?.(); } catch {}
 
     if (!existing) {
-      await channel.send(`➕ <@${discordId}> joined the queue from ${evt.serverKey}.`);
+      await channel.send(`<@${discordId}> joined the queue from ${evt.serverKey}.`);
     }
     await postQueueBoard(channel, state, elo, privacy);
     try { await refreshBotName(reg.client || client, state); } catch {}
