@@ -151,14 +151,8 @@ function queueLines(state, elo, privacy) {
       );
 
       const name = `${base}${supporterBadge(p.id)}`;
-      const playerLine = p.adlVote ? `${name} (ADL)` : name;
 
-      if (p.queueOrigin === "hlds" && p.sourceServerKey) {
-        const serverKey = String(p.sourceServerKey).replace(/`/g, "");
-        return `${playerLine}\n↳ Added to queue via: \`${serverKey}\``;
-      }
-
-      return playerLine;
+      return p.adlVote ? `${name} (ADL)` : name;
     } catch (e) {
       console.error("[queueLines] failed formatting", p, e);
       return mention(p.id);
@@ -682,6 +676,9 @@ reg.set("**", (msg) => add(msg, true));
     try { elo.getRating(discordId, name, { createIfMissing: true }); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}
 
+    if (!existing) {
+      await channel.send(`➕ <@${discordId}> joined the queue from ${evt.serverKey}.`);
+    }
     await postQueueBoard(channel, state, elo, privacy);
     try { await refreshBotName(reg.client || client, state); } catch {}
 

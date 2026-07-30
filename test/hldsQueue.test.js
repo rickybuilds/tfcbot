@@ -181,7 +181,11 @@ test("linked HLDS players join by Discord ID and leave on disconnect", async () 
   assert.ok(sentToDiscord.length >= 1);
   const queueBoard = sentToDiscord.find(payload => payload.embeds)?.embeds[0];
   assert.match(queueBoard.data.description, /Linked Player/);
-  assert.match(queueBoard.data.description, /Added to queue via: `mm1`/);
+  assert.doesNotMatch(queueBoard.data.description, /Added to queue via/);
+  assert.equal(
+    sentToDiscord[0],
+    `➕ <@${discordId}> joined the queue from mm1.`
+  );
 
   const disconnectHandled = await registry.handleHldsQueueEvent({
     type: "disconnect",
