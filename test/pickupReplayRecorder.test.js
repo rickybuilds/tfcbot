@@ -76,6 +76,17 @@ test("duplicate and concurrent starts serialize to one command", async () => {
   h.db.close();
 });
 
+test("map-load restart bypasses durable recording state for the same round", async () => {
+  const h = harness(() => "STARTED match_id=dup round=1 dir=dup/round-01");
+  await h.recorder.start("east", "dup", 1);
+  await h.recorder.start("east", "dup", 1, { restart: true });
+  assert.deepEqual(h.commands.map(x => x.command), [
+    'amx_pr_start "dup" 1',
+    'amx_pr_start "dup" 1',
+  ]);
+  h.db.close();
+});
+
 test("ALREADY_RECORDING for the requested identity is success", async () => {
   const h = harness(() => "ALREADY_RECORDING match_id=dup round=1");
   const result = await h.recorder.start("east", "dup", 1);
@@ -170,7 +181,9 @@ test("autoRecap starts before spectator setup and stops before the round-two map
   const order = [];
   const recorder = {
     async reconcileAll() { return []; },
-    async start(_server, matchId, round) { order.push(`start:${matchId}:${round}`); },
+    async start(_server, matchId, round, options) {
+      order.push(`start:${matchId}:${round}:${options?.restart === true ? "restart" : "normal"}`);
+    },
     async stop(_server, matchId, round) { order.push(`stop:${matchId}:${round}`); },
   };
   const channel = { async send() {} };
@@ -194,7 +207,7 @@ test("autoRecap starts before spectator setup and stops before the round-two map
   await autoRecap.onEvent({ type: "map", name: "shutdown2", from: undefined });
   await autoRecap.onEvent({ type: "score_pair", blue: 1, red: 0, from: undefined });
 
-  assert.ok(order.indexOf("start:ordered:1") < order.indexOf("spectator-setup"));
+  assert.ok(order.indexOf("start:ordered:1:restart") < order.indexOf("spectator-setup"));
   assert.ok(order.indexOf("stop:ordered:1") < order.indexOf("amx_map shutdown2"));
   await autoRecap.disarmByMatchId("ordered");
   db.close();

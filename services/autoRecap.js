@@ -492,7 +492,10 @@ try {
       if (looseMapEqual(evt.name, a.map)) {
         const roundNumber = Math.min((a.half || 0) + 1, 2);
         try {
-          await recorder.start(a.serverKey, a.matchId, roundNumber);
+          // A map load creates a fresh AMXX plugin instance. Its durable bot row may
+          // still say "recording" from the instance that was aborted by map_change,
+          // so explicitly start again and let AMXX replace this round's artifacts.
+          await recorder.start(a.serverKey, a.matchId, roundNumber, { restart: true });
         } catch (err) {
           console.error("[autoRecap] Pickup replay start blocked live setup:", err.message);
           await post(recapChannel, `🚨 Replay recorder failed to start for **${a.matchId}** round ${roundNumber}; live setup is paused.`).catch?.(() => {});

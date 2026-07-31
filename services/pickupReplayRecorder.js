@@ -161,22 +161,23 @@ class PickupReplayRecorder {
     throw new Error(`${kind} RCON failed after ${this.retries} attempts: ${lastError}`);
   }
 
-  start(serverKey, matchId, roundNumber) {
+  start(serverKey, matchId, roundNumber, options = {}) {
     if (!this.enabled) return Promise.resolve({ ok: true, disabled: true });
     let identity;
     try { identity = validateIdentity(matchId, roundNumber); }
     catch (error) { return Promise.reject(error); }
-    return this._enqueue(serverKey, () => this._start(serverKey, identity));
+    const restart = options?.restart === true;
+    return this._enqueue(serverKey, () => this._start(serverKey, identity, { restart }));
   }
 
-  async _start(serverKey, identity) {
+  async _start(serverKey, identity, { restart = false } = {}) {
     this._ensureRow(serverKey, identity, "recording");
     const existing = this._row(serverKey, identity);
-    if (existing?.observed_state === "recording") {
+    if (!restart && existing?.observed_state === "recording") {
       return { ok: true, idempotent: true, state: "recording" };
     }
     this._update(serverKey, identity, { start_requested_at: Date.now() });
-    this._log("info", "start_requested", { serverKey, ...identity });
+    this._log("info", "start_requested", { serverKey, ...identity, restart });
     const command = `amx_pr_start "${identity.matchId}" ${identity.roundNumber}`;
     const raw = await this._rconWithRetry(serverKey, command, identity, "start");
     const response = sanitizeResponse(raw);
@@ -185,7 +186,7 @@ class PickupReplayRecorder {
 
     if (/\bSTARTED\b/i.test(response) && sameIdentity(parsed, identity)) {
       this._update(serverKey, identity, { observed_state: "recording", started_at: Date.now(), last_error: null });
-      this._log("info", "start_acknowledged", { serverKey, ...identity });
+      this._log("info", "start_acknowledged", { serverKey, ...identity, restart });
       return { ok: true, state: "recording" };
     }
     if (/\bALREADY_RECORDING\b/i.test(response) && sameIdentity(parsed, identity)) {
