@@ -37,6 +37,9 @@ module.exports = {
   // UI / Game
   MAX_BUTTONS: 9,
   MAX_PLAYERS: Number(process.env.MAX_PLAYERS) || 8,
+  pickupRecordingEnabled: /^(?:1|true|yes|on)$/i.test(
+    String(process.env.PICKUP_RECORDING_ENABLED || "")
+  ),
   mapMaxSelectionsPerUser: (() => {
     const value = Math.max(1, Number(process.env.MAP_MAX_SELECTIONS_PER_USER || 1));
     return Number.isFinite(value) ? value : 1;

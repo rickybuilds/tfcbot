@@ -128,5 +128,6 @@ test_api.js
 !/test/restartRequestPolicy.test.js
 !/test/hldsQueue.test.js
 !/test/voteTransition.test.js
+!/test/pickupReplayRecorder.test.js
 /output/documents
 /.tmp

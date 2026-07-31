@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { downloadAndUploadLogs } = require("./hldsTransfer");
 const { runRconCommand } = require("./rconClient");
+const { PickupReplayRecorder } = require("./pickupReplayRecorder");
 const config = require("../config");
 const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
@@ -144,6 +145,15 @@ if (hostBase === ipBase) return key;
 
 function attachAutoRecap(ctx, options = {}) {
   const { client } = ctx;
+  const rconCommand = options.runRconCommand || runRconCommand;
+  const voiceStart = options.startVoiceBots || startVoiceBots;
+  const voiceStop = options.stopVoiceBots || stopVoiceBots;
+  const recorder = options.recorder || new PickupReplayRecorder({
+    db: ctx.matchesStore.db,
+    runRconCommand: rconCommand,
+    enabled: config.pickupRecordingEnabled,
+  });
+  const eventQueues = new Map();
 
   // ✅ Channel references pulled from config.js
   const recapChannel = config.channels.recap;
@@ -222,7 +232,7 @@ const k = keyOf(serverIp);
   async function setStartingOrderHostname(a) {
     const teamStartPlan = getTeamStartPlan(a.team1Starts);
     const label = a.serverKey?.toUpperCase() || "SERVER";
-    await runRconCommand(
+    await rconCommand(
       a.serverKey,
       `hostname "fun stuff ${label} - T1 ${a.team1Starts.toUpperCase()} / T2 ${teamStartPlan.team2Starts.toUpperCase()}"`
     );
@@ -415,7 +425,7 @@ function updateArmedMap(matchId, newMap) {
   if (a.voiceArmed) {
     console.log(`[autoRecap] 🎤 Manual disarm — stopping voice bots for ${a.matchId}`);
     try {
-      await stopVoiceBots();
+      await voiceStop();
     } catch (err) {
       console.warn("[autoRecap] Failed to stop voice bots on manual disarm:", err);
     }
@@ -454,7 +464,7 @@ try {
   }
 }
 
-  async function onEvent(evt) {
+  async function handleEvent(evt) {
     const k = keyOf(evt.from);
     const a = armed.get(k);
     if (!a) return;
@@ -479,6 +489,17 @@ try {
       console.log(`[autoRecap] reset liveCaps for ${a.matchId} on ${evt.name}`);
       await post(recapChannel, `🗺️ Map: **${evt.name}**`).catch?.(() => {});
 
+      if (looseMapEqual(evt.name, a.map)) {
+        const roundNumber = Math.min((a.half || 0) + 1, 2);
+        try {
+          await recorder.start(a.serverKey, a.matchId, roundNumber);
+        } catch (err) {
+          console.error("[autoRecap] Pickup replay start blocked live setup:", err.message);
+          await post(recapChannel, `🚨 Replay recorder failed to start for **${a.matchId}** round ${roundNumber}; live setup is paused.`).catch?.(() => {});
+          return;
+        }
+      }
+
       // 🎙️ Rule 1: arm voice bots when the correct match map loads
 		if (!a.voiceArmed && looseMapEqual(evt.name, a.map)) {
 		  try {
@@ -492,7 +513,7 @@ try {
 		  console.log(`[autoRecap] 🎧 Voice bots arming for match ${a.matchId}`);
 
 		  try {
-			await startVoiceBots();
+			await voiceStart();
 		  } catch (err) {
 			console.warn("[autoRecap] Failed to start voice bots:", err);
 		  }
@@ -602,6 +623,21 @@ const capPlayer = evt.player || "unknown";
 		  // return;
 		}
 
+      const scoreSignature = `${blue}:${red}:${a.half}`;
+      if (a.lastScorePair?.signature === scoreSignature && Date.now() - a.lastScorePair.at < 5000) {
+        return;
+      }
+      a.lastScorePair = { signature: scoreSignature, at: Date.now() };
+
+      const completedRound = Math.min((a.half || 0) + 1, 2);
+      try {
+        await recorder.stop(a.serverKey, a.matchId, completedRound);
+      } catch (err) {
+        console.error("[autoRecap] Pickup replay stop blocked round teardown:", err.message);
+        await post(recapChannel, `🚨 Replay recorder failed to stop for **${a.matchId}** round ${completedRound}; map reset/teardown is paused.`).catch?.(() => {});
+        return;
+      }
+
 	  a.half += 1;
 
 	  const blueScore = blue || 0;
@@ -639,11 +675,11 @@ const capPlayer = evt.player || "unknown";
 		      : "Team 2";
 		  const round1OffenseScore =
 		    round1OffenseTeam === "Team 1" ? blueScore : redScore;
-		  await runRconCommand(
+		  await rconCommand(
 		    serverKey,
 		    `hostname "fun stuff ${label} - ${round1OffenseTeam} Round 1 Score - ${round1OffenseScore}"`
 		  );
-		  await runRconCommand(serverKey, `amx_map ${mapNow}`);
+		  await rconCommand(serverKey, `amx_map ${mapNow}`);
 
 		  post(recapChannel, `🔄 Restarting map **${mapNow}** for Half 2...`).catch?.(() => {});
 		} catch (e) {
@@ -840,13 +876,13 @@ await sendRecapWithDemos(client, logsChannel, {
 		if (a.voiceArmed) {
 		  console.log(`[autoRecap] 🎤 Voice bots disarming for match ${a.matchId}`);
 
-		  await stopVoiceBots();
+		  await voiceStop();
 		  a.voiceArmed = false;
 		}
 
     try {
       const label = a.serverKey?.toUpperCase() || serverKey.toUpperCase();
-      await runRconCommand(serverKey, `hostname "fun stuff — ${label}"`);
+      await rconCommand(serverKey, `hostname "fun stuff — ${label}"`);
     } catch (e) {
       console.error("[autoRecap resetHostname] failed:", e);
     }
@@ -890,7 +926,22 @@ setTimeout(() => {
 
   }
 
-     return { 
+  function onEvent(evt) {
+    const key = keyOf(evt?.from);
+    const previous = eventQueues.get(key) || Promise.resolve();
+    const current = previous.catch(() => {}).then(() => handleEvent(evt));
+    eventQueues.set(key, current);
+    current.finally(() => {
+      if (eventQueues.get(key) === current) eventQueues.delete(key);
+    }).catch(() => {});
+    return current;
+  }
+
+  recorder.reconcileAll().catch(err => {
+    console.error("[autoRecap] Pickup replay restart reconciliation failed:", err.message);
+  });
+
+     return {
     armFromMatchReady: ({
       matchId,
       map,
@@ -911,7 +962,8 @@ setTimeout(() => {
       }),
     disarmByIp: ip => disarm(ip),
     disarmByMatchId,
-    onEvent,
+      onEvent,
+      reconcilePickupRecorder: () => recorder.reconcileAll(),
     updateArmedMap,
     updateTeam1Starts,
   };
