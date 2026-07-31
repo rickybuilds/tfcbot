@@ -8,6 +8,19 @@ const os = require("os");
 
 const { spawn } = require("child_process");
 
+const PICKUP_REPLAY_URL = "https://nonamepickup.servehalflife.com/pickup-replay.html";
+
+function buildPickupReplayLinks(matchId, readyRounds = []) {
+  if (!matchId || matchId === "N/A" || !Array.isArray(readyRounds)) return null;
+
+  const encodedMatchId = encodeURIComponent(String(matchId));
+  const links = [1, 2]
+    .filter(round => readyRounds.includes(round))
+    .map(round => `[Round ${round}](${PICKUP_REPLAY_URL}?matchId=${encodedMatchId}&round=${round})`);
+
+  return links.length ? `Watch Replay: ${links.join(" • ")}` : null;
+}
+
 function importHampalyzerStats(matchId, hampalyzerUrl) {
   if (!matchId || !hampalyzerUrl) return;
   if (!/^https?:\/\/app\.hampalyzer\.com\/parsedlogs\//i.test(hampalyzerUrl)) return;
@@ -32,7 +45,7 @@ async function sendRecapWithDemos(client, channelId, options = {}) {
   const ch = await client.channels.fetch(channelId);
   if (!ch) throw new Error("channel not found");
 
-  const { matchInfo = {}, tfcstats, hampalyzer, mentionRoles } = options;
+  const { matchInfo = {}, tfcstats, hampalyzer, mentionRoles, replayRounds = [] } = options;
   let { map, scoreBlue, scoreRed, winner, matchId, id, server } = matchInfo;
 
   // 🧠 try to resolve server if missing
@@ -86,6 +99,7 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
   embedTitleParts.push(`— ${server ? server.toUpperCase() : "UNKNOWN SERVER"}`);
   if (displayId) embedTitleParts.push(`— ID: ${displayId}`);
   const embedTitle = embedTitleParts.join(" ");
+  const replayLinks = buildPickupReplayLinks(displayId, replayRounds);
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
@@ -108,6 +122,7 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
           `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "View TFCStats"} • ${
             hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "View Hampalyzer"
           }`,
+          ...(replayLinks ? [replayLinks] : []),
         ].join("\n"),
         inline: false,
       }

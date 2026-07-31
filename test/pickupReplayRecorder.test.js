@@ -8,8 +8,36 @@ const {
   validateIdentity,
 } = require("../services/pickupReplayRecorder");
 const { attachAutoRecap } = require("../services/autoRecap");
+const { sendRecapWithDemos } = require("../services/discordUpload");
 
 const quietLogger = { info() {}, warn() {}, error() {}, log() {} };
+
+async function renderPickupRecap(replayRounds) {
+  let sentPayload;
+  const client = {
+    channels: {
+      fetch: async () => ({
+        send: async payload => {
+          sentPayload = payload;
+        },
+      }),
+    },
+  };
+
+  await sendRecapWithDemos(client, "channel-id", {
+    matchInfo: {
+      map: "phantom_lg",
+      scoreBlue: 100,
+      scoreRed: 110,
+      winner: "red",
+      matchId: "ZY9NGT",
+      server: "east",
+    },
+    replayRounds,
+  });
+
+  return sentPayload.embeds[0].toJSON();
+}
 
 function harness(responder, options = {}) {
   const db = new Database(":memory:");
@@ -228,4 +256,21 @@ test("unsafe match IDs and invalid round numbers are rejected before RCON", asyn
   await assert.rejects(h.recorder.start("east", 'bad";quit', 1), /Unsafe/);
   assert.equal(h.commands.length, 0);
   h.db.close();
+});
+
+test("pickup recap links only recorder-confirmed replay rounds", async () => {
+  const embed = await renderPickupRecap([1]);
+  const detailField = embed.fields.find(field => field.name === "\u200B");
+
+  assert.match(detailField.value, /Watch Replay: \[Round 1\]/);
+  assert.match(detailField.value, /matchId=ZY9NGT&round=1/);
+  assert.doesNotMatch(detailField.value, /Round 2/);
+});
+
+test("pickup recap omits replay links when no recording was confirmed", async () => {
+  const embed = await renderPickupRecap([]);
+  const detailField = embed.fields.find(field => field.name === "\u200B");
+
+  assert.doesNotMatch(detailField.value, /Watch Replay/);
+  assert.doesNotMatch(detailField.value, /pickup-replay\.html/);
 });

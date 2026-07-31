@@ -160,6 +160,23 @@ function attachAutoRecap(ctx, options = {}) {
   const reportChannel = config.channels.pickup;
   const logsChannel = config.channels.logs;
 
+  function getReadyReplayRounds(matchId, serverKey) {
+    try {
+      return ctx.matchesStore.db.prepare(`
+        SELECT round_number
+        FROM pickup_replay_recordings
+        WHERE match_id=? AND server_key=?
+          AND observed_state='ready' AND stopped_at IS NOT NULL
+        ORDER BY round_number
+      `).all(String(matchId), String(serverKey))
+        .map(row => Number(row.round_number))
+        .filter(round => round === 1 || round === 2);
+    } catch (error) {
+      console.warn(`[autoRecap] Could not confirm replay availability for ${matchId}:`, error.message);
+      return [];
+    }
+  }
+
   const windowMin = Math.max(5, Number(options.windowMin || 45));
   const ttlMin = Math.max(10, Number(options.ttlMin || 90));
   const uploadEnabled = true;
@@ -780,6 +797,7 @@ try {
 
   const hampUrl = result.upload?.url;
   const tfcUrl  = result.tfcstats?.url;
+  const replayRounds = getReadyReplayRounds(a.matchId, serverKey);
 
   // 🧠 Update DB with log URLs + scores
   try {
@@ -822,6 +840,7 @@ await sendRecapWithDemos(client, logsChannel, {
   },
   tfcstats: { url: tfcUrl || null },
   hampalyzer: { url: hampUrl || null },
+  replayRounds,
   mentionRoles: null,
   zipPath: zipResult?.zipPath || null, // ✅ passes HLTV zip if available, else null
 });
@@ -867,6 +886,7 @@ await sendRecapWithDemos(client, logsChannel, {
     },
     tfcstats: { url: tfcUrl || null },
     hampalyzer: { url: hampUrl || null },
+    replayRounds,
   });
 }
 
