@@ -111,6 +111,14 @@ function register(reg, deps) {
           String(matchId)
         );
 
+      // Forward-only V2 shadow calculation. This never mutates live Elo.
+      // Corrected reports explicitly replace and repost their prior snapshot.
+      try {
+        deps.eloShadow?.schedule(matchId, { force: forceFix });
+      } catch (shadowErr) {
+        console.warn(`[elo-shadow] Could not schedule ${matchId}:`, shadowErr);
+      }
+
       // decrement bans for match players
       for (const p of [...blue, ...red]) {
         const currentBan = banStore.getBan(p.id);

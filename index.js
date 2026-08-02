@@ -47,6 +47,7 @@ const { startHldsLogReceiver } = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
+const { EloShadowService } = require("./services/eloShadow");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
 const { createOneVOneSubsystem } = require("./oneVOne");
@@ -356,6 +357,13 @@ memberLeaves(client, config);
 
 // now extend deps with client
 deps.client = client;
+const eloShadow = new EloShadowService({
+  db: matchesStore.db,
+  client,
+  channelId: config.channels.recap,
+  mode: config.eloV2Mode,
+});
+deps.eloShadow = eloShadow;
 
 // ban roles
 const ROLE_PERMABAN = config.roles.permaban;
@@ -394,6 +402,7 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   try { await refreshBotName(client, state); } catch {}
+  try { eloShadow.start(); } catch (e) { console.error("[elo-shadow] startup failed:", e); }
 
   try {
     await startSpeedrunWatcher({

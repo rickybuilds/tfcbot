@@ -40,6 +40,9 @@ module.exports = {
   pickupRecordingEnabled: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_RECORDING_ENABLED || "")
   ),
+  // Elo V2 is intentionally shadow-only for now. "off" disables all polling
+  // and recap posts; "shadow" calculates proposals without changing ratings.
+  eloV2Mode: String(process.env.ELO_V2_MODE || "off").trim().toLowerCase(),
   mapMaxSelectionsPerUser: (() => {
     const value = Math.max(1, Number(process.env.MAP_MAX_SELECTIONS_PER_USER || 1));
     return Number.isFinite(value) ? value : 1;

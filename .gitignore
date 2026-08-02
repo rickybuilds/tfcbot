@@ -129,5 +129,6 @@ test_api.js
 !/test/hldsQueue.test.js
 !/test/voteTransition.test.js
 !/test/pickupReplayRecorder.test.js
+!/test/eloShadow.test.js
 /output/documents
 /.tmp
