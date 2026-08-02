@@ -2,7 +2,7 @@
 
 const fetchDefault = require("node-fetch");
 
-const CALCULATION_VERSION = "elo-shadow-v1";
+const CALCULATION_VERSION = "elo-shadow-v2";
 const DEFAULT_FORMULA_VERSION = "nn-mvp-v1";
 
 function finiteNumber(value, fallback = 0) {
@@ -163,17 +163,11 @@ function calculateShadow(input, options = {}) {
   const avgRed = average(red.map(player => player.before));
   const expBlue = expectedScore(avgBlue, avgRed);
   const winner = String(input.winner || "").toLowerCase();
-  const scoreBlue = winner === "blue" ? 1 : winner === "red" ? 0 : 0.5;
-  const teamK = Math.max(1, finiteNumber(options.teamK, 80));
-  const poolCap = Math.max(1, finiteNumber(options.poolCap, 120));
-  const poolMultiplier = Math.max(0, finiteNumber(options.poolMultiplier, 1));
-  const blueDirection = Math.sign(scoreBlue - expBlue);
-  const poolMagnitude = Math.min(
-    poolCap,
-    Math.round(Math.abs(teamK * (scoreBlue - expBlue)) * poolMultiplier)
-  );
-  const bluePool = blueDirection * poolMagnitude;
-  const redPool = -bluePool;
+  // Shadow V2 changes only the within-team allocation. The exact V1 totals
+  // already awarded to Blue and Red are retained, including existing odds,
+  // mode bonuses, caps, inflation/deflation, and draw behavior.
+  const bluePool = Math.round(blue.reduce((sum, player) => sum + finiteNumber(player.currentDelta), 0));
+  const redPool = Math.round(red.reduce((sum, player) => sum + finiteNumber(player.currentDelta), 0));
   const usePerformance = !input.fallbackReason;
   const allocationOptions = {
     alpha: options.alpha,
@@ -192,8 +186,7 @@ function calculateShadow(input, options = {}) {
     avgRed,
     expectedBlue: expBlue,
     expectedRed: 1 - expBlue,
-    teamK,
-    poolMultiplier,
+    poolSource: "v1-team-totals",
     fallbackReason: input.fallbackReason || null,
     apiPlayerCount: finiteNumber(input.apiPlayerCount, 0),
     teams: {
@@ -228,7 +221,7 @@ function formatShadowMessage(snapshot) {
   const lines = [
     `🧪 **Elo V2 Shadow — ${snapshot.matchId}** *(no live Elo changed)*`,
     `Team pools: 🔵 **${signed(snapshot.pools.blue)}** / 🔴 **${signed(snapshot.pools.red)}** · ` +
-      `odds ${Math.round(snapshot.expectedBlue * 100)}%/${Math.round(snapshot.expectedRed * 100)}% · ` +
+      `same totals as V1 · odds ${Math.round(snapshot.expectedBlue * 100)}%/${Math.round(snapshot.expectedRed * 100)}% · ` +
       `performance ${snapshot.fallbackReason ? "equal-share fallback" : `\`${snapshot.formulaVersion}\``}`,
   ];
 
@@ -255,8 +248,6 @@ class EloShadowService {
     this.fetch = options.fetch || fetchDefault;
     this.baseUrl = String(options.baseUrl || process.env.NONAME_URL || "https://nonamepickup.servehalflife.com").replace(/\/+$/, "");
     this.formulaVersion = String(options.formulaVersion || process.env.ELO_SHADOW_FORMULA_VERSION || DEFAULT_FORMULA_VERSION);
-    this.teamK = finiteNumber(options.teamK ?? process.env.ELO_V2_TEAM_K, 80);
-    this.poolCap = finiteNumber(options.poolCap ?? process.env.ELO_V2_TEAM_POOL_CAP, 120);
     this.alpha = finiteNumber(options.alpha ?? process.env.ELO_V2_PERFORMANCE_ALPHA, 0.35);
     this.minimumShare = finiteNumber(options.minimumShare ?? process.env.ELO_V2_MIN_SHARE, 0.15);
     this.maximumShare = finiteNumber(options.maximumShare ?? process.env.ELO_V2_MAX_SHARE, 0.35);

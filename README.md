@@ -18,10 +18,13 @@ No Name `nn-mvp-v1` player scores, validates them against the official 4v4
 roster, and posts current-versus-shadow deltas to `ELOTEST_CHANNEL_ID`. If that
 setting is absent, the worker falls back to `RECAP_CHANNEL_ID`.
 
-The default even-match transfer pool is 40 points (`ELO_V2_TEAM_K=80`). Player
-shares are bounded to 15%-35%. Matches with extra/missing performance rows,
-ambiguous identity mappings, or unavailable stats use an equal 25% split and
-record the fallback reason. Snapshots are stored in `elo_shadow_results`.
+The shadow keeps the exact Blue and Red team totals already produced by V1 and
+only redistributes each total by individual performance. This preserves current
+volatility, odds behavior, mode bonuses, caps, and existing inflation/deflation
+while isolating the allocation change for evaluation. Player shares are bounded
+to 15%-35%. Matches with extra/missing performance rows, ambiguous identity
+mappings, or unavailable stats use an equal 25% split and record the fallback
+reason. Snapshots are stored in `elo_shadow_results`.
 
 `off` is the only other supported mode. Live V2 rating writes are intentionally
 not implemented yet; setting shadow mode can never mutate `ratings` or
