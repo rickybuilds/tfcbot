@@ -360,7 +360,7 @@ deps.client = client;
 const eloShadow = new EloShadowService({
   db: matchesStore.db,
   client,
-  channelId: config.channels.recap,
+  channelId: config.channels.eloTest || config.channels.recap,
   mode: config.eloV2Mode,
 });
 deps.eloShadow = eloShadow;

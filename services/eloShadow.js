@@ -302,7 +302,9 @@ class EloShadowService {
       ORDER BY updated_at
     `).all();
     for (const row of pending) this.schedule(row.match_id, { delayMs: 1000 });
-    this.logger.info?.(`[elo-shadow] enabled; resumed ${pending.length} pending match(es)`);
+    this.logger.info?.(
+      `[elo-shadow] enabled; channel=${this.channelId || "missing"}; resumed ${pending.length} pending match(es)`
+    );
     return { enabled: true, resumed: pending.length };
   }
 

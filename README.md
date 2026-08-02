@@ -15,7 +15,8 @@ A custom Discord bot and server automation platform for Team Fortress Classic pi
 Set `ELO_V2_MODE=shadow` to calculate and persist proposed Elo V2 results
 without changing live ratings. After a match report, the worker waits for the
 No Name `nn-mvp-v1` player scores, validates them against the official 4v4
-roster, and posts current-versus-shadow deltas to `RECAP_CHANNEL_ID`.
+roster, and posts current-versus-shadow deltas to `ELOTEST_CHANNEL_ID`. If that
+setting is absent, the worker falls back to `RECAP_CHANNEL_ID`.
 
 The default even-match transfer pool is 40 points (`ELO_V2_TEAM_K=80`). Player
 shares are bounded to 15%-35%. Matches with extra/missing performance rows,

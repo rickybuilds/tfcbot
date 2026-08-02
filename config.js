@@ -10,6 +10,7 @@ module.exports = {
     odds: process.env.ODDS_CHANNEL_ID,
     pickup: process.env.PICKUP_CHANNEL_ID,
     eloAdmin: process.env.ELO_ADMIN_CHANNEL_ID,
+    eloTest: process.env.ELOTEST_CHANNEL_ID,
     recap: process.env.RECAP_CHANNEL_ID,
     logs: process.env.LOGS_CHANNEL_ID,
     health: process.env.HEALTH_CHANNEL_ID,
