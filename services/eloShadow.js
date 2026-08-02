@@ -2,7 +2,7 @@
 
 const fetchDefault = require("node-fetch");
 
-const CALCULATION_VERSION = "elo-shadow-v2";
+const CALCULATION_VERSION = "elo-shadow-v3";
 const DEFAULT_FORMULA_VERSION = "nn-mvp-v1";
 
 function finiteNumber(value, fallback = 0) {
@@ -169,11 +169,25 @@ function calculateShadow(input, options = {}) {
   const bluePool = Math.round(blue.reduce((sum, player) => sum + finiteNumber(player.currentDelta), 0));
   const redPool = Math.round(red.reduce((sum, player) => sum + finiteNumber(player.currentDelta), 0));
   const usePerformance = !input.fallbackReason;
-  const allocationOptions = {
+  const wideOptions = {
     alpha: options.alpha,
     minimumShare: options.minimumShare,
     maximumShare: options.maximumShare,
     usePerformance,
+  };
+  const gentleOptions = {
+    alpha: finiteNumber(options.gentleAlpha, 0.20),
+    minimumShare: finiteNumber(options.gentleMinimumShare, 0.20),
+    maximumShare: finiteNumber(options.gentleMaximumShare, 0.30),
+    usePerformance,
+  };
+  const wideTeams = {
+    blue: allocateTeam(blue, bluePool, wideOptions),
+    red: allocateTeam(red, redPool, wideOptions),
+  };
+  const gentleTeams = {
+    blue: allocateTeam(blue, bluePool, gentleOptions),
+    red: allocateTeam(red, redPool, gentleOptions),
   };
 
   return {
@@ -189,9 +203,24 @@ function calculateShadow(input, options = {}) {
     poolSource: "v1-team-totals",
     fallbackReason: input.fallbackReason || null,
     apiPlayerCount: finiteNumber(input.apiPlayerCount, 0),
-    teams: {
-      blue: allocateTeam(blue, bluePool, allocationOptions),
-      red: allocateTeam(red, redPool, allocationOptions),
+    // Keep `teams` as the original wide scenario for compatibility with any
+    // existing shadow analysis scripts. New consumers should use `scenarios`.
+    teams: wideTeams,
+    scenarios: {
+      wide: {
+        label: "15%-35%",
+        alpha: finiteNumber(options.alpha, 0.35),
+        minimumShare: finiteNumber(options.minimumShare, 0.15),
+        maximumShare: finiteNumber(options.maximumShare, 0.35),
+        teams: wideTeams,
+      },
+      gentle: {
+        label: "20%-30%",
+        alpha: gentleOptions.alpha,
+        minimumShare: gentleOptions.minimumShare,
+        maximumShare: gentleOptions.maximumShare,
+        teams: gentleTeams,
+      },
     },
     pools: { blue: bluePool, red: redPool },
   };
@@ -218,18 +247,25 @@ function readableFallback(reason) {
 }
 
 function formatShadowMessage(snapshot) {
+  const wideTeams = snapshot.scenarios?.wide?.teams || snapshot.teams;
+  const gentleTeams = snapshot.scenarios?.gentle?.teams || snapshot.teams;
   const lines = [
     `🧪 **Elo V2 Shadow — ${snapshot.matchId}** *(no live Elo changed)*`,
     `Team pools: 🔵 **${signed(snapshot.pools.blue)}** / 🔴 **${signed(snapshot.pools.red)}** · ` +
       `same totals as V1 · odds ${Math.round(snapshot.expectedBlue * 100)}%/${Math.round(snapshot.expectedRed * 100)}% · ` +
       `performance ${snapshot.fallbackReason ? "equal-share fallback" : `\`${snapshot.formulaVersion}\``}`,
+    `Comparing: **V1** · **15%–35%** (wide) · **20%–30%** (gentle)`,
   ];
 
   for (const [teamKey, icon, label] of [["blue", "🔵", "Blue"], ["red", "🔴", "Red"]]) {
     lines.push(`${icon} **${label}**`);
-    for (const player of snapshot.teams[teamKey]) {
+    for (const player of wideTeams[teamKey]) {
+      const gentle = gentleTeams[teamKey].find(candidate => String(candidate.id) === String(player.id)) || player;
       const score = Number.isFinite(player.score) ? ` · NN ${player.score.toFixed(2)} (#${player.teamRank})` : "";
-      lines.push(`• <@${player.id}>: current **${signed(player.currentDelta)}** → shadow **${signed(player.shadowDelta)}**${score}`);
+      lines.push(
+        `• <@${player.id}>: V1 **${signed(player.currentDelta)}** · ` +
+        `15–35 **${signed(player.shadowDelta)}** · 20–30 **${signed(gentle.shadowDelta)}**${score}`
+      );
     }
   }
 
@@ -251,6 +287,9 @@ class EloShadowService {
     this.alpha = finiteNumber(options.alpha ?? process.env.ELO_V2_PERFORMANCE_ALPHA, 0.35);
     this.minimumShare = finiteNumber(options.minimumShare ?? process.env.ELO_V2_MIN_SHARE, 0.15);
     this.maximumShare = finiteNumber(options.maximumShare ?? process.env.ELO_V2_MAX_SHARE, 0.35);
+    this.gentleAlpha = finiteNumber(options.gentleAlpha ?? process.env.ELO_V2_GENTLE_PERFORMANCE_ALPHA, 0.20);
+    this.gentleMinimumShare = finiteNumber(options.gentleMinimumShare ?? process.env.ELO_V2_GENTLE_MIN_SHARE, 0.20);
+    this.gentleMaximumShare = finiteNumber(options.gentleMaximumShare ?? process.env.ELO_V2_GENTLE_MAX_SHARE, 0.30);
     this.initialDelayMs = Math.max(0, finiteNumber(options.initialDelayMs ?? process.env.ELO_SHADOW_INITIAL_DELAY_MS, 15000));
     this.pollIntervalMs = Math.max(1000, finiteNumber(options.pollIntervalMs ?? process.env.ELO_SHADOW_POLL_MS, 15000));
     this.maxAttempts = Math.max(1, Math.round(finiteNumber(options.maxAttempts ?? process.env.ELO_SHADOW_MAX_ATTEMPTS, 40)));

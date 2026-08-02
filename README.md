@@ -21,10 +21,12 @@ setting is absent, the worker falls back to `RECAP_CHANNEL_ID`.
 The shadow keeps the exact Blue and Red team totals already produced by V1 and
 only redistributes each total by individual performance. This preserves current
 volatility, odds behavior, mode bonuses, caps, and existing inflation/deflation
-while isolating the allocation change for evaluation. Player shares are bounded
-to 15%-35%. Matches with extra/missing performance rows, ambiguous identity
-mappings, or unavailable stats use an equal 25% split and record the fallback
-reason. Snapshots are stored in `elo_shadow_results`.
+while isolating the allocation change for evaluation. Each Discord result shows
+two side-by-side scenarios: a wide 15%-35% share range with performance strength
+0.35, and a gentle 20%-30% range with performance strength 0.20. Both scenarios
+preserve the same V1 team totals. Matches with extra/missing performance rows,
+ambiguous identity mappings, or unavailable stats use an equal 25% split and
+record the fallback reason. Snapshots are stored in `elo_shadow_results`.
 
 `off` is the only other supported mode. Live V2 rating writes are intentionally
 not implemented yet; setting shadow mode can never mutate `ratings` or

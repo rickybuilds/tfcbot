@@ -48,6 +48,10 @@ test("performance redistributes but conserves the exact V1 team totals", () => {
   assert.ok(Math.abs(snapshot.teams.red[0].shadowDelta) < Math.abs(snapshot.teams.red[3].shadowDelta));
   assert.ok(snapshot.teams.blue.every(p => p.share >= 0.15 - 1e-9 && p.share <= 0.35 + 1e-9));
   assert.ok(snapshot.teams.red.every(p => p.share >= 0.15 - 1e-9 && p.share <= 0.35 + 1e-9));
+  assert.equal(snapshot.scenarios.gentle.teams.blue.reduce((sum, p) => sum + p.shadowDelta, 0), 80);
+  assert.equal(snapshot.scenarios.gentle.teams.red.reduce((sum, p) => sum + p.shadowDelta, 0), -80);
+  assert.ok(snapshot.scenarios.gentle.teams.blue.every(p => p.share >= 0.20 - 1e-9 && p.share <= 0.30 + 1e-9));
+  assert.ok(snapshot.scenarios.gentle.teams.red.every(p => p.share >= 0.20 - 1e-9 && p.share <= 0.30 + 1e-9));
 });
 
 test("fallback gives every official player an equal share", () => {
@@ -62,6 +66,8 @@ test("fallback gives every official player an equal share", () => {
 
   assert.deepEqual(snapshot.teams.blue.map(p => p.shadowDelta), [-20, -20, -20, -20]);
   assert.deepEqual(snapshot.teams.red.map(p => p.shadowDelta), [20, 20, 20, 20]);
+  assert.deepEqual(snapshot.scenarios.gentle.teams.blue.map(p => p.shadowDelta), [-20, -20, -20, -20]);
+  assert.deepEqual(snapshot.scenarios.gentle.teams.red.map(p => p.shadowDelta), [20, 20, 20, 20]);
   assert.match(formatShadowMessage(snapshot), /equal-share fallback/);
   assert.match(formatShadowMessage(snapshot), /no live Elo changed/);
 });
@@ -154,12 +160,15 @@ test("service maps official roster, persists the snapshot, and posts to recap", 
   assert.equal(snapshot.teams.red.length, 4);
   assert.equal(h.sent.length, 1);
   assert.match(h.sent[0], /Elo V2 Shadow/);
-  assert.match(h.sent[0], /current \*\*\+20\*\* → shadow/);
+  assert.match(h.sent[0], /V1 \*\*\+20\*\*/);
+  assert.match(h.sent[0], /15–35/);
+  assert.match(h.sent[0], /20–30/);
   const row = h.db.prepare("SELECT status, formula_version, posted_at, payload_json FROM elo_shadow_results WHERE match_id='API123'").get();
   assert.equal(row.status, "posted");
   assert.equal(row.formula_version, "nn-mvp-v1");
   assert.ok(row.posted_at);
   assert.equal(JSON.parse(row.payload_json).pools.blue, 80);
+  assert.equal(JSON.parse(row.payload_json).scenarios.gentle.label, "20%-30%");
   h.db.close();
 });
 
@@ -172,6 +181,8 @@ test("a ninth performance row is recorded as an equal-share fallback", async () 
   assert.equal(snapshot.fallbackReason, "performance_rows_9");
   assert.deepEqual(snapshot.teams.blue.map(p => p.shadowDelta), [20, 20, 20, 20]);
   assert.deepEqual(snapshot.teams.red.map(p => p.shadowDelta), [-20, -20, -20, -20]);
+  assert.deepEqual(snapshot.scenarios.gentle.teams.blue.map(p => p.shadowDelta), [20, 20, 20, 20]);
+  assert.deepEqual(snapshot.scenarios.gentle.teams.red.map(p => p.shadowDelta), [-20, -20, -20, -20]);
   assert.match(h.sent[0], /returned 9 performance rows/);
   h.db.close();
 });
