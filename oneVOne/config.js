@@ -22,6 +22,7 @@ function loadOneVOneConfig() {
     readyTimeoutMs: positiveInt("ONEVONE_READY_TIMEOUT_SECONDS", 300) * 1000,
     disconnectGraceMs: positiveInt("ONEVONE_DISCONNECT_GRACE_SECONDS", 120) * 1000,
     setupTimeoutMs: positiveInt("ONEVONE_SETUP_TIMEOUT_SECONDS", 60) * 1000,
+    postMapSetupDelayMs: positiveInt("ONEVONE_POST_MAP_DELAY_SECONDS", 10) * 1000,
     map: String(process.env.ONEVONE_MAP || "ass_dm"),
     killGoal: positiveInt("ONEVONE_KILL_GOAL", 50),
     roundsToWin: positiveInt("ONEVONE_ROUNDS_TO_WIN", 1),

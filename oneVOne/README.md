@@ -7,6 +7,8 @@ This directory contains the isolated 1v1 implementation. It is inert by default.
 - `ONEVONE_ENABLED=0` disables the subsystem.
 - `ONEVONE_DRY_RUN=1` prevents live match actions while command work is developed.
 - `ONEVONE_SERVER_SETUP_ENABLED=0` prevents RCON setup and restoration.
+- `ONEVONE_POST_MAP_DELAY_SECONDS=10` controls the settle period after `ass_dm`
+  loads and before the plugin cvars are applied with `amx_cvar`.
 
 All three flags must be deliberately reviewed before live server setup is added.
 

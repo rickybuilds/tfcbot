@@ -29,6 +29,7 @@ function challengeEmbed(challenge) {
     .setTitle("⚔️ 1v1 Challenge")
     .setDescription(`<@${challenge.challengedId}>, you have been challenged to a head-to-head duel.`)
     .addFields(
+      { name: "Match ID", value: `\`${challenge.id}\``, inline: false },
       { name: "Challenger", value: `<@${challenge.challengerId}>`, inline: true },
       { name: "Challenged", value: `<@${challenge.challengedId}>`, inline: true },
       { name: "Respond", value: "Use the buttons below to accept or deny. `!accept` and `!decline` also work.", inline: false },
@@ -75,6 +76,7 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       self: "You cannot challenge yourself.", bot: "You cannot challenge a bot.",
       challenger_busy: "You are already committed to a pickup or 1v1 challenge.",
       challenged_busy: "That player is already committed to a pickup or 1v1 challenge.",
+      id_generation_failed: "A match ID could not be allocated. Please try again.",
     };
     if (!result.ok) return message.reply({ embeds: [deniedEmbed("1v1 Challenge Denied", errors[result.reason] || "Challenge could not be created.")] });
     const challengeMessage = await message.channel.send({
@@ -208,14 +210,14 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     function preparingEmbed(server) {
       return successEmbed(
         "⚙️ Preparing 1v1 Server",
-        `**${server.name}** won the vote.\n\nChanging the server to **${config.map}** and applying the duel settings. The bot will ping both players when it is ready.\n\n${connectionDetails(server)}`,
+        `**Match ID:** ${challenge.id}\n\n**${server.name}** won the vote.\n\nChanging the server to **${config.map}** and applying the duel settings. The bot will ping both players when it is ready.\n\n${connectionDetails(server)}`,
       ).addFields({ name: "Final Votes", value: voteBreakdown({ includeStatus: false }) });
     }
 
     function readyEmbed(server) {
       return successEmbed(
         "⚔️ 1v1 Ready",
-        `<@${challenge.challengerId}> vs <@${challenge.challengedId}>\n\n${connectionDetails(server)}\n\n**Map:** ${config.map}\nBoth players can join now.`,
+        `**Match ID:** ${challenge.id}\n\n<@${challenge.challengerId}> vs <@${challenge.challengedId}>\n\n${connectionDetails(server)}\n\n**Map:** ${config.map}\nBoth players can join now.`,
       ).setFooter({ text: `First to ${config.killGoal} kills` });
     }
 

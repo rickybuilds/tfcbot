@@ -93,6 +93,12 @@ class OneVOneStore {
     }
   }
 
+  idExists(id) {
+    const value = String(id);
+    return !!this.db.prepare(`SELECT 1 FROM matches WHERE match_id=?
+      UNION ALL SELECT 1 FROM one_v_one_challenges WHERE challenge_id=? LIMIT 1`).get(value, value);
+  }
+
   pendingChallenges(now = Date.now()) {
     return this.db.prepare(`SELECT challenge_id AS id, challenger_discord_id AS challengerId,
       challenged_discord_id AS challengedId, status, created_at AS createdAt, expires_at AS expiresAt

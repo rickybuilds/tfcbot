@@ -7,6 +7,7 @@ const { ServerReservations } = require("../oneVOne/reservations");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
 const { OneVOneStore } = require("../oneVOne/store");
 const { DuelManager } = require("../oneVOne/manager");
+const { OneVOneServerController } = require("../oneVOne/serverController");
 const { resolveServerKey } = require("../oneVOne/serverResolver");
 const { registerCommands } = require("../oneVOne/commands");
 
@@ -34,6 +35,8 @@ test("migration is idempotent and preserves existing matches", () => {
   store.migrate();
   store.migrate();
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM matches").get().n, 1);
+  assert.equal(store.idExists("old"), true);
+  assert.equal(store.idExists("unused"), false);
   assert.deepEqual(store.schemaStatus(), { matchType: true, playerFormat: true, expectedPlayers: true, scoringMode: true, duelTable: true });
   db.close();
 });
@@ -56,6 +59,21 @@ test("dry-run activation never locks a real server", () => {
   });
 });
 
+test("new 1v1 challenges use the standard six-character match ID", () => {
+  const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
+  const manager = new DuelManager({
+    config: { challengeTtlMs: 1000 },
+    state,
+    reservations: new ServerReservations(state),
+    steamLinks: { getSteamIds: async () => [] },
+  });
+  const result = manager.createChallenge({ id: "1" }, { id: "2", bot: false });
+
+  assert.equal(result.ok, true);
+  assert.match(result.challenge.id, /^[A-HJ-NP-Z2-9]{6}$/);
+  manager.cancel(result.challenge.id, "test_cleanup");
+});
+
 test("server resolver requires exact host and port", () => {
   const result = resolveServerKey({ ip: "1.2.3.4:27016" }, {
     east: { host: "1.2.3.4", port: 27015 }, west: { host: "1.2.3.4", port: 27016 },
@@ -63,6 +81,34 @@ test("server resolver requires exact host and port", () => {
   assert.equal(result.ok, true);
   assert.equal(result.key, "west");
   assert.equal(resolveServerKey({ ip: "1.2.3.4:27017" }, {}).ok, false);
+});
+
+test("post-map setup applies plugin cvars through amx_cvar with enabled last", async () => {
+  const sent = [];
+  const controller = new OneVOneServerController({
+    config: {
+      serverSetupEnabled: true,
+      postMapSetupDelayMs: 1,
+      killGoal: 50,
+      roundsToWin: 1,
+    },
+    runRconCommand: async (serverKey, command) => sent.push([serverKey, command]),
+  });
+  const result = await controller.finishSetup({
+    serverKey: "east",
+    playerSteamIds: ["STEAM_0:0:1", "STEAM_0:1:2"],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(sent, [
+    ["east", "amx_cvar 1v1_enabled 0"],
+    ["east", 'amx_cvar 1v1_player1 "STEAM_0:0:1"'],
+    ["east", 'amx_cvar 1v1_player2 "STEAM_0:1:2"'],
+    ["east", 'amx_cvar 1v1_server_key "east"'],
+    ["east", "amx_cvar 1v1_kill_goal 50"],
+    ["east", "amx_cvar 1v1_rounds_to_win 1"],
+    ["east", "amx_cvar 1v1_enabled 1"],
+  ]);
 });
 
 test("live activation reports ready after the expected map is configured", async () => {
@@ -116,6 +162,52 @@ test("live activation reports ready after the expected map is configured", async
   manager.complete(serverIp, reservations.get(serverIp));
 });
 
+test("player joins received during post-map setup are preserved", async () => {
+  const serverIp = "1.2.3.4:27015";
+  const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
+  const reservations = new ServerReservations(state);
+  let finishSetupResolve;
+  const manager = new DuelManager({
+    config: {
+      dryRun: false,
+      map: "ass_dm",
+      setupTimeoutMs: 60_000,
+      postMapSetupDelayMs: 10_000,
+      joinTimeoutMs: 60_000,
+      readyTimeoutMs: 60_000,
+    },
+    state,
+    reservations,
+    steamLinks: { getSteamIds: async () => [] },
+    resolveServer: () => ({ ok: true, key: "east" }),
+    serverController: {
+      beginSetup: async () => ({ ok: true }),
+      finishSetup: () => new Promise(resolve => { finishSetupResolve = resolve; }),
+    },
+  });
+  const challenge = {
+    id: "duel-joins-during-setup",
+    challengerId: "1",
+    challengedId: "2",
+    player1SteamId: "STEAM_0:0:1",
+    player2SteamId: "STEAM_0:1:2",
+  };
+
+  await manager.activate(challenge, { name: "East", ip: serverIp });
+  const mapHandling = manager.handleMap({ type: "map", name: "ass_dm", from: "1.2.3.4" });
+  manager.handleLifecycle({ type: "one_v_one_player_reconnect", from: "1.2.3.4", steamid: "STEAM_0:0:1" });
+  manager.handleLifecycle({ type: "one_v_one_player_reconnect", from: "1.2.3.4", steamid: "STEAM_0:1:2" });
+  finishSetupResolve({ ok: true });
+  await mapHandling;
+
+  const reservation = reservations.get(serverIp);
+  assert.deepEqual(reservation.joined.sort(), ["STEAM_0:0:1", "STEAM_0:1:2"]);
+  assert.equal(reservation.status, "waiting_for_ready");
+  assert.equal(manager.timers.has(`${challenge.id}:join`), false);
+  assert.equal(manager.timers.has(`${challenge.id}:ready`), true);
+  manager.complete(serverIp, reservation);
+});
+
 test("post-map setup failure is quarantined and reported", async () => {
   const serverIp = "1.2.3.4:27015";
   const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
@@ -134,7 +226,7 @@ test("post-map setup failure is quarantined and reported", async () => {
     resolveServer: () => ({ ok: true, key: "east" }),
     serverController: {
       beginSetup: async () => ({ ok: true }),
-      finishSetup: async () => ({ ok: false, failedCommand: "1v1_enabled 1", error: new Error("RCON failed") }),
+      finishSetup: async () => ({ ok: false, failedCommand: "amx_cvar 1v1_enabled 1", error: new Error("RCON failed") }),
     },
   });
   const challenge = {

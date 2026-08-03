@@ -1,6 +1,6 @@
 "use strict";
 
-const { randomUUID } = require("crypto");
+const { genMatchId } = require("../lib/util");
 
 class DuelManager {
   constructor({ config, state, steamLinks, reservations, store = null, resolveServer, serverController }) {
@@ -36,7 +36,15 @@ class DuelManager {
     if (this.isBusy(p1)) return { ok: false, reason: "challenger_busy" };
     if (this.isBusy(p2)) return { ok: false, reason: "challenged_busy" };
 
-    const id = randomUUID();
+    let id = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const candidate = genMatchId();
+      if (!this.pending.has(candidate) && !this.store?.idExists(candidate)) {
+        id = candidate;
+        break;
+      }
+    }
+    if (!id) return { ok: false, reason: "id_generation_failed" };
     const challenge = {
       id,
       challengerId: p1,
@@ -236,8 +244,15 @@ class DuelManager {
     const [serverIp, reservation] = entry;
     console.log(`[1v1] - expected map observed id=${reservation.id} server=${reservation.serverKey || serverIp} map=${evt.name}`);
     this.clearTimer(reservation.id, "setup");
+    // Start tracking players before enabling the AMXX mode. Existing clients can
+    // be identified while the final RCON command is still returning, so resetting
+    // these fields after finishSetup() would discard valid join events.
+    this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
+    this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
+    console.log(`[1v1] - map settle period started id=${reservation.id} server=${reservation.serverKey || serverIp} delay=${this.config.postMapSetupDelayMs || 0}ms`);
     const setup = await this.serverController.finishSetup(reservation);
     if (!setup.ok) {
+      this.clearAllTimers(reservation.id);
       console.error(`[1v1] - post-map setup failed id=${reservation.id} server=${reservation.serverKey || serverIp} command=${setup.failedCommand || "unknown"}`, setup.error);
       const quarantined = this.reservations.quarantine(serverIp, reservation, "post_map_setup_failed");
       this.store?.updateStatus(reservation.id, "quarantined", { cancellation_reason: "post_map_setup_failed" });
@@ -249,9 +264,8 @@ class DuelManager {
       this.statusHandlers.delete(String(reservation.id));
       return true;
     }
-    const updated = this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
-    this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
-    console.log(`[1v1] - post-map setup completed id=${reservation.id} server=${reservation.serverKey || serverIp}; waiting for players`);
+    const updated = this.reservations.get(serverIp);
+    console.log(`[1v1] - post-map setup completed id=${reservation.id} server=${reservation.serverKey || serverIp}; status=${updated?.status || "waiting_for_players"}`);
     const notified = await this.notifyStatus(reservation.id, { type: "ready", reservation: updated });
     console.log(`[1v1] - ready notification id=${reservation.id} delivered=${notified}`);
     return true;
