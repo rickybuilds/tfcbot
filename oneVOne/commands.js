@@ -180,7 +180,7 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     const voterNames = new Map();
     const voteEndsUnix = Math.floor((Date.now() + 30_000) / 1000);
 
-    function voteBreakdown() {
+    function voteBreakdown({ includeStatus = true } = {}) {
       const lines = options.map((server, index) => {
         const names = [...votes.entries()]
           .filter(([, selected]) => selected === index)
@@ -188,10 +188,46 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
         const count = names.length;
         return `**${index + 1}. ${server.name}**\n${names.length ? `${names.join(", ")} — ` : ""}${count} vote${count === 1 ? "" : "s"}`;
       });
-      const waiting = [challenge.challengerId, challenge.challengedId].filter(id => !votes.has(String(id)));
-      lines.push(`**Waiting on**\n${waiting.length ? waiting.map(id => `<@${id}>`).join(", ") : "✅ All eligible votes are in."}`);
-      lines.push(`⏰ Voting ends <t:${voteEndsUnix}:R>`);
+      if (includeStatus) {
+        const waiting = [challenge.challengerId, challenge.challengedId].filter(id => !votes.has(String(id)));
+        lines.push(`**Waiting on**\n${waiting.length ? waiting.map(id => `<@${id}>`).join(", ") : "✅ All eligible votes are in."}`);
+        lines.push(`⏰ Voting ends <t:${voteEndsUnix}:R>`);
+      }
       return lines.join("\n\n");
+    }
+
+    function connectionDetails(server) {
+      const details = [
+        `**Server:** ${server.name}`,
+        `**IP:** \`${server.ip}\``,
+      ];
+      if (server.url) details.push(`[Click here to join the server](${server.url})`);
+      return details.join("\n");
+    }
+
+    function preparingEmbed(server) {
+      return successEmbed(
+        "⚙️ Preparing 1v1 Server",
+        `**${server.name}** won the vote.\n\nChanging the server to **${config.map}** and applying the duel settings. The bot will ping both players when it is ready.\n\n${connectionDetails(server)}`,
+      ).addFields({ name: "Final Votes", value: voteBreakdown({ includeStatus: false }) });
+    }
+
+    function readyEmbed(server) {
+      return successEmbed(
+        "⚔️ 1v1 Ready",
+        `<@${challenge.challengerId}> vs <@${challenge.challengedId}>\n\n${connectionDetails(server)}\n\n**Map:** ${config.map}\nBoth players can join now.`,
+      ).setFooter({ text: `First to ${config.killGoal} kills` });
+    }
+
+    function cancelledEmbed(reason) {
+      const descriptions = {
+        setup_timeout: "The server did not confirm the duel map in time. It has been restored and released.",
+        join_timeout: "The duel was cancelled because both players did not join in time. The server has been restored and released.",
+        ready_timeout: "The duel was cancelled because both players were not ready in time. The server has been restored and released.",
+        disconnect_timeout: "The duel was cancelled after a player remained disconnected past the grace period. The server has been restored and released.",
+        admin_cancelled: "An admin cancelled the duel. The server has been restored and released.",
+      };
+      return noticeEmbed(COLORS.expired, "⌛ 1v1 Cancelled", descriptions[reason] || "The duel was cancelled and the server was released.");
     }
 
     function liveVoteEmbed() {
@@ -224,19 +260,60 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
       const tied = [...counts.entries()].filter(([, count]) => count === max).map(([selected]) => selected);
       const winningIndex = tied[Math.floor(Math.random() * tied.length)];
       const winner = options[winningIndex];
-      const activated = await manager.activate(challenge, winner);
+      collector.stop("selected");
+      console.log(`[1v1] - server vote completed id=${challenge.id} winner=${winner.name} votes=${votes.size}`);
+
+      const selectedEmbed = config.dryRun
+        ? successEmbed("✅ Server Selected", `**${winner.name}** won the vote.\n\n🛡️ **DRY RUN:** No server commands were sent.`)
+          .addFields({ name: "Final Votes", value: voteBreakdown({ includeStatus: false }) })
+        : preparingEmbed(winner);
+      await voteMessage.edit({ content: "", embeds: [selectedEmbed], components: [] }).catch(error => {
+        console.error(`[1v1] - failed to show preparing state id=${challenge.id}`, error);
+      });
+
+      const activated = await manager.activate(challenge, winner, {
+        onStatus: async status => {
+          if (status.type === "ready") {
+            await voteMessage.edit({
+              content: `<@${challenge.challengerId}> <@${challenge.challengedId}> — your 1v1 server is ready.`,
+              embeds: [readyEmbed(winner)],
+              components: [],
+              allowedMentions: { users: [String(challenge.challengerId), String(challenge.challengedId)] },
+            });
+            return;
+          }
+          if (status.type === "cancelled") {
+            await voteMessage.edit({
+              content: "",
+              embeds: [cancelledEmbed(status.reason)],
+              components: [],
+              allowedMentions: { parse: [] },
+            });
+            return;
+          }
+          if (status.type === "failed") {
+            const detail = status.reason === "restore_failed"
+              ? "The duel could not continue, and automatic server restoration also failed. The server has been quarantined for an admin to inspect."
+              : "The duel settings could not be applied after the map changed. The server has been quarantined for an admin to inspect.";
+            await voteMessage.edit({
+              content: "",
+              embeds: [deniedEmbed("❌ 1v1 Setup Failed", detail)],
+              components: [],
+              allowedMentions: { parse: [] },
+            });
+          }
+        },
+      });
       if (!activated.ok) {
-        collector.stop("unavailable");
+        manager.cancel(challenge.id, "activation_failed");
+        console.error(`[1v1] - activation failed id=${challenge.id} server=${winner.name} reason=${activated.reason || "unavailable"}`);
         return voteMessage.edit({ content: "", embeds: [deniedEmbed("Server Reservation Failed", `The reservation failed (${activated.reason || "unavailable"}). Start the challenge again.`)], components: [] });
       }
-      collector.stop("selected");
-      const safety = config.dryRun ? "\n\n🛡️ **DRY RUN:** No server commands were sent." : "";
-      const finalEmbed = successEmbed("✅ Server Selected", `**${winner.name}** won the vote.${safety}`)
-        .addFields({ name: "Final Votes", value: voteBreakdown() });
-      return voteMessage.edit({ content: "", embeds: [finalEmbed], components: [] });
+      console.log(`[1v1] - activation accepted id=${challenge.id} server=${winner.name} waitingForMap=${!!activated.waitingForMap}`);
+      return voteMessage;
     });
     collector.on("end", async (_, reason) => {
-      if (reason !== "selected" && reason !== "unavailable") {
+      if (reason !== "selected") {
         manager.cancel(challenge.id, "vote_timeout");
         await voteMessage.edit({ content: "", embeds: [noticeEmbed(COLORS.expired, "⌛ Server Vote Expired", "The 1v1 server vote closed before both players voted.")], components: [] }).catch(() => {});
       }
@@ -247,7 +324,8 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     if (!inChannel(message)) return;
     const status = manager.status();
     const pending = status.pending.map(c => `<@${c.challengerId}> → <@${c.challengedId}>`).join("\n") || "None";
-    const active = status.reservations.filter(r => r.mode === "1v1").map(r => `${r.serverKey || r.serverIp}: ${r.status}`).join("\n") || "None";
+    const active = status.reservations.filter(r => r.mode === "1v1")
+      .map(r => `${r.serverKey || r.serverIp}: ${r.status} (${r.id})`).join("\n") || "None";
     const embed = new EmbedBuilder().setColor(COLORS.status).setTitle("⚔️ 1v1 Status")
       .addFields(
         { name: "Pending Challenges", value: pending },
@@ -260,7 +338,9 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     const isAdmin = adminRoleId && message.member?.roles?.cache?.has(adminRoleId);
     if (!isAdmin) return message.reply({ embeds: [deniedEmbed("Cancellation Denied", "You do not have permission to cancel active 1v1s.")] });
     const target = message.mentions?.users?.first();
-    const id = target ? manager.pendingByPlayer.get(String(target.id)) : String(message.content || "").trim().split(/\s+/)[1];
+    const id = target
+      ? manager.pendingByPlayer.get(String(target.id)) || manager.activeByPlayer.get(String(target.id))
+      : String(message.content || "").trim().split(/\s+/)[1];
     if (!id) return message.reply({ embeds: [deniedEmbed("Invalid Cancellation", "Usage: `!1v1cancel @user` or `!1v1cancel <challengeId>`")] });
     const cancelled = manager.cancel(id, "admin_cancelled");
     if (cancelled) return message.channel.send({ embeds: [successEmbed("1v1 Challenge Cancelled", `Cancelled challenge **${cancelled.id}**.`)] });

@@ -16,6 +16,7 @@ class DuelManager {
     this.activeByPlayer = new Map();
     this.completing = new Set();
     this.timers = new Map();
+    this.statusHandlers = new Map();
   }
 
   isPickupLocked(discordId) {
@@ -113,11 +114,19 @@ class DuelManager {
     return { ok: true, challenge, availableServers: available };
   }
 
-  async activate(challenge, server) {
+  async activate(challenge, server, { onStatus } = {}) {
+    console.log(`[1v1] - activation requested id=${challenge.id} server=${server?.name || server?.ip || "unknown"}`);
+    if (typeof onStatus === "function") this.statusHandlers.set(String(challenge.id), onStatus);
     const resolved = this.resolveServer(server);
-    if (!resolved.ok) return { ok: false, reason: resolved.reason };
+    if (!resolved.ok) {
+      console.warn(`[1v1] - activation rejected id=${challenge.id} reason=${resolved.reason}`);
+      this.statusHandlers.delete(String(challenge.id));
+      return { ok: false, reason: resolved.reason };
+    }
     server = { ...server, key: resolved.key };
     if (this.config.dryRun) {
+      console.log(`[1v1] - dry-run activation completed id=${challenge.id} server=${resolved.key}`);
+      this.statusHandlers.delete(String(challenge.id));
       this.pending.delete(challenge.id);
       this.pendingByPlayer.delete(challenge.challengerId);
       this.pendingByPlayer.delete(challenge.challengedId);
@@ -135,11 +144,18 @@ class DuelManager {
       playerSteamIds: [challenge.player1SteamId, challenge.player2SteamId],
       status: "reserved",
     });
-    if (!result.ok) return result;
+    if (!result.ok) {
+      console.warn(`[1v1] - reservation failed id=${challenge.id} server=${server.key} reason=${result.reason || "unavailable"}`);
+      this.statusHandlers.delete(String(challenge.id));
+      return result;
+    }
+    console.log(`[1v1] - server reserved id=${challenge.id} server=${server.key} ip=${server.ip}`);
     try {
       this.store?.createReservedDuel(challenge, server, this.config);
     } catch (error) {
+      console.error(`[1v1] - reservation persistence failed id=${challenge.id} server=${server.key}`, error);
       this.reservations.release(server.ip, challenge.id);
+      this.statusHandlers.delete(String(challenge.id));
       return { ok: false, reason: "persistence_failed", error };
     }
     this.pending.delete(challenge.id);
@@ -149,9 +165,15 @@ class DuelManager {
     this.activeByPlayer.set(challenge.challengedId, challenge.id);
     const setup = await this.serverController.beginSetup(result.reservation);
     if (!setup.ok) {
+      console.error(`[1v1] - map change command failed id=${challenge.id} server=${server.key} command=${setup.failedCommand || "unknown"}`, setup.error);
+      this.store?.updateStatus(challenge.id, "cancelled", {
+        cancelled_at: Date.now(),
+        cancellation_reason: "setup_failed",
+      });
       this.complete(server.ip, result.reservation);
       return { ok: false, reason: "setup_failed", setup };
     }
+    console.log(`[1v1] - map change command sent id=${challenge.id} server=${server.key} map=${this.config.map}`);
     this.setTimer(challenge.id, "setup", this.config.setupTimeoutMs, () => this.cancelActive(challenge.id, "setup_timeout"));
     return { ...result, setup, waitingForMap: true };
   }
@@ -212,14 +234,26 @@ class DuelManager {
     const entry = this.reservationFromSource(evt.from);
     if (!entry) return false;
     const [serverIp, reservation] = entry;
+    console.log(`[1v1] - expected map observed id=${reservation.id} server=${reservation.serverKey || serverIp} map=${evt.name}`);
     this.clearTimer(reservation.id, "setup");
     const setup = await this.serverController.finishSetup(reservation);
     if (!setup.ok) {
-      this.reservations.quarantine(serverIp, reservation, "post_map_setup_failed");
+      console.error(`[1v1] - post-map setup failed id=${reservation.id} server=${reservation.serverKey || serverIp} command=${setup.failedCommand || "unknown"}`, setup.error);
+      const quarantined = this.reservations.quarantine(serverIp, reservation, "post_map_setup_failed");
+      this.store?.updateStatus(reservation.id, "quarantined", { cancellation_reason: "post_map_setup_failed" });
+      await this.notifyStatus(reservation.id, {
+        type: "failed",
+        reason: "post_map_setup_failed",
+        reservation: quarantined,
+      });
+      this.statusHandlers.delete(String(reservation.id));
       return true;
     }
-    this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
+    const updated = this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
     this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
+    console.log(`[1v1] - post-map setup completed id=${reservation.id} server=${reservation.serverKey || serverIp}; waiting for players`);
+    const notified = await this.notifyStatus(reservation.id, { type: "ready", reservation: updated });
+    console.log(`[1v1] - ready notification id=${reservation.id} delivered=${notified}`);
     return true;
   }
 
@@ -232,14 +266,18 @@ class DuelManager {
     if (evt.type === "one_v_one_player_join" || evt.type === "one_v_one_player_reconnect") {
       const joined = new Set(reservation.joined || []); joined.add(steam);
       this.updateReservation(serverIp, { joined: [...joined], status: joined.size === 2 ? "waiting_for_ready" : "waiting_for_players" });
+      console.log(`[1v1] - player joined id=${reservation.id} server=${reservation.serverKey || serverIp} joined=${joined.size}/2`);
       if (joined.size === 2) { this.clearTimer(reservation.id, "join"); this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout")); }
       this.clearTimer(reservation.id, `disconnect:${steam}`);
     } else if (evt.type === "one_v_one_player_ready") {
       const ready = new Set(reservation.ready || []); ready.add(steam); this.updateReservation(serverIp, { ready: [...ready] });
+      console.log(`[1v1] - player ready id=${reservation.id} server=${reservation.serverKey || serverIp} ready=${ready.size}/2`);
     } else if (evt.type === "one_v_one_player_disconnect") {
+      console.warn(`[1v1] - player disconnected id=${reservation.id} server=${reservation.serverKey || serverIp}; grace timer started`);
       this.setTimer(reservation.id, `disconnect:${steam}`, this.config.disconnectGraceMs, () => this.cancelActive(reservation.id, "disconnect_timeout"));
     } else if (evt.type === "one_v_one_match_start") {
       this.clearTimer(reservation.id, "ready"); this.updateReservation(serverIp, { status: "active" });
+      console.log(`[1v1] - match started id=${reservation.id} server=${reservation.serverKey || serverIp}`);
     }
     return true;
   }
@@ -250,7 +288,30 @@ class DuelManager {
     const updated = Object.freeze({ ...current, ...patch }); this.state.serverReservations.set(serverIp, updated); return updated;
   }
 
-  setTimer(id, name, ms, fn) { this.clearTimer(id, name); const key = `${id}:${name}`; const timer = setTimeout(fn, ms); timer.unref?.(); this.timers.set(key, timer); }
+  async notifyStatus(id, status) {
+    const handler = this.statusHandlers.get(String(id));
+    if (!handler) return false;
+    try {
+      await handler(status);
+      return true;
+    } catch (error) {
+      console.error(`[1v1] - status notification failed id=${id} type=${status?.type || "unknown"}`, error);
+      return false;
+    }
+  }
+
+  setTimer(id, name, ms, fn) {
+    this.clearTimer(id, name);
+    const key = `${id}:${name}`;
+    const timer = setTimeout(() => {
+      console.warn(`[1v1] - timer expired id=${id} timer=${name}`);
+      Promise.resolve().then(fn).catch(error => {
+        console.error(`[1v1] - timer action failed id=${id} timer=${name}`, error);
+      });
+    }, ms);
+    timer.unref?.();
+    this.timers.set(key, timer);
+  }
   clearTimer(id, name) { const key = `${id}:${name}`; const timer = this.timers.get(key); if (timer) clearTimeout(timer); this.timers.delete(key); }
   clearAllTimers(id) { for (const [key, timer] of this.timers) if (key.startsWith(`${id}:`)) { clearTimeout(timer); this.timers.delete(key); } }
 
@@ -286,19 +347,26 @@ class DuelManager {
     const entry = [...(this.state.serverReservations || [])].find(([, value]) => value.mode === "1v1" && String(value.id) === String(id));
     if (!entry) return { ok: false, reason: "not_found" };
     const [serverIp, reservation] = entry;
+    console.warn(`[1v1] - cancelling active duel id=${id} server=${reservation.serverKey || serverIp} reason=${reason}`);
     const restored = await this.serverController.restore(reservation);
     if (!restored.ok) {
-      this.reservations.quarantine(serverIp, reservation, "restore_failed");
+      console.error(`[1v1] - server restore failed id=${id} server=${reservation.serverKey || serverIp} command=${restored.failedCommand || "unknown"}`, restored.error);
+      const quarantined = this.reservations.quarantine(serverIp, reservation, "restore_failed");
       this.store?.updateStatus(id, "quarantined", { cancellation_reason: reason });
+      await this.notifyStatus(id, { type: "failed", reason: "restore_failed", cancellationReason: reason, reservation: quarantined });
+      this.statusHandlers.delete(String(id));
       return { ok: false, reason: "restore_failed", restored };
     }
     this.store?.updateStatus(id, "cancelled", { cancelled_at: Date.now(), cancellation_reason: reason });
+    await this.notifyStatus(id, { type: "cancelled", reason, reservation });
     this.complete(serverIp, reservation);
+    console.log(`[1v1] - active duel cancelled and server released id=${id} server=${reservation.serverKey || serverIp} reason=${reason}`);
     return { ok: true, restored };
   }
 
   complete(serverIp, reservation) {
     this.clearAllTimers(reservation.id);
+    this.statusHandlers.delete(String(reservation.id));
     for (const playerId of reservation.playerDiscordIds || []) {
       if (this.activeByPlayer.get(String(playerId)) === reservation.id) this.activeByPlayer.delete(String(playerId));
     }
