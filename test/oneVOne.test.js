@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const Database = require("better-sqlite3");
 const { ServerReservations } = require("../oneVOne/reservations");
 const { parseOneVOneLogLine } = require("../oneVOne/logParser");
@@ -392,4 +393,72 @@ test("admin cancellation by player mention finds an active duel", async () => {
 
   assert.equal(cancelledId, "active-duel");
   assert.equal(sent.length, 1);
+});
+
+test("both duelists can acknowledge and complete the server vote", async () => {
+  const registry = new Map();
+  const collector = new EventEmitter();
+  collector.stop = reason => collector.emit("end", new Map(), reason);
+  const edits = [];
+  const voteMessage = {
+    edit: async payload => { edits.push(payload); return voteMessage; },
+    createMessageComponentCollector: options => { collector.options = options; return collector; },
+  };
+  const challenge = {
+    id: "VOTE12",
+    challengerId: "111",
+    challengedId: "222",
+  };
+  let activated = null;
+  const manager = {
+    accept: async () => ({
+      ok: true,
+      challenge,
+      availableServers: [
+        { name: "East", ip: "1.2.3.4:27015" },
+        { name: "West", ip: "5.6.7.8:27015" },
+      ],
+    }),
+    activate: async (accepted, server) => {
+      activated = { accepted, server };
+      return { ok: true, simulated: true };
+    },
+    cancel: () => null,
+  };
+  registerCommands(registry, {
+    config: { channelId: "pickup", dryRun: true, map: "ass_dm", killGoal: 50 },
+    manager,
+  });
+  const message = {
+    author: { id: "222" },
+    channel: {
+      id: "pickup",
+      send: async () => voteMessage,
+    },
+    reply: async () => {},
+  };
+
+  await registry.get("accept")(message);
+  const collect = collector.listeners("collect")[0];
+  assert.equal(typeof collect, "function");
+  assert.equal(collector.options.filter({ customId: "1v1_server_VOTE12_0" }), true);
+
+  const acknowledgements = [];
+  await collect({
+    customId: "1v1_server_VOTE12_0",
+    user: { id: "111", username: "One" },
+    member: { displayName: "One" },
+    deferUpdate: async () => acknowledgements.push("111"),
+  });
+  await collect({
+    customId: "1v1_server_VOTE12_1",
+    user: { id: "222", username: "Two" },
+    member: { displayName: "Two" },
+    deferUpdate: async () => acknowledgements.push("222"),
+  });
+
+  assert.deepEqual(acknowledgements, ["111", "222"]);
+  assert.equal(edits.length >= 2, true);
+  assert.equal(activated.accepted, challenge);
+  assert.ok(["East", "West"].includes(activated.server.name));
 });

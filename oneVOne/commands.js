@@ -242,38 +242,56 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     }
 
     const voteMessage = await message.channel.send({ embeds: [liveVoteEmbed()], components: [row] });
-    const collector = voteMessage.createMessageComponentCollector({ time: 30_000 });
+    const serverVotePrefix = `1v1_server_${challenge.id}_`;
+    const collector = voteMessage.createMessageComponentCollector({
+      time: 30_000,
+      filter: interaction => String(interaction.customId || "").startsWith(serverVotePrefix),
+    });
     collector.on("collect", async interaction => {
-      if (![challenge.challengerId, challenge.challengedId].includes(String(interaction.user.id))) {
-        return interaction.deferUpdate().catch(() => {});
+      // Acknowledge first so an unexpected payload or downstream edit cannot
+      // leave Discord displaying the button's indefinite "..." loading state.
+      try {
+        await interaction.deferUpdate();
+      } catch (error) {
+        console.error(`[1v1] - failed to acknowledge server vote id=${challenge.id}`, error);
+        return;
       }
-      const index = Number(interaction.customId.split("_").pop());
-      const userId = String(interaction.user.id);
-      votes.set(userId, index);
-      voterNames.set(userId,
-        interaction.member?.displayName || interaction.user?.globalName || interaction.user?.username || "Unknown");
-      await interaction.deferUpdate();
-      if (votes.size < 2) {
-        return voteMessage.edit({ embeds: [liveVoteEmbed()], components: [row] });
-      }
-      const counts = new Map();
-      for (const selected of votes.values()) counts.set(selected, (counts.get(selected) || 0) + 1);
-      const max = Math.max(...counts.values());
-      const tied = [...counts.entries()].filter(([, count]) => count === max).map(([selected]) => selected);
-      const winningIndex = tied[Math.floor(Math.random() * tied.length)];
-      const winner = options[winningIndex];
-      collector.stop("selected");
-      console.log(`[1v1] - server vote completed id=${challenge.id} winner=${winner.name} votes=${votes.size}`);
 
-      const selectedEmbed = config.dryRun
-        ? successEmbed("✅ Server Selected", `**${winner.name}** won the vote.\n\n🛡️ **DRY RUN:** No server commands were sent.`)
-          .addFields({ name: "Final Votes", value: voteBreakdown({ includeStatus: false }) })
-        : preparingEmbed(winner);
-      await voteMessage.edit({ content: "", embeds: [selectedEmbed], components: [] }).catch(error => {
-        console.error(`[1v1] - failed to show preparing state id=${challenge.id}`, error);
-      });
+      try {
+        const userId = String(interaction.user?.id || "");
+        if (![String(challenge.challengerId), String(challenge.challengedId)].includes(userId)) return;
 
-      const activated = await manager.activate(challenge, winner, {
+        const index = Number(String(interaction.customId).slice(serverVotePrefix.length));
+        if (!Number.isInteger(index) || index < 0 || index >= options.length) {
+          console.warn(`[1v1] - invalid server vote ignored id=${challenge.id} user=${userId} customId=${interaction.customId}`);
+          return;
+        }
+        votes.set(userId, index);
+        voterNames.set(userId,
+          interaction.member?.displayName || interaction.user?.globalName || interaction.user?.username || "Unknown");
+        console.log(`[1v1] - server vote recorded id=${challenge.id} user=${userId} option=${options[index].name} votes=${votes.size}/2`);
+        if (votes.size < 2) {
+          await voteMessage.edit({ embeds: [liveVoteEmbed()], components: [row] });
+          return;
+        }
+        const counts = new Map();
+        for (const selected of votes.values()) counts.set(selected, (counts.get(selected) || 0) + 1);
+        const max = Math.max(...counts.values());
+        const tied = [...counts.entries()].filter(([, count]) => count === max).map(([selected]) => selected);
+        const winningIndex = tied[Math.floor(Math.random() * tied.length)];
+        const winner = options[winningIndex];
+        collector.stop("selected");
+        console.log(`[1v1] - server vote completed id=${challenge.id} winner=${winner.name} votes=${votes.size}`);
+
+        const selectedEmbed = config.dryRun
+          ? successEmbed("✅ Server Selected", `**${winner.name}** won the vote.\n\n🛡️ **DRY RUN:** No server commands were sent.`)
+            .addFields({ name: "Final Votes", value: voteBreakdown({ includeStatus: false }) })
+          : preparingEmbed(winner);
+        await voteMessage.edit({ content: "", embeds: [selectedEmbed], components: [] }).catch(error => {
+          console.error(`[1v1] - failed to show preparing state id=${challenge.id}`, error);
+        });
+
+        const activated = await manager.activate(challenge, winner, {
         onStatus: async status => {
           if (status.type === "ready") {
             await voteMessage.edit({
@@ -305,14 +323,17 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
             });
           }
         },
-      });
-      if (!activated.ok) {
-        manager.cancel(challenge.id, "activation_failed");
-        console.error(`[1v1] - activation failed id=${challenge.id} server=${winner.name} reason=${activated.reason || "unavailable"}`);
-        return voteMessage.edit({ content: "", embeds: [deniedEmbed("Server Reservation Failed", `The reservation failed (${activated.reason || "unavailable"}). Start the challenge again.`)], components: [] });
+        });
+        if (!activated.ok) {
+          manager.cancel(challenge.id, "activation_failed");
+          console.error(`[1v1] - activation failed id=${challenge.id} server=${winner.name} reason=${activated.reason || "unavailable"}`);
+          await voteMessage.edit({ content: "", embeds: [deniedEmbed("Server Reservation Failed", `The reservation failed (${activated.reason || "unavailable"}). Start the challenge again.`)], components: [] });
+          return;
+        }
+        console.log(`[1v1] - activation accepted id=${challenge.id} server=${winner.name} waitingForMap=${!!activated.waitingForMap}`);
+      } catch (error) {
+        console.error(`[1v1] - server vote interaction failed id=${challenge.id}`, error);
       }
-      console.log(`[1v1] - activation accepted id=${challenge.id} server=${winner.name} waitingForMap=${!!activated.waitingForMap}`);
-      return voteMessage;
     });
     collector.on("end", async (_, reason) => {
       if (reason !== "selected") {
