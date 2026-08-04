@@ -244,11 +244,26 @@ class DuelManager {
     const [serverIp, reservation] = entry;
     console.log(`[1v1] - expected map observed id=${reservation.id} server=${reservation.serverKey || serverIp} map=${evt.name}`);
     this.clearTimer(reservation.id, "setup");
-    // Start tracking players before enabling the AMXX mode. Existing clients can
-    // be identified while the final RCON command is still returning, so resetting
-    // these fields after finishSetup() would discard valid join events.
-    this.updateReservation(serverIp, { status: "waiting_for_players", joined: [], ready: [] });
-    this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
+    // Lifecycle messages can beat the map-start message over UDP. Preserve any
+    // players (or even a match start) already observed for this reservation.
+    const joined = new Set(reservation.joined || []);
+    const status = reservation.status === "active"
+      ? "active"
+      : joined.size === 2 ? "waiting_for_ready" : "waiting_for_players";
+    this.updateReservation(serverIp, {
+      status,
+      joined: [...joined],
+      ready: [...new Set(reservation.ready || [])],
+    });
+    if (status === "active") {
+      this.clearTimer(reservation.id, "join");
+      this.clearTimer(reservation.id, "ready");
+    } else if (joined.size === 2) {
+      this.clearTimer(reservation.id, "join");
+      this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout"));
+    } else {
+      this.setTimer(reservation.id, "join", this.config.joinTimeoutMs, () => this.cancelActive(reservation.id, "join_timeout"));
+    }
     console.log(`[1v1] - map settle period started id=${reservation.id} server=${reservation.serverKey || serverIp} delay=${this.config.postMapSetupDelayMs || 0}ms`);
     const setup = await this.serverController.finishSetup(reservation);
     if (!setup.ok) {
@@ -279,18 +294,33 @@ class DuelManager {
     if (steam && !(reservation.playerSteamIds || []).map(String).map(s => s.toUpperCase()).includes(steam)) return true;
     if (evt.type === "one_v_one_player_join" || evt.type === "one_v_one_player_reconnect") {
       const joined = new Set(reservation.joined || []); joined.add(steam);
-      this.updateReservation(serverIp, { joined: [...joined], status: joined.size === 2 ? "waiting_for_ready" : "waiting_for_players" });
+      const status = reservation.status === "active" ? "active" : joined.size === 2 ? "waiting_for_ready" : "waiting_for_players";
+      this.updateReservation(serverIp, { joined: [...joined], status });
       console.log(`[1v1] - player joined id=${reservation.id} server=${reservation.serverKey || serverIp} joined=${joined.size}/2`);
-      if (joined.size === 2) { this.clearTimer(reservation.id, "join"); this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout")); }
+      if (joined.size === 2) {
+        this.clearTimer(reservation.id, "join");
+        if (status !== "active") this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout"));
+      }
       this.clearTimer(reservation.id, `disconnect:${steam}`);
     } else if (evt.type === "one_v_one_player_ready") {
-      const ready = new Set(reservation.ready || []); ready.add(steam); this.updateReservation(serverIp, { ready: [...ready] });
+      // The plugin only accepts !ready from an assigned, connected player, so a
+      // ready event is also authoritative evidence that this player joined.
+      const joined = new Set(reservation.joined || []); joined.add(steam);
+      const ready = new Set(reservation.ready || []); ready.add(steam);
+      const status = reservation.status === "active" ? "active" : "waiting_for_ready";
+      this.updateReservation(serverIp, { joined: [...joined], ready: [...ready], status });
       console.log(`[1v1] - player ready id=${reservation.id} server=${reservation.serverKey || serverIp} ready=${ready.size}/2`);
+      if (joined.size === 2) this.clearTimer(reservation.id, "join");
+      if (status !== "active") this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout"));
     } else if (evt.type === "one_v_one_player_disconnect") {
       console.warn(`[1v1] - player disconnected id=${reservation.id} server=${reservation.serverKey || serverIp}; grace timer started`);
       this.setTimer(reservation.id, `disconnect:${steam}`, this.config.disconnectGraceMs, () => this.cancelActive(reservation.id, "disconnect_timeout"));
     } else if (evt.type === "one_v_one_match_start") {
-      this.clearTimer(reservation.id, "ready"); this.updateReservation(serverIp, { status: "active" });
+      // MATCH_START is authoritative proof that both assigned players joined and
+      // readied. No pre-match timeout may remain armed once play is underway.
+      this.clearTimer(reservation.id, "join");
+      this.clearTimer(reservation.id, "ready");
+      this.updateReservation(serverIp, { status: "active" });
       console.log(`[1v1] - match started id=${reservation.id} server=${reservation.serverKey || serverIp}`);
     }
     return true;

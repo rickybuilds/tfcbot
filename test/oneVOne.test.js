@@ -111,6 +111,25 @@ test("post-map setup applies plugin cvars through amx_cvar with enabled last", a
   ]);
 });
 
+test("map setup disables and clears any stale duel before changing map", async () => {
+  const sent = [];
+  const controller = new OneVOneServerController({
+    config: { serverSetupEnabled: true, map: "ass_dm" },
+    runRconCommand: async (serverKey, command) => sent.push([serverKey, command]),
+  });
+
+  const result = await controller.beginSetup({ serverKey: "east" });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(sent, [
+    ["east", "amx_cvar 1v1_enabled 0"],
+    ["east", 'amx_cvar 1v1_player1 ""'],
+    ["east", 'amx_cvar 1v1_player2 ""'],
+    ["east", 'amx_cvar 1v1_server_key "unknown"'],
+    ["east", "amx_map ass_dm"],
+  ]);
+});
+
 test("live activation reports ready after the expected map is configured", async () => {
   const serverIp = "1.2.3.4:27015";
   const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
@@ -205,6 +224,103 @@ test("player joins received during post-map setup are preserved", async () => {
   assert.equal(reservation.status, "waiting_for_ready");
   assert.equal(manager.timers.has(`${challenge.id}:join`), false);
   assert.equal(manager.timers.has(`${challenge.id}:ready`), true);
+  manager.complete(serverIp, reservation);
+});
+
+test("player lifecycle received before the map event is preserved", async () => {
+  const serverIp = "1.2.3.4:27015";
+  const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
+  const reservations = new ServerReservations(state);
+  const manager = new DuelManager({
+    config: {
+      dryRun: false,
+      map: "ass_dm",
+      setupTimeoutMs: 60_000,
+      joinTimeoutMs: 60_000,
+      readyTimeoutMs: 60_000,
+    },
+    state,
+    reservations,
+    steamLinks: { getSteamIds: async () => [] },
+    resolveServer: () => ({ ok: true, key: "east" }),
+    serverController: {
+      beginSetup: async () => ({ ok: true }),
+      finishSetup: async () => ({ ok: true }),
+    },
+  });
+  const challenge = {
+    id: "duel-early-lifecycle",
+    challengerId: "1",
+    challengedId: "2",
+    player1SteamId: "STEAM_0:0:1",
+    player2SteamId: "STEAM_0:1:2",
+  };
+
+  await manager.activate(challenge, { name: "East", ip: serverIp });
+  manager.handleLifecycle({ type: "one_v_one_player_reconnect", from: "1.2.3.4", steamid: "STEAM_0:0:1" });
+  manager.handleLifecycle({ type: "one_v_one_player_reconnect", from: "1.2.3.4", steamid: "STEAM_0:1:2" });
+  await manager.handleMap({ type: "map", name: "ass_dm", from: "1.2.3.4" });
+
+  const reservation = reservations.get(serverIp);
+  assert.deepEqual(reservation.joined.sort(), ["STEAM_0:0:1", "STEAM_0:1:2"]);
+  assert.equal(reservation.status, "waiting_for_ready");
+  assert.equal(manager.timers.has(`${challenge.id}:join`), false);
+  assert.equal(manager.timers.has(`${challenge.id}:ready`), true);
+  manager.complete(serverIp, reservation);
+});
+
+test("match start clears both pre-match timeout timers", () => {
+  const serverIp = "1.2.3.4:27015";
+  const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
+  const reservations = new ServerReservations(state);
+  const manager = new DuelManager({
+    config: {}, state, reservations,
+    steamLinks: { getSteamIds: async () => [] },
+  });
+  reservations.reserve(serverIp, {
+    id: "duel-started",
+    mode: "1v1",
+    serverKey: "east",
+    playerSteamIds: ["STEAM_0:0:1", "STEAM_0:1:2"],
+    status: "waiting_for_players",
+  });
+  manager.setTimer("duel-started", "join", 60_000, () => {});
+  manager.setTimer("duel-started", "ready", 60_000, () => {});
+
+  manager.handleLifecycle({ type: "one_v_one_match_start", from: "1.2.3.4" });
+
+  assert.equal(reservations.get(serverIp).status, "active");
+  assert.equal(manager.timers.has("duel-started:join"), false);
+  assert.equal(manager.timers.has("duel-started:ready"), false);
+  manager.complete(serverIp, reservations.get(serverIp));
+});
+
+test("ready events prove players joined even when join events were lost", () => {
+  const serverIp = "1.2.3.4:27015";
+  const state = { lockedServers: new Set(), lockedPlayers: new Map(), servers: [] };
+  const reservations = new ServerReservations(state);
+  const manager = new DuelManager({
+    config: { readyTimeoutMs: 60_000 }, state, reservations,
+    steamLinks: { getSteamIds: async () => [] },
+  });
+  reservations.reserve(serverIp, {
+    id: "duel-ready-without-joins",
+    mode: "1v1",
+    serverKey: "east",
+    playerSteamIds: ["STEAM_0:0:1", "STEAM_0:1:2"],
+    status: "waiting_for_players",
+  });
+  manager.setTimer("duel-ready-without-joins", "join", 60_000, () => {});
+
+  manager.handleLifecycle({ type: "one_v_one_player_ready", from: "1.2.3.4", steamid: "STEAM_0:0:1" });
+  manager.handleLifecycle({ type: "one_v_one_player_ready", from: "1.2.3.4", steamid: "STEAM_0:1:2" });
+
+  const reservation = reservations.get(serverIp);
+  assert.deepEqual(reservation.joined.sort(), ["STEAM_0:0:1", "STEAM_0:1:2"]);
+  assert.deepEqual(reservation.ready.sort(), ["STEAM_0:0:1", "STEAM_0:1:2"]);
+  assert.equal(reservation.status, "waiting_for_ready");
+  assert.equal(manager.timers.has("duel-ready-without-joins:join"), false);
+  assert.equal(manager.timers.has("duel-ready-without-joins:ready"), true);
   manager.complete(serverIp, reservation);
 });
 

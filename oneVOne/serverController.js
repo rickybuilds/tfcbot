@@ -44,7 +44,17 @@ class OneVOneServerController {
     return { ok: true, simulated: false, commands: completed };
   }
 
-  beginSetup(reservation) { return this.execute(reservation.serverKey, [`amx_map ${this.config.map}`]); }
+  beginSetup(reservation) {
+    // Cvars survive map changes. Disable and clear any previous duel before the
+    // change so the freshly loaded plugin cannot start from stale assignments.
+    return this.execute(reservation.serverKey, [
+      "amx_cvar 1v1_enabled 0",
+      'amx_cvar 1v1_player1 ""',
+      'amx_cvar 1v1_player2 ""',
+      'amx_cvar 1v1_server_key "unknown"',
+      `amx_map ${this.config.map}`,
+    ]);
+  }
   async finishSetup(reservation) {
     if (this.config.serverSetupEnabled) {
       await new Promise(resolve => setTimeout(resolve, this.config.postMapSetupDelayMs));
