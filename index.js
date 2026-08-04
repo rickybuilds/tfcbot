@@ -402,6 +402,16 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  try {
+    const application = await client.application.fetch();
+    if (application.interactionsEndpointURL) {
+      console.error(`[Discord interactions] HTTP endpoint is configured (${application.interactionsEndpointURL}). Button events will not reach this gateway bot; remove the Interactions Endpoint URL in the Discord Developer Portal.`);
+    } else {
+      console.log("[Discord interactions] gateway delivery enabled (no Interactions Endpoint URL configured)");
+    }
+  } catch (error) {
+    console.warn("[Discord interactions] could not inspect application delivery configuration:", error.message);
+  }
   try { await refreshBotName(client, state); } catch {}
   try { eloShadow.start(); } catch (e) { console.error("[elo-shadow] startup failed:", e); }
 
