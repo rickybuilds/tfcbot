@@ -130,5 +130,6 @@ test_api.js
 !/test/voteTransition.test.js
 !/test/pickupReplayRecorder.test.js
 !/test/eloShadow.test.js
+!/test/backup.test.js
 /output/documents
 /.tmp

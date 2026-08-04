@@ -591,7 +591,7 @@ startSpeedrunPlayerLinkSync({
   });
   } catch (e) { console.error("[HLDS-LOG] failed:", e); }
 
-  // TODO: keep your ban restore + backups + decay logic here
+  scheduleBackups(settings);
 });
 
 // ============================================================================
