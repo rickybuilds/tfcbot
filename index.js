@@ -347,17 +347,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
 
-// Keep a low-level trace for component interactions. If this fires but the
-// high-level interactionCreate event does not, discord.js conversion is the
-// fault; if neither fires, Discord did not dispatch the interaction to this
-// authenticated gateway session.
-client.on("raw", packet => {
-  if (packet?.t !== "INTERACTION_CREATE") return;
-  console.log(`[Discord raw] INTERACTION_CREATE id=${packet.d?.id || "unknown"} application=${packet.d?.application_id || "unknown"} customId=${packet.d?.data?.custom_id || "none"}`);
-});
-
 oneVOne.attachCompletion({ client, logsChannelId: config.channels.logs });
-oneVOne.attachInteractions(client);
 registry.client = client;
 client.persistQueueSoon = persistQueueSoon;
 
@@ -411,17 +401,6 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  try {
-    const application = await client.application.fetch();
-    console.log(`[Discord identity] botUser=${client.user.id} application=${application.id} name=${application.name} guilds=${client.guilds.cache.size}`);
-    if (application.interactionsEndpointURL) {
-      console.error(`[Discord interactions] HTTP endpoint is configured (${application.interactionsEndpointURL}). Button events will not reach this gateway bot; remove the Interactions Endpoint URL in the Discord Developer Portal.`);
-    } else {
-      console.log("[Discord interactions] gateway delivery enabled (no Interactions Endpoint URL configured)");
-    }
-  } catch (error) {
-    console.warn("[Discord interactions] could not inspect application delivery configuration:", error.message);
-  }
   try { await refreshBotName(client, state); } catch {}
   try { eloShadow.start(); } catch (e) { console.error("[elo-shadow] startup failed:", e); }
 

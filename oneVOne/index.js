@@ -25,36 +25,9 @@ function createOneVOneSubsystem(deps) {
   const manager = new DuelManager({ config, state: deps.state, steamLinks: deps.steamLinks, reservations, store,
     resolveServer: server => resolveServerKey(server, rconServers), serverController });
   let completion = null;
-  let interactionsAttached = false;
   function attachCompletion({ client, logsChannelId }) {
     if (!config.enabled) return false;
     completion = createCompletionHandler({ client, matchesStore: deps.matchesStore, logsChannelId, manager });
-    return true;
-  }
-
-  function attachInteractions(client) {
-    if (!config.enabled || interactionsAttached || !client?.on) return false;
-    interactionsAttached = true;
-    client.on("interactionCreate", interaction => {
-      const customId = String(interaction?.customId || "");
-      if (!customId.startsWith("1v1_")) return;
-      const userId = String(interaction.user?.id || "unknown");
-      console.log(`[1v1] - discord button event customId=${customId} user=${userId} message=${interaction.message?.id || "unknown"}`);
-
-      // Message collectors are process-local. After a restart an old button can
-      // still be visible even though no collector exists to acknowledge it.
-      const timer = setTimeout(async () => {
-        if (interaction.deferred || interaction.replied) return;
-        console.warn(`[1v1] - orphaned button detected customId=${customId} user=${userId}`);
-        await interaction.reply({
-          content: "This 1v1 button is no longer active, usually because the bot restarted. Use `!accept`/`!decline`, or start a new challenge if this was a server vote.",
-          ephemeral: true,
-        }).catch(error => {
-          console.error(`[1v1] - orphaned button response failed customId=${customId} user=${userId}`, error);
-        });
-      }, 250);
-      timer.unref?.();
-    });
     return true;
   }
 
@@ -92,7 +65,7 @@ function createOneVOneSubsystem(deps) {
     return true;
   }
 
-  return { config, reservations, manager, register, attachCompletion, attachInteractions, onHldsEvent, parseOneVOneLogLine };
+  return { config, reservations, manager, register, attachCompletion, onHldsEvent, parseOneVOneLogLine };
 }
 
 module.exports = { createOneVOneSubsystem };

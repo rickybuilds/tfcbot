@@ -67,66 +67,6 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
   const inChannel = message => !config.channelId || String(message.channel?.id) === config.channelId;
   const challengeMessages = new Map();
 
-  registry.set("test", async message => {
-    const ownerId = String(message.author?.id || "");
-    const testId = `${Date.now().toString(36)}_${ownerId}`;
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`1v1_test_yes_${testId}`)
-        .setLabel("Yes")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`1v1_test_no_${testId}`)
-        .setLabel("No")
-        .setStyle(ButtonStyle.Danger),
-    );
-    const embed = noticeEmbed(COLORS.info, "Button Test", `<@${ownerId}>, select **Yes** or **No** below.`)
-      .setFooter({ text: "This test expires after 30 seconds" });
-    const testMessage = await message.channel.send({
-      embeds: [embed],
-      components: [row],
-      allowedMentions: { users: [ownerId] },
-    });
-    console.log(`[button-test] opened owner=${ownerId} message=${testMessage.id || "unknown"}`);
-    const collector = testMessage.createMessageComponentCollector({
-      time: 30_000,
-      filter: interaction => String(interaction.customId || "").startsWith("1v1_test_"),
-    });
-    collector.on("collect", async interaction => {
-      const userId = String(interaction.user?.id || "unknown");
-      console.log(`[button-test] click received owner=${ownerId} user=${userId} customId=${interaction.customId}`);
-      try {
-        await interaction.deferUpdate();
-        console.log(`[button-test] click acknowledged owner=${ownerId} user=${userId}`);
-      } catch (error) {
-        console.error(`[button-test] acknowledgement failed owner=${ownerId} user=${userId}`, error);
-        return;
-      }
-      if (userId !== ownerId) {
-        console.warn(`[button-test] click ignored reason=not_owner owner=${ownerId} user=${userId}`);
-        await interaction.followUp({ content: "Only the person who ran `!test` can choose.", ephemeral: true }).catch(() => {});
-        return;
-      }
-      const choice = String(interaction.customId).startsWith("1v1_test_yes_") ? "Yes" : "No";
-      collector.stop("selected");
-      await testMessage.edit({
-        embeds: [successEmbed("✅ Button Test Passed", `<@${ownerId}> selected **${choice}**.`)],
-        components: [],
-        allowedMentions: { parse: [] },
-      });
-      console.log(`[button-test] completed owner=${ownerId} choice=${choice}`);
-    });
-    collector.on("end", async (_, reason) => {
-      console.log(`[button-test] closed owner=${ownerId} reason=${reason || "unknown"}`);
-      if (reason === "selected") return;
-      await testMessage.edit({
-        embeds: [noticeEmbed(COLORS.expired, "⌛ Button Test Expired", "No selection was received within 30 seconds.")],
-        components: [],
-      }).catch(() => {});
-    });
-    return testMessage;
-  });
-
   registry.set("1v1", async message => {
     if (!inChannel(message)) return;
     const target = message.mentions?.users?.first();
