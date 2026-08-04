@@ -165,7 +165,7 @@
     "key": "nexus-b2-8cde",
     "name": "nexus_b4",
     "mirv": 1,
-    "tier": 1
+    "tier": 3
   },
   {
     "key": "massive-b7-e8dc",
@@ -195,6 +195,6 @@
     "key": "foundry-b3-988e",
     "name": "foundry_b3",
     "mirv": 1,
-    "tier": 3
+    "tier": 1
   }
 ]
