@@ -462,3 +462,69 @@ test("both duelists can acknowledge and complete the server vote", async () => {
   assert.equal(activated.accepted, challenge);
   assert.ok(["East", "West"].includes(activated.server.name));
 });
+
+test("the challenged player can acknowledge the Accept button", async () => {
+  const registry = new Map();
+  const challengeCollector = new EventEmitter();
+  challengeCollector.stop = reason => challengeCollector.emit("end", new Map(), reason);
+  const voteCollector = new EventEmitter();
+  const challengeMessage = {
+    id: "challenge-message",
+    edit: async () => challengeMessage,
+    createMessageComponentCollector: () => challengeCollector,
+  };
+  const voteMessage = {
+    edit: async () => voteMessage,
+    createMessageComponentCollector: () => voteCollector,
+  };
+  let sends = 0;
+  const challenge = {
+    id: "ACPT12",
+    challengerId: "111",
+    challengedId: "222",
+    expiresAt: Date.now() + 60_000,
+    status: "pending",
+  };
+  const manager = {
+    createChallenge: () => ({ ok: true, challenge }),
+    onChallengeExpire: () => true,
+    incomingFor: userId => String(userId) === "222" && challenge.status === "pending" ? challenge : null,
+    accept: async () => {
+      challenge.status = "accepted";
+      return {
+        ok: true,
+        challenge,
+        availableServers: [{ name: "East", ip: "1.2.3.4:27015" }],
+      };
+    },
+    cancel: () => null,
+  };
+  registerCommands(registry, {
+    config: { channelId: "pickup", dryRun: true, map: "ass_dm", killGoal: 50 },
+    manager,
+  });
+  const channel = {
+    id: "pickup",
+    send: async () => (++sends === 1 ? challengeMessage : voteMessage),
+  };
+  await registry.get("1v1")({
+    author: { id: "111" },
+    mentions: { users: { first: () => ({ id: "222", bot: false }) } },
+    channel,
+    reply: async () => {},
+  });
+
+  let acknowledged = false;
+  const interaction = {
+    customId: "1v1_accept_ACPT12",
+    user: { id: "222", username: "Two" },
+    channel,
+    deferUpdate: async () => { acknowledged = true; },
+    followUp: async () => {},
+  };
+  await challengeCollector.listeners("collect")[0](interaction);
+
+  assert.equal(acknowledged, true);
+  assert.equal(challenge.status, "accepted");
+  assert.equal(sends, 2);
+});

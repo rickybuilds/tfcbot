@@ -100,33 +100,57 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
     challengeCollector = challengeMessage.createMessageComponentCollector({
       time: Math.max(1, result.challenge.expiresAt - Date.now()),
     });
+    console.log(`[1v1] - challenge buttons opened id=${result.challenge.id} message=${challengeMessage.id || "unknown"}`);
     challengeCollector.on("collect", async interaction => {
       const acceptId = `1v1_accept_${result.challenge.id}`;
       const denyId = `1v1_deny_${result.challenge.id}`;
       if (interaction.customId !== acceptId && interaction.customId !== denyId) return;
-      if (String(interaction.user.id) !== String(result.challenge.challengedId)) {
-        return interaction.deferUpdate().catch(() => {});
+      const userId = String(interaction.user?.id || "unknown");
+      console.log(`[1v1] - challenge button received id=${result.challenge.id} action=${interaction.customId === acceptId ? "accept" : "deny"} user=${userId}`);
+      try {
+        await interaction.deferUpdate();
+        console.log(`[1v1] - challenge button acknowledged id=${result.challenge.id} user=${userId}`);
+      } catch (error) {
+        console.error(`[1v1] - challenge button acknowledgement failed id=${result.challenge.id} user=${userId}`, error);
+        return;
       }
-      if (manager.incomingFor(interaction.user.id)?.id !== result.challenge.id) {
-        challengeCollector.stop("closed");
-        return interaction.reply({
-          content: "This 1v1 challenge is no longer pending.",
+
+      try {
+        if (userId !== String(result.challenge.challengedId)) {
+          console.warn(`[1v1] - challenge button ignored id=${result.challenge.id} reason=ineligible user=${userId}`);
+          return;
+        }
+        if (manager.incomingFor(userId)?.id !== result.challenge.id) {
+          challengeCollector.stop("closed");
+          await interaction.followUp({
+            content: "This 1v1 challenge is no longer pending.",
+            ephemeral: true,
+          }).catch(() => {});
+          return;
+        }
+
+        const interactionMessage = {
+          author: interaction.user,
+          channel: interaction.channel,
+          reply: payload => interaction.followUp({ ...payload, ephemeral: true }),
+        };
+        if (interaction.customId === denyId) {
+          challengeCollector.stop("denied");
+          await registry.get("decline")(interactionMessage);
+          return;
+        }
+        await registry.get("accept")(interactionMessage);
+        if (result.challenge.status === "accepted") challengeCollector.stop("accepted");
+      } catch (error) {
+        console.error(`[1v1] - challenge button handler failed id=${result.challenge.id} action=${interaction.customId} user=${userId}`, error);
+        await interaction.followUp({
+          content: "The 1v1 button could not be processed. The error has been logged; try `!accept` or `!decline`.",
           ephemeral: true,
         }).catch(() => {});
       }
-
-      await interaction.deferUpdate();
-      const interactionMessage = {
-        author: interaction.user,
-        channel: interaction.channel,
-        reply: payload => interaction.followUp({ ...payload, ephemeral: true }),
-      };
-      if (interaction.customId === denyId) {
-        challengeCollector.stop("denied");
-        return registry.get("decline")(interactionMessage);
-      }
-      await registry.get("accept")(interactionMessage);
-      if (result.challenge.status === "accepted") challengeCollector.stop("accepted");
+    });
+    challengeCollector.on("end", (_, reason) => {
+      console.log(`[1v1] - challenge buttons closed id=${result.challenge.id} reason=${reason || "unknown"}`);
     });
     return challengeMessage;
   });

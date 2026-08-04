@@ -348,6 +348,7 @@ const client = new Client({
 });
 
 oneVOne.attachCompletion({ client, logsChannelId: config.channels.logs });
+oneVOne.attachInteractions(client);
 registry.client = client;
 client.persistQueueSoon = persistQueueSoon;
 
