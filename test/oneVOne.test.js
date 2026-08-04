@@ -528,3 +528,45 @@ test("the challenged player can acknowledge the Accept button", async () => {
   assert.equal(challenge.status, "accepted");
   assert.equal(sends, 2);
 });
+
+test("!test renders Yes and No buttons and records the owner's choice", async () => {
+  const registry = new Map();
+  const collector = new EventEmitter();
+  collector.stop = reason => collector.emit("end", new Map(), reason);
+  const edits = [];
+  let sentPayload = null;
+  const testMessage = {
+    id: "button-test-message",
+    edit: async payload => { edits.push(payload); return testMessage; },
+    createMessageComponentCollector: options => { collector.options = options; return collector; },
+  };
+  registerCommands(registry, {
+    config: {},
+    manager: {},
+  });
+
+  await registry.get("test")({
+    author: { id: "111" },
+    channel: {
+      send: async payload => { sentPayload = payload; return testMessage; },
+    },
+  });
+
+  const labels = sentPayload.components[0].components.map(button => button.data.label);
+  assert.deepEqual(labels, ["Yes", "No"]);
+  const yesButton = sentPayload.components[0].components[0].data.custom_id;
+  assert.equal(collector.options.filter({ customId: yesButton }), true);
+
+  let acknowledged = false;
+  await collector.listeners("collect")[0]({
+    customId: yesButton,
+    user: { id: "111" },
+    deferUpdate: async () => { acknowledged = true; },
+    followUp: async () => {},
+  });
+
+  assert.equal(acknowledged, true);
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0].components.length, 0);
+  assert.match(edits[0].embeds[0].data.description, /selected \*\*Yes\*\*/);
+});
