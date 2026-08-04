@@ -75,6 +75,84 @@ test("new 1v1 challenges use the standard six-character match ID", () => {
   manager.cancel(result.challenge.id, "test_cleanup");
 });
 
+test("admins can arrange a pending 1v1 between two mentioned players", async () => {
+  const registry = new Map();
+  let createdWith = null;
+  const challenge = {
+    id: "ADMIN1",
+    challengerId: "111",
+    challengedId: "222",
+    createdByAdminId: "999",
+    expiresAt: Date.now() + 60_000,
+  };
+  const challengeMessage = {
+    id: "admin-challenge-message",
+    edit: async () => challengeMessage,
+    createMessageComponentCollector: () => new EventEmitter(),
+  };
+  const manager = {
+    createChallenge: (challenger, challenged, options) => {
+      createdWith = { challenger, challenged, options };
+      return { ok: true, challenge };
+    },
+    onChallengeExpire: () => true,
+  };
+  registerCommands(registry, {
+    config: { channelId: "pickup" },
+    manager,
+    adminRoleId: "admin",
+  });
+  const mentions = new Map([
+    ["111", { id: "111", bot: false }],
+    ["222", { id: "222", bot: false }],
+  ]);
+  let sentPayload = null;
+
+  await registry.get("1v1")({
+    author: { id: "999" },
+    member: { roles: { cache: { has: id => id === "admin" } } },
+    mentions: { users: mentions },
+    channel: {
+      id: "pickup",
+      send: async payload => { sentPayload = payload; return challengeMessage; },
+    },
+    reply: async () => {},
+  });
+
+  assert.equal(createdWith.challenger.id, "111");
+  assert.equal(createdWith.challenged.id, "222");
+  assert.deepEqual(createdWith.options, { createdByAdminId: "999" });
+  assert.deepEqual(sentPayload.allowedMentions.users, ["222"]);
+  assert.match(sentPayload.embeds[0].data.description, /admin arranged/i);
+});
+
+test("non-admins cannot arrange a 1v1 between two other players", async () => {
+  const registry = new Map();
+  let createCalls = 0;
+  const manager = { createChallenge: () => { createCalls += 1; } };
+  registerCommands(registry, {
+    config: { channelId: "pickup" },
+    manager,
+    adminRoleId: "admin",
+  });
+  const replies = [];
+
+  await registry.get("1v1")({
+    author: { id: "333" },
+    member: { roles: { cache: { has: () => false } } },
+    mentions: { users: new Map([
+      ["111", { id: "111", bot: false }],
+      ["222", { id: "222", bot: false }],
+    ]) },
+    channel: { id: "pickup" },
+    reply: async payload => replies.push(payload),
+  });
+
+  assert.equal(createCalls, 0);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].embeds[0].data.description, /only admins/i);
+});
+
 test("server resolver requires exact host and port", () => {
   const result = resolveServerKey({ ip: "1.2.3.4:27016" }, {
     east: { host: "1.2.3.4", port: 27015 }, west: { host: "1.2.3.4", port: 27016 },

@@ -41,7 +41,7 @@ Implemented:
 - atomic in-memory server reservations compatible with `lockedServers`;
 - idempotent schema migration;
 - structured `1V1_MATCH_END` parsing;
-- Discord `!1v1`, `!accept`, and `!decline` commands behind the feature flag;
+- Discord `!1v1 @opponent`, admin `!1v1 @player1 @player2`, `!accept`, and `!decline` commands behind the feature flag;
 - an isolated two-player server vote with both votes counted and randomized tie resolution;
 - pending-challenge persistence and restart restoration when the migration is present;
 - reservation and SteamID verification for machine-readable match-end events;

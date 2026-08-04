@@ -28,11 +28,11 @@ class DuelManager {
     return this.pendingByPlayer.has(id) || this.activeByPlayer.has(id) || this.isPickupLocked(id);
   }
 
-  createChallenge(challenger, challenged) {
+  createChallenge(challenger, challenged, { createdByAdminId = null } = {}) {
     const p1 = String(challenger.id);
     const p2 = String(challenged.id);
     if (p1 === p2) return { ok: false, reason: "self" };
-    if (challenged.bot) return { ok: false, reason: "bot" };
+    if (challenger.bot || challenged.bot) return { ok: false, reason: "bot" };
     if (this.isBusy(p1)) return { ok: false, reason: "challenger_busy" };
     if (this.isBusy(p2)) return { ok: false, reason: "challenged_busy" };
 
@@ -52,6 +52,7 @@ class DuelManager {
       createdAt: Date.now(),
       expiresAt: Date.now() + this.config.challengeTtlMs,
       status: "pending",
+      createdByAdminId: createdByAdminId ? String(createdByAdminId) : null,
     };
     this.pending.set(id, challenge);
     this.pendingByPlayer.set(p1, id);

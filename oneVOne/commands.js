@@ -24,10 +24,13 @@ const successEmbed = (title, description) => noticeEmbed(COLORS.success, title, 
 
 function challengeEmbed(challenge) {
   const expiresUnix = Math.floor(challenge.expiresAt / 1000);
+  const description = challenge.createdByAdminId
+    ? `<@${challenge.challengedId}>, an admin arranged a head-to-head duel between you and <@${challenge.challengerId}>.`
+    : `<@${challenge.challengedId}>, you have been challenged to a head-to-head duel.`;
   return new EmbedBuilder()
     .setColor(COLORS.challenge)
     .setTitle("⚔️ 1v1 Challenge")
-    .setDescription(`<@${challenge.challengedId}>, you have been challenged to a head-to-head duel.`)
+    .setDescription(description)
     .addFields(
       { name: "Match ID", value: `\`${challenge.id}\``, inline: false },
       { name: "Challenger", value: `<@${challenge.challengerId}>`, inline: true },
@@ -69,13 +72,35 @@ function registerCommands(registry, { config, manager, adminRoleId }) {
 
   registry.set("1v1", async message => {
     if (!inChannel(message)) return;
-    const target = message.mentions?.users?.first();
-    if (!target) return message.reply({ embeds: [deniedEmbed("Invalid 1v1 Challenge", "Usage: `!1v1 @user`")] });
-    const result = manager.createChallenge(message.author, target);
+    const mentionedUsers = typeof message.mentions?.users?.values === "function"
+      ? [...message.mentions.users.values()]
+      : [message.mentions?.users?.first?.()].filter(Boolean);
+    if (!mentionedUsers.length) {
+      return message.reply({ embeds: [deniedEmbed("Invalid 1v1 Challenge", "Usage: `!1v1 @user` (admins: `!1v1 @player1 @player2`)")] });
+    }
+
+    const adminArranged = mentionedUsers.length > 1;
+    const isAdmin = adminRoleId && message.member?.roles?.cache?.has(adminRoleId);
+    if (adminArranged && !isAdmin) {
+      return message.reply({ embeds: [deniedEmbed("1v1 Challenge Denied", "Only admins can arrange a 1v1 between two other players. Use `!1v1 @user` to challenge someone yourself.")] });
+    }
+    if (mentionedUsers.length > 2) {
+      return message.reply({ embeds: [deniedEmbed("Invalid 1v1 Challenge", "Usage: `!1v1 @player1 @player2`")] });
+    }
+
+    const challenger = adminArranged ? mentionedUsers[0] : message.author;
+    const target = adminArranged ? mentionedUsers[1] : mentionedUsers[0];
+    const result = manager.createChallenge(challenger, target, {
+      createdByAdminId: adminArranged ? message.author.id : null,
+    });
     const errors = {
-      self: "You cannot challenge yourself.", bot: "You cannot challenge a bot.",
-      challenger_busy: "You are already committed to a pickup or 1v1 challenge.",
-      challenged_busy: "That player is already committed to a pickup or 1v1 challenge.",
+      self: "The two players must be different.", bot: "Bots cannot participate in a 1v1.",
+      challenger_busy: adminArranged
+        ? "The first player is already committed to a pickup or 1v1 challenge."
+        : "You are already committed to a pickup or 1v1 challenge.",
+      challenged_busy: adminArranged
+        ? "The second player is already committed to a pickup or 1v1 challenge."
+        : "That player is already committed to a pickup or 1v1 challenge.",
       id_generation_failed: "A match ID could not be allocated. Please try again.",
     };
     if (!result.ok) return message.reply({ embeds: [deniedEmbed("1v1 Challenge Denied", errors[result.reason] || "Challenge could not be created.")] });
