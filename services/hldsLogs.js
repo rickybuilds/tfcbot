@@ -139,6 +139,24 @@ function parseLine(raw, currentLogFile = null) {
     };
   }
 
+  const mKill = s.match(/"([^"]+)<(\d+)><([^>]+)><([^>]*)>" killed "([^"]+)<(\d+)><([^>]+)><([^>]*)>" with "([^"]+)"/i);
+
+  if (mKill) {
+    return {
+      type: "kill",
+      killer: mKill[1],
+      killerUserid: mKill[2],
+      killerSteamid: mKill[3],
+      killerTeam: mKill[4],
+      victim: mKill[5],
+      victimUserid: mKill[6],
+      victimSteamid: mKill[7],
+      victimTeam: mKill[8],
+      weapon: mKill[9],
+      raw: s
+    };
+  }
+
 return null;
 }
 /* -------------------------------------------------------------------------- */
@@ -172,46 +190,45 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     const from = rinfo.address;
     global.lastHldsPacketAt = Date.now();
     if (allowedIPs.length && !allowedIPs.includes(from)) return;
-    const currentLogFile = currentLogFileBySource.get(from) || null;
-    const parsed = parseLine(msg, currentLogFile);
-    if (!parsed) return;
-    if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
-    if (parsed.type === "log_closed") {
-      currentLogFileBySource.delete(from);
-      if (currentLogFile && global._teamFileTrack) delete global._teamFileTrack[currentLogFile];
-    }
-    const evt = {
-      ...parsed,
-      from,
-      sourcePort: rinfo.port,
-      serverKey: serverKeyForSource(from, rinfo.port),
-      ts: Date.now(),
-    };
-    const steamId = normalizeSteamId(evt.steamid);
-    if (identityStore && steamId && evt.type === "connect") {
-      try {
-        identityStore.recordConnect({
-          steamId,
-          alias: evt.player,
-          ip: evt.ip,
-          server: serverNameForSource(from),
-          timestamp: evt.ts,
-        });
-      } catch (err) {
-        console.error(`[HLDS identity] connect write failed for ${steamId}:`, err);
+    const records = String(msg).split(/\r?\n/).filter(record => record.trim());
+    for (const record of records) {
+      const currentLogFile = currentLogFileBySource.get(from) || null;
+      const parsed = parseLine(record, currentLogFile);
+      if (!parsed) continue;
+      if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
+      if (parsed.type === "log_closed") {
+        currentLogFileBySource.delete(from);
+        if (currentLogFile && global._teamFileTrack) delete global._teamFileTrack[currentLogFile];
       }
-    }
-    if (identityStore && steamId && evt.type === "disconnect") {
-      try {
-        identityStore.recordDisconnect(steamId, evt.ts);
-      } catch (err) {
-        console.error(`[HLDS identity] disconnect write failed for ${steamId}:`, err);
+      const evt = {
+        ...parsed,
+        from,
+        sourcePort: rinfo.port,
+        serverKey: serverKeyForSource(from, rinfo.port),
+        ts: Date.now(),
+      };
+      const steamId = normalizeSteamId(evt.steamid);
+      if (identityStore && steamId && evt.type === "connect") {
+        try {
+          identityStore.recordConnect({
+            steamId,
+            alias: evt.player,
+            ip: evt.ip,
+            server: serverNameForSource(from),
+            timestamp: evt.ts,
+          });
+        } catch (err) {
+          console.error(`[HLDS identity] connect write failed for ${steamId}:`, err);
+        }
       }
-    }
-    if (evt.type === "say") {
-      const text = String(evt.text || "").trim().toLowerCase();
-
-      if (text === "!rs") {
+      if (identityStore && steamId && evt.type === "disconnect") {
+        try {
+          identityStore.recordDisconnect(steamId, evt.ts);
+        } catch (err) {
+          console.error(`[HLDS identity] disconnect write failed for ${steamId}:`, err);
+        }
+      }
+      if (evt.type === "say" && String(evt.text || "").trim().toLowerCase() === "!rs") {
         onEvent?.({
           type: "restart_request",
           from,
@@ -221,39 +238,38 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
           ts: evt.ts,
           raw: evt.raw
         });
-
-        return;
+        continue;
       }
-    }
-    // ---------- SCORE PAIRING LOGIC (unchanged) ----------
-  let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
-    if (evt.type === "map") {
-      last = { map: evt.name, blue: null, red: null, ts: evt.ts };
-      lastScoresBySource.set(from, last);
-    }
-    if (evt.type === "score") {
-      if (evt.ts - last.ts > 9000) {
-        last = { map: last.map, blue: null, red: null, ts: evt.ts };
+      // ---------- SCORE PAIRING LOGIC (unchanged) ----------
+      let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
+      if (evt.type === "map") {
+        last = { map: evt.name, blue: null, red: null, ts: evt.ts };
+        lastScoresBySource.set(from, last);
       }
-      if (/blue/i.test(evt.team)) last.blue = evt.score;
-      if (/red/i.test(evt.team)) last.red = evt.score;
-      last.ts = evt.ts;
-      lastScoresBySource.set(from, last);
-      if (last.blue != null && last.red != null) {
-        const pair = {
-          type: "score_pair",
-          map: last.map || "unknown",
-          blue: last.blue,
-          red: last.red,
-          ts: evt.ts,
-          from
-        };
-        onEvent?.(pair);
-        lastScoresBySource.delete(from);
-        return;
+      if (evt.type === "score") {
+        if (evt.ts - last.ts > 9000) {
+          last = { map: last.map, blue: null, red: null, ts: evt.ts };
+        }
+        if (/blue/i.test(evt.team)) last.blue = evt.score;
+        if (/red/i.test(evt.team)) last.red = evt.score;
+        last.ts = evt.ts;
+        lastScoresBySource.set(from, last);
+        if (last.blue != null && last.red != null) {
+          const pair = {
+            type: "score_pair",
+            map: last.map || "unknown",
+            blue: last.blue,
+            red: last.red,
+            ts: evt.ts,
+            from
+          };
+          onEvent?.(pair);
+          lastScoresBySource.delete(from);
+          continue;
+        }
       }
+      onEvent?.(evt);
     }
-    onEvent?.(evt);
   });
   const listenPort = Number(opts.port || 27500);
   sock.bind(listenPort, "0.0.0.0", () => {

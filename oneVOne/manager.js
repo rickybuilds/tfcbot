@@ -253,6 +253,7 @@ class DuelManager {
       : joined.size === 2 ? "waiting_for_ready" : "waiting_for_players";
     this.updateReservation(serverIp, {
       status,
+      mapObserved: true,
       joined: [...joined],
       ready: [...new Set(reservation.ready || [])],
     });
@@ -325,6 +326,56 @@ class DuelManager {
       console.log(`[1v1] - match started id=${reservation.id} server=${reservation.serverKey || serverIp}`);
     }
     return true;
+  }
+
+  handleHldsActivity(evt) {
+    const entry = this.reservationFromSource(evt.from);
+    if (!entry) return false;
+    const [serverIp, reservation] = entry;
+    const expected = new Set((reservation.playerSteamIds || []).map(value => String(value).toUpperCase()));
+    if (expected.size !== 2) return false;
+
+    if (evt.type === "connect" || evt.type === "disconnect") {
+      const steam = String(evt.steamid || "").toUpperCase();
+      if (!expected.has(steam)) return false;
+      if (evt.type === "connect") {
+        const joined = new Set(reservation.joined || []);
+        joined.add(steam);
+        const status = reservation.status === "active"
+          ? "active"
+          : joined.size === 2 ? "waiting_for_ready" : "waiting_for_players";
+        this.updateReservation(serverIp, { joined: [...joined], status });
+        console.log(`[1v1] - player joined from HLDS id=${reservation.id} server=${reservation.serverKey || serverIp} joined=${joined.size}/2`);
+        if (joined.size === 2) {
+          this.clearTimer(reservation.id, "join");
+          if (status !== "active") this.setTimer(reservation.id, "ready", this.config.readyTimeoutMs, () => this.cancelActive(reservation.id, "ready_timeout"));
+        }
+        this.clearTimer(reservation.id, `disconnect:${steam}`);
+      } else {
+        console.warn(`[1v1] - player disconnected from HLDS id=${reservation.id} server=${reservation.serverKey || serverIp}; grace timer started`);
+        this.setTimer(reservation.id, `disconnect:${steam}`, this.config.disconnectGraceMs, () => this.cancelActive(reservation.id, "disconnect_timeout"));
+      }
+      return true;
+    }
+
+    if (evt.type === "kill") {
+      const killer = String(evt.killerSteamid || "").toUpperCase();
+      const victim = String(evt.victimSteamid || "").toUpperCase();
+      if (!reservation.mapObserved || killer === victim || !expected.has(killer) || !expected.has(victim)) return false;
+
+      // A normal HLDS kill record involving both assigned Steam IDs is direct
+      // proof that both players joined and the duel is already underway. This
+      // fallback keeps custom AMXX lifecycle logging from being a single point
+      // of failure for the join and ready timers.
+      this.clearTimer(reservation.id, "join");
+      this.clearTimer(reservation.id, "ready");
+      for (const steam of expected) this.clearTimer(reservation.id, `disconnect:${steam}`);
+      this.updateReservation(serverIp, { joined: [...expected], status: "active" });
+      console.log(`[1v1] - match activity observed from HLDS id=${reservation.id} server=${reservation.serverKey || serverIp} weapon=${evt.weapon || "unknown"}`);
+      return true;
+    }
+
+    return false;
   }
 
   updateReservation(serverIp, patch) {

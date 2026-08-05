@@ -479,6 +479,12 @@ startSpeedrunPlayerLinkSync({
       pairScores: true,
       pairWindowMs: 8000,
       }, async (evt) => {
+    // Give active duels first refusal on standard HLDS player activity. The
+    // queue handler may consume disconnect events, and duel timers must see
+    // those events (plus ordinary connect/kill evidence) before that happens.
+    if (["connect", "disconnect", "kill"].includes(evt.type)) {
+      if (await oneVOne.onHldsEvent(evt)) return;
+    }
     if (
       (evt.type === "say" || evt.type === "disconnect") &&
       typeof registry.handleHldsQueueEvent === "function"
