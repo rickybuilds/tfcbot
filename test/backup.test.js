@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 const Database = require("better-sqlite3");
 const { scheduleBackups } = require("../lib/backup");
 
@@ -38,8 +39,14 @@ test("backs up committed SQLite data that is still in the WAL", async t => {
 
   const files = fs.readdirSync(destination);
   assert.equal(files.length, 1);
+  assert.match(files[0], /__elo\.db\.gz$/);
 
-  snapshot = new Database(path.join(destination, files[0]), { readonly: true });
+  const compressed = fs.readFileSync(path.join(destination, files[0]));
+  assert.deepEqual([...compressed.subarray(0, 2)], [0x1f, 0x8b]);
+  const restored = path.join(dir, "restored.db");
+  fs.writeFileSync(restored, zlib.gunzipSync(compressed));
+
+  snapshot = new Database(restored, { readonly: true });
   assert.deepEqual(
     snapshot.prepare("SELECT player_id, rating FROM ratings").get(),
     { player_id: "player-1", rating: 1941 }

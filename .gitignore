@@ -131,5 +131,6 @@ test_api.js
 !/test/pickupReplayRecorder.test.js
 !/test/eloShadow.test.js
 !/test/backup.test.js
+!/test/mergeDiscordAccount.test.js
 /output/documents
 /.tmp
