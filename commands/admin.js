@@ -182,7 +182,7 @@ if (!isAuto) {
     const { determineServerKey } = require("../services/autoRecap");
 
     const dbMatch = elo.db.prepare(`
-      SELECT match_id, server_name, map_name
+      SELECT match_id, server_name, map_name, score_blue, score_red
       FROM matches
       WHERE match_id = ?
     `).get(String(matchId));
@@ -247,7 +247,14 @@ if (!isAuto) {
     if (zipResult?.zipPath) {
       await sendRecapWithDemos(message.client, config.channels.logs, {
         zipPath: zipResult.zipPath,
-        matchInfo: { matchId, map: mapNow, winner: result.toUpperCase() },
+        matchInfo: {
+          matchId,
+          map: mapNow,
+          winner: result.toUpperCase(),
+          server: serverKey,
+          scoreBlue: dbMatch?.score_blue ?? match.scoreBlue ?? match.blueScore,
+          scoreRed: dbMatch?.score_red ?? match.scoreRed ?? match.redScore,
+        },
         tfcstats: { url: tfcUrl },
         hampalyzer: { url: hampUrl },
       });
