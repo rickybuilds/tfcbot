@@ -132,14 +132,26 @@ function keyOf(ip) {
 }
 
 /* --------------------------- resolve server --------------------------- */
-function determineServerKey(serverIp) {
-  if (!serverIp) return "east";
-  const ipBase = String(serverIp).split(":")[0];
-  for (const [key, srv] of Object.entries(rconCfg)) {
-    const hostBase = String(srv.host || "").split(":")[0];
-if (hostBase === ipBase) return key;
+function determineServerKey(serverRef) {
+  if (!serverRef) return "east";
 
+  const value = String(serverRef).trim().toLowerCase();
+  const ipBase = value.split(":")[0];
+
+  for (const [key, srv] of Object.entries(rconCfg)) {
+    const hostBase = String(srv.host || "").split(":")[0].toLowerCase();
+    const serverName = String(srv.name || "").trim().toLowerCase();
+
+    if (
+      key.toLowerCase() === value ||
+      serverName === value ||
+      hostBase === ipBase
+    ) {
+      return key;
+    }
   }
+
+  console.warn(`[server resolve] Unknown server reference: ${serverRef}; defaulting to east`);
   return "east"; // fallback
 }
 
@@ -729,7 +741,10 @@ const capPlayer = evt.player || "unknown";
 		  `🧾 **Recorded Match** — ${mapNow}\n + ID: ${a.matchId}\n + 🔵 Blue ${totalBlue} | 🔴 Red ${totalRed} → **${winner.toUpperCase()}**`
 		).catch?.(() => {});
 
-await post(reportChannel, `!report ${a.matchId} ${winner} --auto`).catch?.(() => {});
+await post(
+  reportChannel,
+  `!report ${a.matchId} ${winner} --auto --score-blue=${totalBlue} --score-red=${totalRed}`
+).catch?.(() => {});
 console.log(`[autoRecap] Reporting ${a.matchId} (${winner}) --auto`);
 
 // 🧩 ensure serverName always set, even if armed entry missing

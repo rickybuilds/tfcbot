@@ -42,6 +42,13 @@ function register(reg, deps) {
     const matchId = (args.shift() || "").trim();
     const result  = (args.shift() || "").toLowerCase();
     const isAuto  = args.includes("--auto"); // 👈 detect autoRecap trigger
+    const scoreBlueArg = args.find(arg => arg.startsWith("--score-blue="));
+    const scoreRedArg = args.find(arg => arg.startsWith("--score-red="));
+    const scoreBlue = scoreBlueArg ? Number(scoreBlueArg.slice("--score-blue=".length)) : null;
+    const scoreRed = scoreRedArg ? Number(scoreRedArg.slice("--score-red=".length)) : null;
+    const hasAutoScores = isAuto &&
+      Number.isInteger(scoreBlue) && scoreBlue >= 0 &&
+      Number.isInteger(scoreRed) && scoreRed >= 0;
 
     if (!matchId || !["blue", "red", "tie"].includes(result)) {
       return message.channel.send("Usage: `!report <matchId> (blue|red|tie)`");
@@ -143,7 +150,10 @@ function register(reg, deps) {
       const emb = new EmbedBuilder()
         .setColor(result === "tie" ? 0xfee75c : result === "blue" ? 0x57f287 : 0xed4245)
         .setTitle(forceFix ? "Match Result Corrected" : "Match Reported")
-        .setDescription(`**${matchId}** — Winner: **${result.toUpperCase()}**`)
+        .setDescription(
+          `**${matchId}** — Winner: **${result.toUpperCase()}**` +
+          (hasAutoScores ? `\n🔵 ${scoreBlue}     🔴 ${scoreRed}` : "")
+        )
         .setTimestamp();
       await message.channel.send({ embeds: [emb] });
 
