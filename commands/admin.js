@@ -34,7 +34,7 @@ function register(reg, deps) {
     const chId = message.channel?.id;
     if (chId !== PICKUP_CH && chId !== ADMIN_CH) return;
 
-    if (!isAdmin(message)) {
+    if (!message.internalAutoReport && !isAdmin(message)) {
       return message.channel.send("❌ You don’t have permission to use this command.");
     }
 

@@ -741,11 +741,40 @@ const capPlayer = evt.player || "unknown";
 		  `🧾 **Recorded Match** — ${mapNow}\n + ID: ${a.matchId}\n + 🔵 Blue ${totalBlue} | 🔴 Red ${totalRed} → **${winner.toUpperCase()}**`
 		).catch?.(() => {});
 
-await post(
-  reportChannel,
-  `!report ${a.matchId} ${winner} --auto --score-blue=${totalBlue} --score-red=${totalRed}`
-).catch?.(() => {});
-console.log(`[autoRecap] Reporting ${a.matchId} (${winner}) --auto`);
+const autoReportArgs = [
+  a.matchId,
+  winner,
+  "--auto",
+  `--score-blue=${totalBlue}`,
+  `--score-red=${totalRed}`,
+];
+const autoReportText = `!report ${autoReportArgs.join(" ")}`;
+console.log(`[autoRecap] Internal report: ${autoReportText}`);
+
+try {
+  const reportCommand = ctx.registry?.get?.("report");
+  let reportChannelObject = client.channels.cache.get(reportChannel);
+  if (!reportChannelObject) {
+    reportChannelObject = await client.channels.fetch(reportChannel);
+  }
+
+  if (typeof reportCommand !== "function" || !reportChannelObject) {
+    throw new Error("report command or report channel is unavailable");
+  }
+
+  await reportCommand(
+    {
+      client,
+      channel: reportChannelObject,
+      content: autoReportText,
+      author: { bot: true, id: client.user?.id },
+      internalAutoReport: true,
+    },
+    autoReportArgs.slice()
+  );
+} catch (reportErr) {
+  console.error(`[autoRecap] Internal report failed for ${a.matchId}:`, reportErr);
+}
 
 // 🧩 ensure serverName always set, even if armed entry missing
 const resolvedKey = determineServerKey(evt.from || a?.serverIp);
