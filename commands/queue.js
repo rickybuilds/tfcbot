@@ -141,11 +141,14 @@ function queueLines(state, elo, privacy) {
 
   return state.queue.map(p => {
     try {
+      const registeredName = typeof elo?.getDisplayName === "function"
+        ? elo.getDisplayName(p.id, p.name)
+        : p.name;
       const base = formatPlayerName(
         state,
         elo,
         p.id,
-        p.name || `Player#${String(p.id).slice(-4)}`,
+        registeredName || `Player#${String(p.id).slice(-4)}`,
         privacy,
         false
       );
