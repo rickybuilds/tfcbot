@@ -25,7 +25,7 @@ if (process.env.TFC_RCON_CENTRAL_HOST) {
     host: process.env.TFC_RCON_CENTRAL_HOST,
     port: parseInt(process.env.TFC_RCON_CENTRAL_PORT || "27015", 10),
     password: process.env.TFC_RCON_CENTRAL_PASS,
-    url: "https://tinyurl.com/nonamecentrals",
+    url: "https://tinyurl.com/centralnnpickup",
     ssh: {
       host: process.env.HL_SSH_HOST_CENTRAL || process.env.HL_SSH_HOST,
       port: parseInt(process.env.HL_SSH_PORT || "22", 10),

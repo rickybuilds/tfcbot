@@ -6,9 +6,9 @@
 	"url": "http://tinyurl.com/eastnoname"
     },{
         "name": "TFC Central US Server",
-        "ip": "144.202.48.25:27015",
+        "ip": "64.177.123.157:27015",
         "password": "pickup",
-	"url": "https://tinyurl.com/nonamecentrals"
+	"url": "https://tinyurl.com/centralnnpickup"
     },{
         "name": "TFC West US Server",
         "ip": "66.42.67.218:27015",

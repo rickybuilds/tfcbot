@@ -119,6 +119,48 @@
         "capValue": 1,
         "scoreValue": 10
       }
+    ],
+    "proton_l": [
+      {
+        "trigger": "Blue_Cap",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red_Cap",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "voltage_lg": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "viridian": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
     ]
   }
 }
