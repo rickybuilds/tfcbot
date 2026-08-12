@@ -135,7 +135,7 @@ class PickupReplayRecorder {
 
   _log(level, event, data) {
     const fn = typeof this.logger[level] === "function" ? this.logger[level] : this.logger.log;
-    fn.call(this.logger, "[pickup-replay]", { event, ...data });
+    fn.call(this.logger, `[pickup-replay] ${JSON.stringify({ event, ...data })}`);
   }
 
   async _rconWithRetry(serverKey, command, identity, kind) {
