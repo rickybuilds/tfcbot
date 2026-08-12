@@ -120,6 +120,9 @@ function eligibleStreakPlayers(players, elo) {
 		return message.channel.send("⚠️ A vote is already being started, please wait...");
 	  }
 	  state.isVoteStarting = true;
+	  const voteStartToken = Symbol("vote-start");
+	  state.voteStartToken = voteStartToken;
+	  const voteStartCancelled = () => state.voteStartToken !== voteStartToken;
 
     try {
       if (!(await guardChannel(message, config.channels.pickup))) return;
@@ -169,6 +172,7 @@ function eligibleStreakPlayers(players, elo) {
 		  ? "**ADL ACTIVATED** — ADL map pool with **Bonus Elo Enabled**."
 		  : "Running **Standard** (insufficient ADL votes)."
       );
+	      if (voteStartCancelled()) return;
 
       const serverVoteDur = settings.getNumber("vote:server_duration", 10);
       const mapVoteDur = settings.getNumber("vote:map_duration", 10);
@@ -187,6 +191,7 @@ function eligibleStreakPlayers(players, elo) {
 	}
 
 	await notifyHldsVoteStarted(state.queueSnapshot, runRconCommand);
+	if (voteStartCancelled()) return;
 
       // Snapshot this for the full server-vote -> map-vote transition. The
       // dedicated pending value keeps !set locked even in the brief gap
@@ -201,6 +206,7 @@ function eligibleStreakPlayers(players, elo) {
 
 
 	console.log("[!fv] starting server vote…", serverOptions.length, "options");
+	if (voteStartCancelled()) return;
 	  await startVote(state, message, {
 	  title: "Server Vote",
 	  duration: serverVoteDur,
@@ -330,9 +336,12 @@ function eligibleStreakPlayers(players, elo) {
         state.isVotingInProgress = false;
       }
       await message.channel.send("❌ Something went wrong during the vote.");
-    } finally {
-      state.isVoteStarting = false;
+	  } finally {
+	    if (state.voteStartToken === voteStartToken) {
+	      state.voteStartToken = null;
+	      state.isVoteStarting = false;
       state.voteLock = false;
+	    }
       console.log("[!fv] voteLock released");
     }
 

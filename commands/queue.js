@@ -197,6 +197,11 @@ function register(reg, {
   const add = async (message, isAdl = false) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
+
+    if (state.isVotingInProgress || state.vote) {
+      console.log(`[queue] Ignored add from ${id} while vote is active`);
+      return;
+    }
 	// Prevent players currently in an active match from joining another queue
 	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
   const matchId = state.lockedPlayers.get(String(id));
@@ -293,15 +298,30 @@ if (ban) {
   }
 
   // Handle active vote removal cleanly
-  if (state.isVotingInProgress && state.vote) {
+  if (state.isVotingInProgress || state.vote) {
     try {
-      await state.vote.cancelVote(
-        `Player <@${id}> left during vote. Requeuing remaining players.`,
-        id
-      );
+      const reason = `Player <@${id}> left during vote. Requeuing remaining players.`;
+      if (state.vote?.cancelVote) {
+        await state.vote.cancelVote(reason, id);
+      } else {
+        // Vote startup is still awaiting its first Discord message. Cancel
+        // the in-flight runner and remove the player from both rosters.
+        state.voteStartToken = null;
+        state.queue = state.queue.filter(p => String(p.id) !== String(id));
+        if (Array.isArray(state.queueSnapshot)) {
+          state.queueSnapshot = state.queueSnapshot.filter(p => String(p.id) !== String(id));
+        }
+        state.vote = null;
+        state.isVotingInProgress = false;
+        state.pendingTeam1Starts = null;
+        state.voteLock = false;
+        state.isVoteStarting = false;
+        await message.channel.send(`⚠️ ${reason} Vote canceled.`);
+      }
 
       await postQueueBoard(message.channel, state, elo, privacy);
       try { await refreshBotName(message.client, state); } catch {}
+      try { reg.persistQueueSoon?.(); } catch {}
       console.log(`[queue] ${message.author.tag} left mid-vote — vote canceled, removed, and queue updated.`);
       return;
     } catch (err) {
