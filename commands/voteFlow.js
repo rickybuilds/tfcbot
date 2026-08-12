@@ -35,7 +35,6 @@ const adl = require("../lib/adl");
 
 // rank helper for streak trigger
 const { rankFromRating } = require("../lib/elo");
-console.log("[VOTEFLOW] Loaded state file:", require.resolve("../lib/state"));
 
 /* ------------------------- ADL map pool loader ------------------------- */
 	function loadAdlPool(file = process.env.ADL_MAPPOOL_FILE || "./mappool_adl.json") {

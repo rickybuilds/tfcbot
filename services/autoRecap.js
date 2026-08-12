@@ -19,11 +19,6 @@ const {
   normalizeTeam1Starts,
 } = require("../lib/teamStart");
 
-console.log("[AUTORECAP] Loaded state file:", require.resolve("../lib/state"));
-console.log("[AUTORECAP queueCheck] state.locks.servers =", state.locks?.servers);
-console.log("[AUTORECAP queueCheck] state.lockedServers =", state.lockedServers);
-console.log("[AUTORECAP queueCheck] autoRecap.locks =", state.autoRecap?.state?.locks?.servers);
-
 const armed = new Map();
 
 function getLiveStatePath(serverKey){return `/root/tfcbot/live_${serverKey}.json`;}

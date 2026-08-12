@@ -36,10 +36,14 @@ function createOneVOneSubsystem(deps) {
       console.log("[1v1] disabled (ONEVONE_ENABLED is not set)");
       return;
     }
-    console.log(`[1v1] enabled dryRun=${config.dryRun} serverSetup=${config.serverSetupEnabled}`);
     registerCommands(deps.registry, { config, manager, adminRoleId: deps.config.roles.admin });
-    console.log(`[1v1] restored pending challenges=${manager.restorePending()}`);
-    console.log(`[1v1] recovered active reservations=${manager.recoverActive()}`);
+    const pendingChallenges = manager.restorePending();
+    const activeReservations = manager.recoverActive();
+    console.log(
+      `[1v1] startup enabled=true dryRun=${config.dryRun} ` +
+      `serverSetup=${config.serverSetupEnabled} ` +
+      `pendingChallenges=${pendingChallenges} activeReservations=${activeReservations}`
+    );
   }
 
   async function onHldsEvent(evt) {

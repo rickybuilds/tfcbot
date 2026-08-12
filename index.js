@@ -6,7 +6,6 @@
 // ============================================================================
 
 require("dotenv").config();
-console.log("[MAIN] Loaded state file:", require.resolve("./lib/state"));
 
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const config = require("./config");
