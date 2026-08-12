@@ -201,7 +201,7 @@ function eligibleStreakPlayers(players, elo) {
 
 
 	console.log("[!fv] starting server vote…", serverOptions.length, "options");
-	await startVote(state, message, {
+	  await startVote(state, message, {
 	  title: "Server Vote",
 	  duration: serverVoteDur,
 	  kind: "server",
@@ -378,16 +378,22 @@ registry.set("cancelvote", async (message) => {
 		const now = Date.now();
 		const timeLeft = Math.max(0, Math.floor((h.endsAt - now) / 1000));
 		const eligible = h.eligible || [];
-		const voted = h.voted || new Set();
+		const voted = h.votedByUser instanceof Map
+		  ? new Set([...h.votedByUser.keys()].map(String))
+		  : new Set();
 
-		const missing = eligible.filter(uid => !voted.has(uid));
+		const missing = eligible.filter(uid => {
+		  const id = String(uid);
+		  return isRealDiscordId(id) && !id.startsWith("test_") && !voted.has(id);
+		});
 		if (missing.length === 0)
 		  return message.channel.send(`✅ Everyone has already voted (${timeLeft}s left).`);
 
 		const mentions = missing.map(id => `<@${id}>`).join(" ");
-		await message.channel.send(
-		  `⏰️ **Vote Reminder** — ${timeLeft}s remaining!\n${mentions}`
-		);
+		await message.channel.send({
+		  content: `⏰️ **Vote Reminder** — ${timeLeft}s remaining!\n${mentions}`,
+		  allowedMentions: { parse: ["users"] }
+		});
 	  } catch (e) {
 		console.error("[!vote reminder failed]", e);
 		await message.channel.send("❌ Failed to send vote reminder.");

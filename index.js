@@ -126,7 +126,7 @@ const deps = {
   state, 
   settings, 
   elo, 
-  privacy, 
+  privacy,
   matchesStore,
   banStore,
   steamLinks,
