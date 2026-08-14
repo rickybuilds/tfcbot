@@ -161,6 +161,34 @@
         "capValue": 1,
         "scoreValue": 10
       }
+    ],
+    "spaceape_l": [
+      {
+        "trigger": "Blue Cap Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Cap Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
+    ],
+    "orbit_tfp": [
+      {
+        "trigger": "Blue Capture Point",
+        "team": "Blue",
+        "capValue": 1,
+        "scoreValue": 10
+      },
+      {
+        "trigger": "Red Capture Point",
+        "team": "Red",
+        "capValue": 1,
+        "scoreValue": 10
+      }
     ]
   }
 }

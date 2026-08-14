@@ -99,7 +99,7 @@
     "key": "stormz2-lg-5175",
     "name": "stormz2_lg",
     "mirv": 2,
-    "tier": 3
+    "tier": 1
   },
   {
     "key": "siden-lg-3521",
@@ -194,12 +194,6 @@
   {
     "key": "foundry-b3-988e",
     "name": "foundry_b3",
-    "mirv": 1,
-    "tier": 1
-  },
-  {
-    "key": "stormz3-b5-5a4d",
-    "name": "stormz3_b5",
     "mirv": 1,
     "tier": 1
   }

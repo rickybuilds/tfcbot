@@ -3,17 +3,17 @@
         "name": "TFC East US Server",
         "ip": "108.61.128.120:27015",
         "password": "pickup",
-	"url": "http://tinyurl.com/eastnoname"
+	"url": "https://tinyurl.com/eastnoname"
     },{
         "name": "TFC Central US Server",
         "ip": "64.177.123.157:27015",
         "password": "pickup",
-	"url": "https://tinyurl.com/centralnnpickup"
+	"url": "https://tinyurl.com/nncentralpickup"
     },{
         "name": "TFC West US Server",
-        "ip": "66.42.67.218:27015",
+        "ip": "149.28.78.158:27015",
         "password": "pickup",
-        "url": "https://tinyurl.com/nonamewest"
+        "url": "https://tinyurl.com/nnpickupwest"
 }
 
 ]
