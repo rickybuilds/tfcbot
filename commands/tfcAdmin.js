@@ -170,7 +170,8 @@ async function getSteamNameMap() {
 async function reloadAdminsAllServers() {
   const results = [];
 
-  for (const key of Object.keys(servers)) {
+  for (const [key, server] of Object.entries(servers)) {
+    if (server.trackingOnly) continue;
     try {
       await runRconCommand(key, "amx_reloadadmins");
       results.push(`✅ ${key}`);

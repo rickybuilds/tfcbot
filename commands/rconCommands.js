@@ -5,6 +5,8 @@ const { EmbedBuilder } = require("discord.js");
 const servers = require("../config/rcon");
 
 const FORBIDDEN = ["quit", "exit", "restart"];
+const publicServerEntries = () =>
+  Object.entries(servers).filter(([, cfg]) => !cfg.trackingOnly);
 
 module.exports = {
   name: "rcon",
@@ -65,7 +67,7 @@ module.exports = {
           const embeds = [];
 
           for (const armedMatch of armedList) {
-            const matchedServer = Object.entries(servers).find(([k, cfg]) => {
+            const matchedServer = publicServerEntries().find(([k, cfg]) => {
               const ipBase = String(cfg.host || "").split(":")[0].toLowerCase();
               return String(armedMatch.serverIp || "").split(":")[0].toLowerCase() === ipBase;
             });
@@ -91,7 +93,7 @@ module.exports = {
         // 🧩 Case 3: nothing armed → show all live servers
         console.log("[!timeleft] No armed matches found, showing all servers");
         const embeds = [];
-        for (const [srvKey, srvCfg] of Object.entries(servers)) {
+        for (const [srvKey, srvCfg] of publicServerEntries()) {
           try {
             const rawStatus = await runRconCommand(srvKey, "status").catch(() => "");
             const rawTime = await runRconCommand(srvKey, "mp_timeleft").catch(() => "Unknown");
@@ -142,7 +144,11 @@ module.exports = {
 
     try {
       const serverKey = requestedServer && servers[requestedServer] ? requestedServer : null;
-      const targetServer = serverKey || Object.keys(servers)[0]; // fallback to first server if none provided
+      const targetServer = serverKey || publicServerEntries()[0]?.[0]; // fallback to first public server if none provided
+
+      if (!targetServer) {
+        return message.channel.send("❌ No public servers are configured.");
+      }
 
       const result = await runRconCommand(targetServer, command);
 

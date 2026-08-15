@@ -55,4 +55,30 @@ if (process.env.TFC_RCON_WEST_HOST) {
 }
 }
 
+// Skill servers share the same host as their competitive counterpart but run
+// on port 27016. Keep them out of servers.json: that file is the source for
+// pickup server voting. These internal entries exist only so HLDS log events
+// can be attributed to the correct server for player tracking.
+function addSkillTrackingServer(region, envPrefix) {
+  const base = servers[region];
+  const host = process.env[`${envPrefix}_SKILL_HOST`] || base?.host;
+  if (!host || !base) return;
+
+  const port = parseInt(process.env[`${envPrefix}_SKILL_PORT`] || "27016", 10);
+
+  servers[`${region}Skill`] = {
+    name: `${base.name} Skill Server`,
+    host,
+    port,
+    logSourcePort: port,
+    password:
+      process.env[`${envPrefix}_SKILL_PASS`] || base.password,
+    trackingOnly: true,
+  };
+}
+
+addSkillTrackingServer("east", "TFC_RCON_EAST");
+addSkillTrackingServer("central", "TFC_RCON_CENTRAL");
+addSkillTrackingServer("west", "TFC_RCON_WEST");
+
 module.exports = servers;

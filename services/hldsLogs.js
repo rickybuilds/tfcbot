@@ -19,7 +19,12 @@ function addressToIp(address) {
   return value.replace(/:\d+$/, "");
 }
 
-function serverNameForSource(source) {
+function serverNameForSource(source, sourcePort = null) {
+  const matchedKey = serverKeyForSource(source, sourcePort);
+  if (matchedKey && servers[matchedKey]) {
+    return servers[matchedKey].name || matchedKey;
+  }
+
   const sourceIp = addressToIp(source);
   for (const [key, server] of Object.entries(servers)) {
     if (addressToIp(server.host) === sourceIp) return server.name || key;
@@ -214,7 +219,7 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
             steamId,
             alias: evt.player,
             ip: evt.ip,
-            server: serverNameForSource(from),
+            server: serverNameForSource(from, rinfo.port),
             timestamp: evt.ts,
           });
         } catch (err) {
