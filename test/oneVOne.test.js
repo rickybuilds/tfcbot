@@ -22,6 +22,36 @@ test("reservation is atomic and mirrors legacy pickup lock", () => {
   assert.equal(reservations.release("1.2.3.4:27015", "duel-1").ok, true);
 });
 
+test("1v1 event lookup is endpoint-aware for same-host servers", () => {
+  const state = {
+    lockedServers: new Set(),
+    serverReservations: new Map([
+      ["1.2.3.4:27015", {
+        mode: "1v1",
+        serverKey: "east",
+        playerSteamIds: ["STEAM_0:1:1", "STEAM_0:1:2"],
+      }],
+    ]),
+  };
+  const manager = new DuelManager({
+    config: {},
+    state,
+    reservations: new ServerReservations(state),
+    steamLinks: {},
+  });
+
+  assert.equal(manager.reservationFromSource({
+    from: "1.2.3.4",
+    sourcePort: 27016,
+    serverKey: "eastSkill",
+  }), null);
+  assert.equal(manager.reservationFromSource({
+    from: "1.2.3.4",
+    sourcePort: 27015,
+    serverKey: "east",
+  })[1].serverKey, "east");
+});
+
 test("machine-readable match end parses and validates", () => {
   const event = parseOneVOneLogLine('[TFCBOT] 1V1_MATCH_END server=east map=ass_dm winner=STEAM_0:0:59055 loser=STEAM_0:1:12345 winner_score=50 loser_score=43 duration=487 kill_goal=50 rounds_won=1 rounds_required=1');
   assert.equal(event.type, "one_v_one_match_end");

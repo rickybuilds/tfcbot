@@ -120,10 +120,19 @@ function looseMapEqual(a, b) {
   return a === b || a.includes(b) || b.includes(a);
 }
 
-// ✅ Always strip ports so HLDS events + arm() match
-function keyOf(ip) {
-  if (!ip) return "default";
-  return String(ip).split(":")[0];
+function keyOf(serverRef) {
+  if (!serverRef) return "east";
+  const value = String(serverRef).trim().toLowerCase();
+  if (rconCfg[value]) return value;
+  return determineServerKey(serverRef) || `unresolved:${value}`;
+}
+
+function eventServerKey(evt) {
+  if (evt?.serverKey) return String(evt.serverKey);
+  // Synthetic/unit-test events without a source retain the historical default.
+  // Real UDP events always have from/sourcePort and must carry a resolved key.
+  if (!evt?.from && !evt?.sourcePort) return "east";
+  return null;
 }
 
 /* --------------------------- resolve server --------------------------- */
@@ -131,23 +140,25 @@ function determineServerKey(serverRef) {
   if (!serverRef) return "east";
 
   const value = String(serverRef).trim().toLowerCase();
-  const ipBase = value.split(":")[0];
+  if (rconCfg[value]) return value;
+  const endpoint = value.match(/^(.+):(\d+)$/);
+  const ipBase = endpoint ? endpoint[1] : value;
+  const requestedPort = endpoint ? Number(endpoint[2]) : null;
 
-  for (const [key, srv] of Object.entries(rconCfg)) {
+  const matches = Object.entries(rconCfg).filter(([key, srv]) => {
     const hostBase = String(srv.host || "").split(":")[0].toLowerCase();
     const serverName = String(srv.name || "").trim().toLowerCase();
 
-    if (
-      key.toLowerCase() === value ||
-      serverName === value ||
-      hostBase === ipBase
-    ) {
-      return key;
-    }
-  }
+    if (serverName === value) return true;
+    if (hostBase !== ipBase) return false;
+    return requestedPort == null || Number(srv.port) === requestedPort;
+  });
 
-  console.warn(`[server resolve] Unknown server reference: ${serverRef}; defaulting to east`);
-  return "east"; // fallback
+  if (matches.length === 1) return matches[0][0];
+  console.warn(
+    `[server resolve] ${matches.length ? "Ambiguous" : "Unknown"} server reference: ${serverRef}`
+  );
+  return null;
 }
 
 function attachAutoRecap(ctx, options = {}) {
@@ -215,7 +226,10 @@ function attachAutoRecap(ctx, options = {}) {
     team1StartsReason = null,
   }) {
     const serverKey = determineServerKey(serverIp);
-const k = keyOf(serverIp);
+    if (!serverKey || rconCfg[serverKey]?.trackingOnly) {
+      throw new Error(`Cannot arm pickup AutoRecap for unresolved/tracking-only server ${serverIp || "unknown"}`);
+    }
+    const k = serverKey;
 
     const previous = armed.get(k);
     if (previous?.timeout) clearTimeout(previous.timeout);
@@ -238,6 +252,7 @@ const k = keyOf(serverIp);
       liveScore: 0,
       lastCap: null,
       liveEvents: [],
+      mapInterrupted: false,
       files: [],
       done: false,
       timeout: setTimeout(() => disarm(serverIp), ttlMin * 60 * 1000),
@@ -338,13 +353,14 @@ const k = keyOf(serverIp);
 function unlockServer(serverIp) {
   try {
     if (!serverIp) return;
-    const ipOnly = String(serverIp).split(":")[0];
+    const identity = String(serverIp);
     let cleared = 0;
 
-    // 🧹 Clean from Set (supports full and stripped forms)
+    // Locks are endpoint identities. Never clear another logical server that
+    // happens to share the same host/IP.
     if (state?.lockedServers instanceof Set) {
       for (const val of [...state.lockedServers]) {
-        if (val === serverIp || val === ipOnly || val.startsWith(ipOnly)) {
+        if (String(val) === identity) {
           state.lockedServers.delete(val);
           cleared++;
         }
@@ -353,8 +369,8 @@ function unlockServer(serverIp) {
 
     // 🧹 Clean from unified map
     if (state?.locks?.servers && typeof state.locks.servers === "object") {
-      for (const [key, lock] of Object.entries(state.locks.servers)) {
-        if (key === serverIp || key === ipOnly || key.startsWith(ipOnly)) {
+      for (const [key] of Object.entries(state.locks.servers)) {
+        if (String(key) === identity) {
           delete state.locks.servers[key];
           cleared++;
         }
@@ -397,12 +413,12 @@ function unlockPlayersForMatch(matchId) {
   }
 }
 
-  function disarm(serverIp) {
-    const k = keyOf(serverIp);
+  function disarm(serverRef) {
+    const k = keyOf(serverRef);
     const a = armed.get(k);
     if (a?.timeout) clearTimeout(a.timeout);
     armed.delete(k);
-	unlockServer(serverIp);
+	unlockServer(a?.serverIp || serverRef);
     return a?.matchId ? unlockPlayersForMatch(a.matchId) : [];
   }
 
@@ -461,11 +477,10 @@ function updateArmedMap(matchId, newMap) {
       try {
         unlockPlayersForMatch(matchId);
 
-// 🧩 Try both IP and IP:PORT keys
 try {
-  const armedEntry = a?.serverIp || k;
-  unlockServer(armedEntry); // full ip:port
-  unlockServer(String(armedEntry).split(":")[0]); // plain ip fallback
+  // Server locks are endpoint-scoped. Never fall back to a bare IP here:
+  // pickup and SKILLS can intentionally share the same host.
+  unlockServer(a?.serverIp || k);
 } catch (err) {
   console.warn(`[autoRecap] unlock failed for ${matchId}:`, err);
 }
@@ -489,20 +504,42 @@ try {
 }
 
   async function handleEvent(evt) {
-    const k = keyOf(evt.from);
+    const k = eventServerKey(evt);
+    if (!k || rconCfg[k]?.trackingOnly) {
+      console.warn(
+        `[autoRecap] ignored HLDS event from unresolved/tracking-only source ` +
+        `${evt?.from || "unknown"}:${evt?.sourcePort || "?"}`
+      );
+      return;
+    }
     const a = armed.get(k);
     if (!a) return;
+
+    if (a.serverKey !== k) {
+      console.warn(`[autoRecap] ignored HLDS event for ${evt?.serverKey || "unknown"}; armed=${a.serverKey}`);
+      return;
+    }
 
   // TTL still disarms stuck matches, but never interferes with voice bots
   if (Date.now() - a.t0 > ttlMin * 60 * 1000) {
     post(recapChannel, `⚠️ TTL expired for match ${a.matchId}`).catch?.(() => {});
-    disarm(evt.from);
+    disarm(a.serverKey);
     return;
   }
 
     if (evt.type === "map") {
+      if (!looseMapEqual(evt.name, a.map)) {
+        a.mapInterrupted = true;
+        console.warn(
+          `[autoRecap] unexpected map for ${a.matchId} on ${a.serverKey}: ` +
+          `${evt.name} (expected ${a.map}); pickup state preserved`
+        );
+        return;
+      }
+
       a.lastMapSeen = evt.name;
       a.mapStartTime = Date.now();
+      a.mapInterrupted = false;
 
       a.liveCaps = 0;
       a.liveScore = 0;
@@ -513,22 +550,19 @@ try {
       console.log(`[autoRecap] reset liveCaps for ${a.matchId} on ${evt.name}`);
       await post(recapChannel, `🗺️ Map: **${evt.name}**`).catch?.(() => {});
 
-      if (looseMapEqual(evt.name, a.map)) {
-        const roundNumber = Math.min((a.half || 0) + 1, 2);
-        try {
-          // A map load creates a fresh AMXX plugin instance. Its durable bot row may
-          // still say "recording" from the instance that was aborted by map_change,
-          // so explicitly start again and let AMXX replace this round's artifacts.
-          await recorder.start(a.serverKey, a.matchId, roundNumber, { restart: true });
-        } catch (err) {
-          console.error("[autoRecap] Pickup replay start blocked live setup:", err.message);
-          await post(recapChannel, `🚨 Replay recorder failed to start for **${a.matchId}** round ${roundNumber}; live setup is paused.`).catch?.(() => {});
-          return;
-        }
+      const roundNumber = Math.min((a.half || 0) + 1, 2);
+      try {
+        // A map load creates a fresh AMXX plugin instance. Its durable bot row may
+        // still say "recording" from the instance that was aborted by map_change,
+        // so explicitly start again and let AMXX replace this round's artifacts.
+        await recorder.start(a.serverKey, a.matchId, roundNumber, { restart: true });
+      } catch (err) {
+        console.error("[autoRecap] Pickup replay start failed; state remains authoritative:", err.message);
+        await post(recapChannel, `🚨 Replay recorder failed to start for **${a.matchId}** round ${roundNumber}; live setup is paused.`).catch?.(() => {});
       }
 
       // 🎙️ Rule 1: arm voice bots when the correct match map loads
-		if (!a.voiceArmed && looseMapEqual(evt.name, a.map)) {
+      if (!a.voiceArmed) {
 		  try {
 		    await setStartingOrderHostname(a);
 		  } catch (err) {
@@ -559,10 +593,10 @@ try {
 /* -------------------------------------------------------------------------- */
 /* Added this on 5/27/26 */
 /* -------------------------------------------------------------------------- */
-  if (evt.type === "capture") {
+    if (evt.type === "capture") {
 
   // ignore captures before actual map start
-  if (!a.lastMapSeen) {
+  if (!a.lastMapSeen || a.mapInterrupted) {
     console.log(
       `[autoRecap] ignoring prematch capture for ${a.matchId}`
     );
@@ -623,8 +657,15 @@ const capPlayer = evt.player || "unknown";
 /* -------------------------------------------------------------------------- */
 
     if (evt.type === "score_pair") {
+	  if (a.mapInterrupted) {
+		console.warn(`[autoRecap] ignored score_pair while ${a.matchId} is on an unexpected map`);
+		return;
+	  }
 	  const mapNow = a.lastMapSeen || a.map;
-	  if (!looseMapEqual(mapNow, a.map)) return;
+	  if (!looseMapEqual(mapNow, a.map)) {
+		console.warn(`[autoRecap] ignored score_pair for unexpected map ${mapNow}; expected ${a.map}`);
+		return;
+	  }
 
 	  const blue = Number(evt.blue);
 	  const red = Number(evt.red);
@@ -635,7 +676,9 @@ const capPlayer = evt.player || "unknown";
 		  return;
 		}
 
-		// 🕒 Time since map start
+		// 🕒 Time since the current expected pickup map started. This safeguard is
+		// evaluated before the authoritative commit, so later replay/map work cannot
+		// make an already-valid half become "too late".
 		const elapsedMin = (Date.now() - (a.mapStartTime || a.t0)) / 60000;
 
 		// 🧩 Skip Half 1 if it happens too soon after map start (warmup)
@@ -646,79 +689,69 @@ const capPlayer = evt.player || "unknown";
 			);
 			return;
 		  }
-		  // optional: you can skip *any* early score regardless of value if you want strict 15min gating
-		  // return;
 		}
-
-      const scoreSignature = `${blue}:${red}:${a.half}`;
-      if (a.lastScorePair?.signature === scoreSignature && Date.now() - a.lastScorePair.at < 5000) {
-        return;
-      }
-      a.lastScorePair = { signature: scoreSignature, at: Date.now() };
 
       const completedRound = Math.min((a.half || 0) + 1, 2);
-      try {
-        await recorder.stop(a.serverKey, a.matchId, completedRound);
-      } catch (err) {
-        console.error("[autoRecap] Pickup replay stop blocked round teardown:", err.message);
-        await post(recapChannel, `🚨 Replay recorder failed to stop for **${a.matchId}** round ${completedRound}; map reset/teardown is paused.`).catch?.(() => {});
+      if (
+        a.lastAcceptedScorePair?.round === completedRound &&
+        a.lastAcceptedScorePair.blue === blue &&
+        a.lastAcceptedScorePair.red === red &&
+        Date.now() - Number(a.lastAcceptedScorePair.at || 0) < 5000
+      ) {
         return;
       }
+      a.lastScorePair = { signature: `${blue}:${red}:${completedRound}`, at: Date.now() };
 
-	  a.half += 1;
+      // Commit the half before replay/RCON work. This is the authoritative
+      // transition and is intentionally synchronous/idempotent in this queue.
+	  a.half = completedRound;
+	  a.lastAcceptedScorePair = { round: completedRound, blue, red, at: Date.now() };
+	  a.halfScores.push({ blue, red });
+	  a.liveCaps = 0;
+	  a.liveScore = 0;
+	  a.lastCap = null;
+	  a.liveEvents = [];
+	  writeLiveState(a);
 
-	  const blueScore = blue || 0;
-	  const redScore = red || 0;
-
-	  if (a.half === 1) {
-		if (Date.now() - a.t0 > windowMin * 60 * 1000) {
-		  post(recapChannel, `⚠️ Ignored Half 1 — too late`).catch?.(() => {});
-		  disarm(evt.from);
-		  return;
-		}
-
-    a.halfScores.push({ blue: blueScore, red: redScore });
-
-    a.liveCaps = 0;
-    a.liveScore = 0;
-    a.lastCap = null;
-    a.liveEvents = [];
-
-    writeLiveState(a);
+	  if (completedRound === 1) {
 		post(
 		  recapChannel,
-		  `⏱️ Half 1 saved — ${mapNow} (Match ${a.matchId}): 🔵 ${blueScore} / 🔴 ${redScore}`
+		  `⏱️ Half 1 saved — ${mapNow} (Match ${a.matchId}): 🔵 ${blue} / 🔴 ${red}`
 		).catch?.(() => {});
+	  }
 
+	  try {
+		await recorder.stop(a.serverKey, a.matchId, completedRound);
+	  } catch (err) {
+		console.error("[autoRecap] Pickup replay stop failed after state commit:", err.message);
+		await post(recapChannel, `🚨 Replay recorder failed to stop for **${a.matchId}** round ${completedRound}; authoritative match state was retained.`).catch?.(() => {});
+	  }
+
+	  if (completedRound === 1) {
 		try {
-		  const serverKey = determineServerKey(evt.from);
-		  const a = armed.get(keyOf(evt.from));
-		  if (!a) return;
-
-		  const label = serverKey.toUpperCase();
+		  const label = a.serverKey.toUpperCase();
 		  const round1OffenseTeam =
 		    getTeamStartPlan(a.team1Starts).round1.offenseTeam === "team1"
 		      ? "Team 1"
 		      : "Team 2";
 		  const round1OffenseScore =
-		    round1OffenseTeam === "Team 1" ? blueScore : redScore;
+		    round1OffenseTeam === "Team 1" ? blue : red;
 		  await rconCommand(
-		    serverKey,
+		    a.serverKey,
 		    `hostname "fun stuff ${label} - ${round1OffenseTeam} Round 1 Score - ${round1OffenseScore}"`
 		  );
-		  await rconCommand(serverKey, `amx_map ${mapNow}`);
+		  await rconCommand(a.serverKey, `amx_map ${mapNow}`);
 
 		  post(recapChannel, `🔄 Restarting map **${mapNow}** for Half 2...`).catch?.(() => {});
 		} catch (e) {
-		  console.error("[autoRecap restartMap] failed:", e);
-		  post(recapChannel, "⚠️ Failed to restart map for Half 2.").catch?.(() => {});
+		  console.error("[autoRecap restartMap] failed after Half 1 commit:", e);
+		  post(recapChannel, "⚠️ Failed to restart map for Half 2; Half 1 remains committed.").catch?.(() => {});
 		}
 		return;
 	  }
 
-	  if (a.half === 2) {
-		a.halfScores.push({ blue: blueScore, red: redScore });
-    writeLiveState(a);
+	  if (completedRound === 2) {
+		writeLiveState(a);
 		const h1 = a.halfScores[0] || { blue: 0, red: 0 };
 		const h2 = a.halfScores[1] || { blue: 0, red: 0 };
 
@@ -772,7 +805,7 @@ try {
 }
 
 // 🧩 ensure serverName always set, even if armed entry missing
-const resolvedKey = determineServerKey(evt.from || a?.serverIp);
+const resolvedKey = a.serverKey;
 const resolvedName = rconCfg[resolvedKey]?.name || resolvedKey.toUpperCase();
 console.log(`[autoRecap] Building embed for ${a?.matchId} on ${resolvedKey.toUpperCase()} (${resolvedName})`);
 
@@ -782,7 +815,7 @@ try {
   await new Promise(r => setTimeout(r, 3000)); // short buffer to let HLTV close files
 
   let zipResult = null;
-  const hltvServerKey = determineServerKey(evt.from);
+  const hltvServerKey = a.serverKey;
   try {
     zipResult = await fetchAndZipRecentDemos({
       mapName: mapNow,
@@ -816,7 +849,7 @@ try {
   await new Promise(r => setTimeout(r, 4000)); // ⏳ wait 4s for logs to flush
 
   // ✅ NEW: detect which server to pull from
-  const serverKey = determineServerKey(evt.from);
+  const serverKey = a.serverKey;
   console.log(`[autoRecap] Uploading logs for ${a.matchId} on ${serverKey}`);
   console.log("[autoRecap -> discordUpload] Sending matchInfo:", {
   server: serverKey,
@@ -905,7 +938,6 @@ await sendRecapWithDemos(client, logsChannel, {
     serverKey ||
     a?.serverKey ||
     a?.serverName ||
-    determineServerKey(evt.from) ||
     "east";
 
   console.log("[autoRecap -> discordUpload] Fallback matchInfo:", {
@@ -970,10 +1002,10 @@ setTimeout(() => {
     console.warn("[autoRecap delayed unlock failed]", e);
   }
 
-  const current = armed.get(keyOf(evt.from));
+  const current = armed.get(a.serverKey);
   const unlockedIds =
     String(current?.matchId) === String(a.matchId)
-      ? disarm(evt.from)
+       ? disarm(a.serverKey)
       : unlockPlayersForMatch(a.matchId);
   if (unlockedIds.length) {
     post(
@@ -989,7 +1021,7 @@ setTimeout(() => {
   }
 
   function onEvent(evt) {
-    const key = keyOf(evt?.from);
+    const key = eventServerKey(evt) || `unresolved:${evt?.from || "unknown"}:${evt?.sourcePort || "?"}`;
     const previous = eventQueues.get(key) || Promise.resolve();
     const current = previous.catch(() => {}).then(() => handleEvent(evt));
     eventQueues.set(key, current);

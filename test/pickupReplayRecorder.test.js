@@ -7,7 +7,8 @@ const {
   PickupReplayRecorder,
   validateIdentity,
 } = require("../services/pickupReplayRecorder");
-const { attachAutoRecap } = require("../services/autoRecap");
+const { attachAutoRecap, armed } = require("../services/autoRecap");
+const rconServers = require("../config/rcon");
 const { sendRecapWithDemos } = require("../services/discordUpload");
 
 const quietLogger = { info() {}, warn() {}, error() {}, log() {} };
@@ -239,6 +240,97 @@ test("autoRecap starts before spectator setup and stops before the round-two map
   assert.ok(order.indexOf("stop:ordered:1") < order.indexOf("amx_map shutdown2"));
   await autoRecap.disarmByMatchId("ordered");
   db.close();
+});
+
+function autoRecapHarness({ stopFails = false } = {}) {
+  const db = new Database(":memory:");
+  const commands = [];
+  const channel = { async send() {} };
+  const recorder = {
+    async reconcileAll() {},
+    async start(serverKey, matchId, round) {
+      commands.push({ type: "start", serverKey, matchId, round });
+    },
+    async stop(serverKey, matchId, round) {
+      commands.push({ type: "stop", serverKey, matchId, round });
+      if (stopFails) throw new Error("simulated replay stop failure");
+    },
+  };
+  const client = {
+    channels: {
+      cache: { get: () => channel },
+      fetch: async () => channel,
+    },
+  };
+  const autoRecap = attachAutoRecap(
+    { client, matchesStore: { db } },
+    {
+      recorder,
+      startVoiceBots: async () => {},
+      stopVoiceBots: async () => {},
+      runRconCommand: async (serverKey, command) => commands.push({ type: "rcon", serverKey, command }),
+    }
+  );
+  autoRecap.armFromMatchReady({ matchId: "XARD55", map: "blutopia_tfp", serverIp: "east" });
+  return { autoRecap, commands, db };
+}
+
+test("SKILLS map events do not mutate pickup AutoRecap state", async () => {
+  const skillKey = Object.keys(rconServers).find(key => rconServers[key].trackingOnly);
+  assert.ok(skillKey, "a tracking-only SKILLS server must be configured");
+  const h = autoRecapHarness();
+  await h.autoRecap.onEvent({ type: "map", name: "blutopia_tfp", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  const before = armed.get("east");
+  before.liveCaps = 3;
+  before.liveScore = 30;
+  await h.autoRecap.onEvent({ type: "map", name: "raiden9", serverKey: skillKey, from: "shared-host", sourcePort: 27016 });
+  const after = armed.get("east");
+  assert.equal(after.lastMapSeen, "blutopia_tfp");
+  assert.equal(after.liveCaps, 3);
+  assert.equal(after.liveScore, 30);
+  assert.equal(after.mapInterrupted, false);
+  await h.autoRecap.disarmByMatchId("XARD55");
+  h.db.close();
+});
+
+test("pickup Half 1 is accepted after SKILLS activity and reload starts Round 2", async () => {
+  const skillKey = Object.keys(rconServers).find(key => rconServers[key].trackingOnly);
+  const h = autoRecapHarness();
+  await h.autoRecap.onEvent({ type: "map", name: "blutopia_tfp", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  await h.autoRecap.onEvent({ type: "map", name: "raiden9", serverKey: skillKey, from: "shared-host", sourcePort: 27016 });
+  await h.autoRecap.onEvent({ type: "score_pair", map: "blutopia_tfp", blue: 80, red: 0, serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  assert.equal(armed.get("east").half, 1);
+  assert.deepEqual(armed.get("east").halfScores, [{ blue: 80, red: 0 }]);
+  await h.autoRecap.onEvent({ type: "map", name: "blutopia_tfp", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  const starts = h.commands.filter(command => command.type === "start" && command.matchId === "XARD55");
+  assert.equal(starts.at(-1).round, 2);
+  await h.autoRecap.disarmByMatchId("XARD55");
+  h.db.close();
+});
+
+test("replay stop failure cannot discard a committed Half 1", async () => {
+  const h = autoRecapHarness({ stopFails: true });
+  await h.autoRecap.onEvent({ type: "map", name: "blutopia_tfp", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  await h.autoRecap.onEvent({ type: "score_pair", map: "blutopia_tfp", blue: 80, red: 0, serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  assert.equal(armed.get("east").half, 1);
+  assert.deepEqual(armed.get("east").halfScores, [{ blue: 80, red: 0 }]);
+  await h.autoRecap.disarmByMatchId("XARD55");
+  h.db.close();
+});
+
+test("unexpected pickup map preserves pending live state until recovery", async () => {
+  const h = autoRecapHarness();
+  await h.autoRecap.onEvent({ type: "map", name: "blutopia_tfp", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  const active = armed.get("east");
+  active.liveCaps = 4;
+  active.liveScore = 40;
+  await h.autoRecap.onEvent({ type: "map", name: "raiden9", serverKey: "east", from: "shared-host", sourcePort: 27015 });
+  assert.equal(active.lastMapSeen, "blutopia_tfp");
+  assert.equal(active.liveCaps, 4);
+  assert.equal(active.liveScore, 40);
+  assert.equal(active.mapInterrupted, true);
+  await h.autoRecap.disarmByMatchId("XARD55");
+  h.db.close();
 });
 
 test("feature flag disabled sends no recorder commands", async () => {

@@ -86,3 +86,27 @@ test("!rs remains available when the server is on a different map", () => {
   assert.equal(disarmIfAlreadyOnRequestedMap(state, rs), null);
   assert.equal(rs.used, false);
 });
+
+test("same-host SKILLS map events cannot consume a pickup restart request", () => {
+  const state = {
+    restartRequest: {
+      serverIp: "192.0.2.210:27015",
+      serverKey: "pickup",
+      map: "blutopia_tfp",
+      used: false,
+    },
+  };
+
+  const result = recordMapEvent(state, {
+    type: "map",
+    from: "192.0.2.210",
+    sourcePort: 27016,
+    serverKey: "pickupSkill",
+    name: "raiden9",
+  });
+
+  assert.equal(result, null);
+  assert.equal(state.restartRequest.used, false);
+  assert.equal(currentMapFor(state, "192.0.2.210:27015", "pickup"), null);
+  assert.equal(currentMapFor(state, "192.0.2.210:27016", "pickupSkill"), "raiden9");
+});

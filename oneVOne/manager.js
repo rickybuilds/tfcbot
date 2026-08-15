@@ -207,10 +207,27 @@ class DuelManager {
     return restored;
   }
 
+  eventMatchesReservation(serverIp, reservation, evt) {
+    if (evt?.serverKey && reservation?.serverKey) {
+      return String(evt.serverKey) === String(reservation.serverKey);
+    }
+
+    const configured = String(serverIp || "").trim();
+    const configuredHost = configured.split(":")[0];
+    const configuredPort = configured.includes(":") ? Number(configured.split(":").at(-1)) : null;
+    const eventHost = String(evt?.from || "").trim().split(":")[0];
+    const eventPort = Number(evt?.sourcePort);
+
+    if (!configuredHost || configuredHost !== eventHost) return false;
+    if (Number.isFinite(configuredPort) && Number.isFinite(eventPort)) {
+      return configuredPort === eventPort;
+    }
+    return true;
+  }
+
   findReservationForEvent(evt) {
-    const from = String(evt.from || "").split(":")[0];
     for (const [serverIp, reservation] of this.state.serverReservations || []) {
-      if (String(serverIp).split(":")[0] !== from || reservation.mode !== "1v1") continue;
+      if (!this.eventMatchesReservation(serverIp, reservation, evt) || reservation.mode !== "1v1") continue;
       const expected = new Set((reservation.playerSteamIds || []).map(value => String(value).toUpperCase()));
       if (expected.size !== 2 || !expected.has(String(evt.winner).toUpperCase()) || !expected.has(String(evt.loser).toUpperCase())) {
         return { ok: false, reason: "steam_mismatch", reservation };
@@ -221,9 +238,8 @@ class DuelManager {
   }
 
   recordLogFile(evt) {
-    const from = String(evt.from || "").split(":")[0];
     for (const [serverIp, reservation] of this.state.serverReservations || []) {
-      if (reservation.mode !== "1v1" || String(serverIp).split(":")[0] !== from) continue;
+      if (reservation.mode !== "1v1" || !this.eventMatchesReservation(serverIp, reservation, evt)) continue;
       const files = new Set(reservation.logFiles || []);
       files.add(evt.file);
       const updated = Object.freeze({ ...reservation, logFiles: [...files] });
@@ -233,14 +249,15 @@ class DuelManager {
     return false;
   }
 
-  reservationFromSource(from) {
-    const ip = String(from || "").split(":")[0];
-    return [...(this.state.serverReservations || [])].find(([serverIp, value]) => value.mode === "1v1" && String(serverIp).split(":")[0] === ip) || null;
+  reservationFromSource(evt) {
+    return [...(this.state.serverReservations || [])].find(([serverIp, value]) =>
+      value.mode === "1v1" && this.eventMatchesReservation(serverIp, value, evt)
+    ) || null;
   }
 
   async handleMap(evt) {
     if (String(evt.name).toLowerCase() !== String(this.config.map).toLowerCase()) return false;
-    const entry = this.reservationFromSource(evt.from);
+    const entry = this.reservationFromSource(evt);
     if (!entry) return false;
     const [serverIp, reservation] = entry;
     console.log(`[1v1] - expected map observed id=${reservation.id} server=${reservation.serverKey || serverIp} map=${evt.name}`);
@@ -289,7 +306,7 @@ class DuelManager {
   }
 
   handleLifecycle(evt) {
-    const entry = this.reservationFromSource(evt.from);
+    const entry = this.reservationFromSource(evt);
     if (!entry) return false;
     const [serverIp, reservation] = entry;
     const steam = String(evt.steamid || "").toUpperCase();
@@ -329,7 +346,7 @@ class DuelManager {
   }
 
   handleHldsActivity(evt) {
-    const entry = this.reservationFromSource(evt.from);
+    const entry = this.reservationFromSource(evt);
     if (!entry) return false;
     const [serverIp, reservation] = entry;
     const expected = new Set((reservation.playerSteamIds || []).map(value => String(value).toUpperCase()));

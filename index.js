@@ -42,7 +42,7 @@ const removeadl = require("./commands/removeadl");
 const health    = require("./commands/health");
 
 // HLDS log listener + auto-recap
-const { startHldsLogReceiver } = require("./services/hldsLogs");
+const { startHldsLogReceiver, isPickupServerKey } = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
@@ -479,6 +479,16 @@ startSpeedrunPlayerLinkSync({
       pairScores: true,
       pairWindowMs: 8000,
       }, async (evt) => {
+    // hldsLogs has already performed tracker/identity writes. Only configured
+    // pickup endpoints may cross this boundary into gameplay consumers.
+    if (!isPickupServerKey(evt?.serverKey)) {
+      console.warn(
+        `[HLDS route] tracker-only/unresolved source blocked from pickup lifecycle: ` +
+        `${evt?.serverKey || "unknown"} ${evt?.from || "?"}:${evt?.sourcePort || "?"}`
+      );
+      return;
+    }
+
     // Give active duels first refusal on standard HLDS player activity. The
     // queue handler may consume disconnect events, and duel timers must see
     // those events (plus ordinary connect/kill evidence) before that happens.
@@ -518,10 +528,11 @@ startSpeedrunPlayerLinkSync({
         return;
       }
 
-      const armedIp = normalizeIp(rs.serverIp);
-      const evtIp = normalizeIp(evt.from);
+      const wrongServer = rs.serverKey && evt.serverKey
+        ? rs.serverKey !== evt.serverKey
+        : normalizeIp(rs.serverIp) !== normalizeIp(evt.from);
 
-      if (armedIp !== evtIp) {
+      if (wrongServer) {
         console.log(`[!rs] denied reason=wrong_server armed=${rs.serverIp} from=${evt.from}`);
         return;
       }
@@ -561,7 +572,7 @@ startSpeedrunPlayerLinkSync({
       // so simultaneous chat packets cannot both trigger a restart.
       rs.used = true;
 
-      const serverKey = determineServerKey(rs.serverIp);
+      const serverKey = rs.serverKey || determineServerKey(rs.serverIp);
 
       console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
       const restartMsg =

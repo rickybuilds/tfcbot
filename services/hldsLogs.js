@@ -46,10 +46,25 @@ function serverKeyForSource(source, sourcePort = null) {
   });
   return exact?.[0] || null;
 }
+
+function sourceKeyForSource(source, sourcePort = null) {
+  const serverKey = serverKeyForSource(source, sourcePort);
+  if (serverKey) return serverKey;
+  const ip = addressToIp(source);
+  return `${ip}:${Number(sourcePort) || "?"}`;
+}
+
+function isPickupServerKey(serverKey) {
+  return Boolean(serverKey && servers[serverKey] && !servers[serverKey].trackingOnly);
+}
+
+function isTrackingOnlyServerKey(serverKey) {
+  return Boolean(serverKey && servers[serverKey]?.trackingOnly);
+}
 /* -------------------------------------------------------------------------- */
 /* Log Parser */
 /* -------------------------------------------------------------------------- */
-function parseLine(raw, currentLogFile = null) {
+function parseLine(raw, currentLogFile = null, trackingKey = null) {
   let s = String(raw).trim();
   s = s.replace(/^[^\x20-\x7E]*/g, "");
   const oneVOneEvent = parseOneVOneLogLine(s);
@@ -79,9 +94,10 @@ function parseLine(raw, currentLogFile = null) {
     const team = /blue/i.test(teamRaw) ? "Blue" : /red/i.test(teamRaw) ? "Red" : null;
     if (!team) {
       if (!global._teamFileTrack) global._teamFileTrack = {};
-      if (!global._teamFileTrack[currentLogFile]) global._teamFileTrack[currentLogFile] = 0;
-      let order = ++global._teamFileTrack[currentLogFile];
-      if (order > 2) order = global._teamFileTrack[currentLogFile] = 1;
+      const teamTrackKey = `${trackingKey || "default"}:${currentLogFile || "unknown"}`;
+      if (!global._teamFileTrack[teamTrackKey]) global._teamFileTrack[teamTrackKey] = 0;
+      let order = ++global._teamFileTrack[teamTrackKey];
+      if (order > 2) order = global._teamFileTrack[teamTrackKey] = 1;
       return { type: "score", team: order === 1 ? "Blue" : "Red", score: Number(mScore[2]), raw: s, halfOrder: order };
     }
     return { type: "score", team, score: Number(mScore[2]), raw: s };
@@ -168,6 +184,43 @@ return null;
 /* UDP Listener + Score Pairing */
 /* -------------------------------------------------------------------------- */
 const currentLogFileBySource = new Map();
+
+function updateScorePair(lastScoresBySource, evt) {
+  const sourceKey = evt.sourceKey || sourceKeyForSource(evt.from, evt.sourcePort);
+  let last = lastScoresBySource.get(sourceKey) || { map: null, blue: null, red: null, ts: 0 };
+
+  if (evt.type === "map") {
+    last = { map: evt.name, blue: null, red: null, ts: evt.ts };
+    lastScoresBySource.set(sourceKey, last);
+    return null;
+  }
+
+  if (evt.type !== "score") return null;
+  if (evt.ts - last.ts > 9000) {
+    last = { map: last.map, blue: null, red: null, ts: evt.ts };
+  }
+  if (/blue/i.test(evt.team)) last.blue = evt.score;
+  if (/red/i.test(evt.team)) last.red = evt.score;
+  last.ts = evt.ts;
+  lastScoresBySource.set(sourceKey, last);
+
+  if (last.blue == null || last.red == null) return null;
+  const pair = {
+    type: "score_pair",
+    map: last.map || "unknown",
+    blue: last.blue,
+    red: last.red,
+    ts: evt.ts,
+    from: evt.from,
+    sourcePort: evt.sourcePort,
+    serverKey: evt.serverKey,
+    sourceKey,
+    trackingOnly: evt.trackingOnly,
+  };
+  lastScoresBySource.delete(sourceKey);
+  return pair;
+}
+
 function startHldsLogReceiver(client, opts = {}, onEvent) {
   if (process.env.NO_HLDS_LISTENER === "1") {
     return { close: () => {} };
@@ -197,19 +250,25 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
     if (allowedIPs.length && !allowedIPs.includes(from)) return;
     const records = String(msg).split(/\r?\n/).filter(record => record.trim());
     for (const record of records) {
-      const currentLogFile = currentLogFileBySource.get(from) || null;
-      const parsed = parseLine(record, currentLogFile);
+      const sourceKey = sourceKeyForSource(from, rinfo.port);
+      const serverKey = serverKeyForSource(from, rinfo.port);
+      const currentLogFile = currentLogFileBySource.get(sourceKey) || null;
+      const parsed = parseLine(record, currentLogFile, sourceKey);
       if (!parsed) continue;
-      if (parsed.type === "logfile") currentLogFileBySource.set(from, parsed.file);
+      if (parsed.type === "logfile") currentLogFileBySource.set(sourceKey, parsed.file);
       if (parsed.type === "log_closed") {
-        currentLogFileBySource.delete(from);
-        if (currentLogFile && global._teamFileTrack) delete global._teamFileTrack[currentLogFile];
+        currentLogFileBySource.delete(sourceKey);
+        if (currentLogFile && global._teamFileTrack) {
+          delete global._teamFileTrack[`${sourceKey}:${currentLogFile}`];
+        }
       }
       const evt = {
         ...parsed,
         from,
         sourcePort: rinfo.port,
-        serverKey: serverKeyForSource(from, rinfo.port),
+        serverKey,
+        sourceKey,
+        trackingOnly: isTrackingOnlyServerKey(serverKey),
         ts: Date.now(),
       };
       const steamId = normalizeSteamId(evt.steamid);
@@ -237,6 +296,10 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
         onEvent?.({
           type: "restart_request",
           from,
+          sourcePort: evt.sourcePort,
+          serverKey: evt.serverKey,
+          sourceKey: evt.sourceKey,
+          trackingOnly: evt.trackingOnly,
           steamid: evt.steamid,
           player: evt.player,
           team: evt.team,
@@ -245,33 +308,10 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
         });
         continue;
       }
-      // ---------- SCORE PAIRING LOGIC (unchanged) ----------
-      let last = lastScoresBySource.get(from) || { map: null, blue: null, red: null, ts: 0 };
-      if (evt.type === "map") {
-        last = { map: evt.name, blue: null, red: null, ts: evt.ts };
-        lastScoresBySource.set(from, last);
-      }
-      if (evt.type === "score") {
-        if (evt.ts - last.ts > 9000) {
-          last = { map: last.map, blue: null, red: null, ts: evt.ts };
-        }
-        if (/blue/i.test(evt.team)) last.blue = evt.score;
-        if (/red/i.test(evt.team)) last.red = evt.score;
-        last.ts = evt.ts;
-        lastScoresBySource.set(from, last);
-        if (last.blue != null && last.red != null) {
-          const pair = {
-            type: "score_pair",
-            map: last.map || "unknown",
-            blue: last.blue,
-            red: last.red,
-            ts: evt.ts,
-            from
-          };
-          onEvent?.(pair);
-          lastScoresBySource.delete(from);
-          continue;
-        }
+      const pair = updateScorePair(lastScoresBySource, evt);
+      if (pair) {
+        onEvent?.(pair);
+        continue;
       }
       onEvent?.(evt);
     }
@@ -293,5 +333,9 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
 module.exports = {
   parseLine,
   serverKeyForSource,
+  sourceKeyForSource,
+  updateScorePair,
+  isPickupServerKey,
+  isTrackingOnlyServerKey,
   startHldsLogReceiver,
 };

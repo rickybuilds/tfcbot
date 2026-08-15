@@ -12,6 +12,9 @@ const rconServers = require("../config/rcon");
 const {
   parseLine,
   serverKeyForSource,
+  updateScorePair,
+  isPickupServerKey,
+  isTrackingOnlyServerKey,
 } = require("../services/hldsLogs");
 
 test("recognizes regular in-game queue commands", () => {
@@ -48,7 +51,7 @@ test("HLDS say and disconnect events retain the Steam ID needed by the queue bri
 
 test("distinguishes two configured game servers sharing one IP by source port", () => {
   rconServers.testMm1 = { host: "192.0.2.200", port: 27015 };
-  rconServers.testMm2 = { host: "192.0.2.200", port: 27016 };
+  rconServers.testMm2 = { host: "192.0.2.200", port: 27016, trackingOnly: true };
 
   try {
     assert.equal(serverKeyForSource("192.0.2.200", 27015), "testMm1");
@@ -60,11 +63,36 @@ test("distinguishes two configured game servers sharing one IP by source port", 
   }
 });
 
+test("tracking-only endpoints cannot cross the pickup lifecycle boundary", () => {
+  rconServers.testPickup = { host: "192.0.2.201", port: 27015 };
+  rconServers.testSkills = { host: "192.0.2.201", port: 27016, trackingOnly: true };
+
+  try {
+    assert.equal(isPickupServerKey("testPickup"), true);
+    assert.equal(isTrackingOnlyServerKey("testPickup"), false);
+    assert.equal(isPickupServerKey("testSkills"), false);
+    assert.equal(isTrackingOnlyServerKey("testSkills"), true);
+  } finally {
+    delete rconServers.testPickup;
+    delete rconServers.testSkills;
+  }
+});
+
 test("RCON queue notices cannot inject quotes or new commands", () => {
   assert.equal(
     safeRconText('Player"\nquit\r now'),
     "Player quit now"
   );
+});
+
+test("score pairing never combines pickup and SKILLS endpoints sharing an IP", () => {
+  const pairs = new Map();
+  const pickup = { sourceKey: "testMm1", serverKey: "testMm1", from: "192.0.2.200", sourcePort: 27015 };
+  const skill = { sourceKey: "testMm2", serverKey: "testMm2", from: "192.0.2.200", sourcePort: 27016 };
+
+  assert.equal(updateScorePair(pairs, { ...pickup, type: "score", team: "Blue", score: 80, ts: 1000 }), null);
+  assert.equal(updateScorePair(pairs, { ...skill, type: "score", team: "Red", score: 20, ts: 1001 }), null);
+  assert.equal(updateScorePair(pairs, { ...pickup, type: "score", team: "Red", score: 0, ts: 1002 }).serverKey, "testMm1");
 });
 
 test("vote start notifies each server represented by in-game players once", async () => {

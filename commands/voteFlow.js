@@ -23,6 +23,7 @@ const { postQueueBoard, notifyHldsVoteStarted } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 // HLDS auto-recap
 const { autoArmFromMatchReady } = require("../lib/autoArm");
+const { determineServerKey } = require("../services/autoRecap");
 const {
   getTeamStartPlan,
   normalizeTeam1Starts,
@@ -719,6 +720,7 @@ async function finalizeMatch(
   state.restartRequest = {
     matchId,
     serverIp: serverObj.ip,
+    serverKey: determineServerKey(serverObj.ip),
     map: mapObj?.name || null,
     used: false,
     armedAt: Date.now(),
