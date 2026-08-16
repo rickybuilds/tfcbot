@@ -166,12 +166,13 @@ function eligibleStreakPlayers(players, elo) {
       state.isVotingInProgress = true;
       try { await refreshBotName(message.client, state); } catch {}
 
-      // Announce mode
-      await message.channel.send(
-        useAdl
-		  ? "**ADL ACTIVATED** — ADL map pool with **Bonus Elo Enabled**."
-		  : "Running **Standard** (insufficient ADL votes)."
-      );
+      // Announce ADL mode only; standard mode is the normal fallback and
+      // does not need a separate status message.
+      if (useAdl) {
+        await message.channel.send(
+          "**ADL ACTIVATED** — ADL map pool with **Bonus Elo Enabled**."
+        );
+      }
 	      if (voteStartCancelled()) return;
 
       const serverVoteDur = settings.getNumber("vote:server_duration", 10);

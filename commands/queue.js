@@ -10,7 +10,6 @@ const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
 const lockedReplyCooldown = new Map();
 const LOCKED_REPLY_COOLDOWN_MS = 60 * 1000; // 1 minute
 let lastStatusUsedAt = 0; // global cooldown timestamp
-const autoFullVoteTimers = new WeakMap();
 
 const ADMIN_ROLE = process.env.ADMIN_ROLE_ID || "";
 const HLDS_QUEUE_COMMANDS = new Map([
@@ -71,7 +70,7 @@ async function notifyHldsVoteStarted(players, runRconCommand) {
 async function maybeStartAutoFullVote(
   message,
   state,
-  { delayMs = 2000, runner = global.runFullVoteFlow } = {}
+  { runner = global.runFullVoteFlow } = {}
 ) {
   const max = state.MAX_PLAYERS || 8;
 
@@ -85,29 +84,14 @@ async function maybeStartAutoFullVote(
     state.isVotingInProgress ||
     state.isVoteStarting ||
     state.voteLock ||
-    typeof runner !== "function" ||
-    autoFullVoteTimers.has(state)
+    typeof runner !== "function"
   ) {
     return false;
   }
 
-  await message.channel.send("Queue is full! Starting vote in **2 seconds**...");
-
-  const timer = setTimeout(() => {
-    autoFullVoteTimers.delete(state);
-
-    if (
-      state.queue.length === max &&
-      !state.vote &&
-      !state.isVotingInProgress &&
-      !state.isVoteStarting &&
-      !state.voteLock
-    ) {
-      Promise.resolve(runner(message)).catch(console.error);
-    }
-  }, delayMs);
-
-  autoFullVoteTimers.set(state, timer);
+  // Start immediately once the queue reaches capacity. The vote runner sets
+  // its own startup guards synchronously before doing any asynchronous work.
+  Promise.resolve(runner(message)).catch(console.error);
   return true;
 }
 
