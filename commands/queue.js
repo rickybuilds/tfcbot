@@ -144,7 +144,7 @@ function queueLines(state, elo, privacy) {
       console.error("[queueLines] failed formatting", p, e);
       return mention(p.id);
     }
-  }).join("\n");
+  }).join(", ");
 }
 
 function adlProgress(state) {
