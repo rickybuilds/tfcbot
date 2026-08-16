@@ -160,8 +160,11 @@ async function postQueueBoard(channel, state, elo, privacy) {
     .setColor(0xed4245)
     .setTitle(`Player Queue — (${state.queue.length}/${state.MAX_PLAYERS || 8})`)
     .setDescription(queueLines(state, elo, privacy))
-    .addFields({ name: "ADL", value: adlProgress(state), inline: false })
     .setTimestamp();
+
+  if (state.queue.some(p => p.adlVote)) {
+    emb.addFields({ name: "ADL", value: adlProgress(state), inline: false });
+  }
 
   await channel.send({ embeds: [emb] });
 }
