@@ -388,7 +388,6 @@ class DuelManager {
       this.clearTimer(reservation.id, "ready");
       for (const steam of expected) this.clearTimer(reservation.id, `disconnect:${steam}`);
       this.updateReservation(serverIp, { joined: [...expected], status: "active" });
-      console.log(`[1v1] - match activity observed from HLDS id=${reservation.id} server=${reservation.serverKey || serverIp} weapon=${evt.weapon || "unknown"}`);
       return true;
     }
 
