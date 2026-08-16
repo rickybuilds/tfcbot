@@ -13,7 +13,6 @@ const {
   isRealDiscordId,
   mention,
   clearAnyTimer,
-  disableAllButtons,
   mirvLabel,
   genMatchId,
   formatPlayerName,
@@ -429,8 +428,7 @@ async function cancelVote(message, config, state, elo, privacy) {
       h.notifyTimers?.forEach(clearAnyTimer);
       clearAnyTimer(h.endTimer);
       clearAnyTimer(h.tickTimer);
-      const disabled = disableAllButtons(h.message);
-      await h.message.edit({ components: disabled }).catch(() => {});
+      await h.message.edit({ components: [] }).catch(() => {});
       h.collector?.stop("cancelled");
     } catch {}
   }
@@ -463,8 +461,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
       h.notifyTimers?.forEach(clearAnyTimer);
       clearAnyTimer(h.endTimer);
       clearAnyTimer(h.tickTimer);
-      const disabled = disableAllButtons(h.message);
-      await h.message.edit({ components: disabled }).catch(() => {});
+      await h.message.edit({ components: [] }).catch(() => {});
       h.collector?.stop("cancelled");
     } catch (e) {
       console.error("[cancelVoteAndRequeue] cleanup failed:", e);

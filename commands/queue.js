@@ -3,7 +3,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 const { refreshBotName } = require("../lib/botName");
-const { mention, formatPlayerName, clearAnyTimer, disableAllButtons } = require("../lib/util");
+const { mention, formatPlayerName, clearAnyTimer } = require("../lib/util");
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
 const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
@@ -350,8 +350,7 @@ if (ban) {
         h.notifyTimers?.forEach(clearAnyTimer);
         clearAnyTimer(h.endTimer);
         clearAnyTimer(h.tickTimer);
-        const disabled = disableAllButtons(h.message);
-        await h.message.edit({ components: disabled }).catch(() => {});
+        await h.message.edit({ components: [] }).catch(() => {});
         h.collector?.stop("cancelled");
       } catch {}
     }
