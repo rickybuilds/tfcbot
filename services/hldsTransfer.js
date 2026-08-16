@@ -180,6 +180,24 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
 async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
   if (!paths.length) return { ok: false, status: 0, text: "no files" };
 
+  // Hampalyzer's /parseGame API currently rejects single-log uploads even
+  // though the web UI advertises one or two logs. Do not upload the same log
+  // twice: Hampalyzer treats two files as two rounds and would double-count a
+  // single-round 1v1. The caller still gets the TFCStats result.
+  if (paths.length === 1) {
+    console.warn(
+      "[HAMPALYZER] Skipping single-log upload: /parseGame requires two log files"
+    );
+    for (const p of paths) try { fs.unlinkSync(p); } catch {}
+    return {
+      ok: false,
+      status: 422,
+      text: "Hampalyzer /parseGame requires two log files; single-log match skipped",
+      reason: "single_log_unsupported",
+      url: null,
+    };
+  }
+
   const form = new FormData();
   form.append("force", "on");
   form.append("matchId", String(matchId || ""));
