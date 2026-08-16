@@ -3,6 +3,7 @@
 
 const { addPlayerToQueue, maybeStartAutoFullVote } = require("./queue");
 const adl = require("../lib/adl");
+const { getStoredPlayerName } = require("../lib/util");
 
 module.exports = {
   name: "addadl",
@@ -35,15 +36,19 @@ module.exports = {
       return;
     }
 
-    // Find or create player entry manually first
+    // Find or create player entry manually first so the ADL flag is present
+    // when the queue board is rendered.
     if (!entry) {
+      const discordName = message.member?.displayName || message.author.username;
+      try { deps.elo?.getRating(id, discordName, { createIfMissing: true }); } catch {}
       entry = {
         id: message.author.id,
-        name: message.member?.displayName || message.author.username,
+        name: getStoredPlayerName(deps.elo, id, discordName),
         lastSeenAt: Date.now(),
       };
       state.queue.push(entry);
     } else {
+      entry.name = getStoredPlayerName(deps.elo, id, entry.name);
       entry.lastSeenAt = Date.now();
     }
 

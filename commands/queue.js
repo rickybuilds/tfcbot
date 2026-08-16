@@ -3,7 +3,12 @@
 
 const { EmbedBuilder } = require("discord.js");
 const { refreshBotName } = require("../lib/botName");
-const { mention, formatPlayerName, clearAnyTimer } = require("../lib/util");
+const {
+  mention,
+  formatPlayerName,
+  getStoredPlayerName,
+  clearAnyTimer,
+} = require("../lib/util");
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
 const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
@@ -125,9 +130,7 @@ function queueLines(state, elo, privacy) {
 
   return state.queue.map(p => {
     try {
-      const registeredName = typeof elo?.getDisplayName === "function"
-        ? elo.getDisplayName(p.id, p.name)
-        : p.name;
+      const registeredName = getStoredPlayerName(elo, p.id, p.name);
       const base = formatPlayerName(
         state,
         elo,
@@ -249,12 +252,16 @@ if (ban) {
   return; // still banned, don’t add them
 }
 
-    const name = message.member?.displayName || message.author.username;
     let entry = state.queue.find(p => p.id === id);
+    const discordName = message.member?.displayName || message.author.username;
+    const nameSeed = entry?.name || discordName;
+    try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
+    const name = getStoredPlayerName(elo, id, nameSeed);
     if (!entry) {
       entry = { id, name, lastSeenAt: Date.now() };
       state.queue.push(entry);
     } else {
+      entry.name = name;
       entry.lastSeenAt = Date.now();
     }
 
@@ -263,9 +270,6 @@ if (ban) {
       entry.adlVote = true;
       try { adl.vote(String(id)); } catch {}
     }
-
-    // force Elo lookup so correct rank is shown
-    try { elo.getRating(id, name, { createIfMissing: true }); } catch {}
 
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
@@ -410,9 +414,15 @@ if (ban) {
       const m = await message.guild.members.fetch(target.id).catch(() => null);
       if (m?.displayName) display = m.displayName;
     } catch {}
-    if (!state.queue.some(p => p.id === target.id)) {
+    const existing = state.queue.find(p => String(p.id) === String(target.id));
+    const nameSeed = existing?.name || display;
+    try { elo.getRating(target.id, nameSeed, { createIfMissing: true }); } catch {}
+    display = getStoredPlayerName(elo, target.id, nameSeed);
+    if (!existing) {
       state.queue.push({ id: target.id, name: display, lastSeenAt: now() });
-      try { elo.getRating(target.id, display, { createIfMissing: true }); } catch {}
+    } else {
+      existing.name = display;
+      existing.lastSeenAt = now();
     }
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
@@ -666,7 +676,10 @@ reg.set("**", (msg) => add(msg, true));
       return true;
     }
 
-    const name = member.displayName || evt.player || `Player#${discordId.slice(-4)}`;
+    const discordName = member.displayName || evt.player || `Player#${discordId.slice(-4)}`;
+    const nameSeed = existing?.name || discordName;
+    try { elo.getRating(discordId, nameSeed, { createIfMissing: true }); } catch {}
+    const name = getStoredPlayerName(elo, discordId, nameSeed);
     const entry = existing || { id: discordId, name, lastSeenAt: Date.now() };
     if (!existing) state.queue.push(entry);
 
@@ -793,17 +806,18 @@ async function addPlayerToQueue(message, { state, config, elo, banStore, setting
   const ban = banStore?.getBan(id);
   if (ban) return null;
 
-  const name = message.member?.displayName || message.author.username;
   let entry = state.queue.find(p => p.id === id);
+  const discordName = message.member?.displayName || message.author.username;
+  const nameSeed = entry?.name || discordName;
+  try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
+  const name = getStoredPlayerName(elo, id, nameSeed);
   if (!entry) {
     entry = { id, name, lastSeenAt: Date.now() };
     state.queue.push(entry);
   } else {
+    entry.name = name;
     entry.lastSeenAt = Date.now();
   }
-
-  // 👇 Ensure Elo rank is ready
-  try { elo.getRating(id, name, { createIfMissing: true }); } catch {}
 
   await postQueueBoard(message.channel, state, elo, privacy);
   try { await refreshBotName(message.client, state); } catch {}

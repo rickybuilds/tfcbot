@@ -16,6 +16,7 @@ const {
   mirvLabel,
   genMatchId,
   formatPlayerName,
+  getStoredPlayerName,
 } = require("../lib/util");
 const { makeBalancedTeams } = require("../lib/balance");
 const { postQueueBoard, notifyHldsVoteStarted } = require("./queue");
@@ -250,8 +251,8 @@ function eligibleStreakPlayers(players, elo) {
             try { await refreshBotName(message.client, state); } catch {}
 				// 🔴 Not all players voted — log and kick
 				const kickedNames = missing.map(id => {
-				const m = message.guild?.members?.cache?.get(id);
-				return m?.displayName || `<@${id}>`;
+				const player = (state.queueSnapshot || []).find(p => String(p.id) === String(id));
+				return getStoredPlayerName(elo, id, player?.name) || `<@${id}>`;
 				}).join(", ");
 				await message.channel.send(`Not all players voted. Kicked: ${kickedNames}`);
 
@@ -609,8 +610,15 @@ async function finalizeMatch(
       ? state.queueSnapshot
       : state.queue.slice(0, state.MAX_PLAYERS || 8);
 
+  // Normalize the frozen roster once more before balancing. This keeps saved
+  // team records and every downstream display on the same stored name.
+  const canonicalPlayers = players.map(p => ({
+    ...p,
+    name: getStoredPlayerName(elo, p.id, p.name),
+  }));
+
   // Balance teams (actual teams used in match)
-  const bal = makeBalancedTeams(players, elo);
+  const bal = makeBalancedTeams(canonicalPlayers, elo);
 
   const blueList = bal.blue.length
     ? bal.blue.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)).join("\n")
