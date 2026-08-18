@@ -3,7 +3,61 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
-const { startVote } = require("../lib/vote");
+const { startVote, getMapVoteShortenReason } = require("../lib/vote");
+
+const ids = Array.from(
+  { length: 8 },
+  (_, i) => `${String(i + 1).padStart(2, "0")}1111111111111111`
+);
+
+test("map vote shortening recognizes a majority among the frozen queue", () => {
+  const options = [
+    { id: "1", name: "openfire" },
+    { id: "N", name: "New Maps" },
+  ];
+  const reason = getMapVoteShortenReason({
+    eligible: ids,
+    voted: new Set(ids.slice(0, 5)),
+    counts: new Map([["1", 5], ["N", 0]]),
+    options,
+  });
+
+  assert.equal(reason.type, "majority");
+  assert.deepEqual(reason.options.map(option => option.name), ["openfire"]);
+  assert.deepEqual(reason.realEligible, ids);
+});
+
+test("map vote shortening recognizes one remaining voter without a majority", () => {
+  const options = [
+    { id: "1", name: "openfire" },
+    { id: "2", name: "well" },
+    { id: "N", name: "New Maps" },
+  ];
+  const reason = getMapVoteShortenReason({
+    eligible: ids,
+    voted: new Set(ids.slice(0, 7)),
+    counts: new Map([["1", 3], ["2", 2], ["N", 2]]),
+    options,
+  });
+
+  assert.equal(reason.type, "one_remaining");
+  assert.equal(reason.waiting.length, 1);
+});
+
+test("map vote shortening does not trigger with multiple voters remaining and no majority", () => {
+  const reason = getMapVoteShortenReason({
+    eligible: ids,
+    voted: new Set(ids.slice(0, 6)),
+    counts: new Map([["1", 2], ["2", 2], ["N", 2]]),
+    options: [
+      { id: "1", name: "openfire" },
+      { id: "2", name: "well" },
+      { id: "N", name: "New Maps" },
+    ],
+  });
+
+  assert.equal(reason, null);
+});
 
 test("a direct server winner reaches onFinish even if its announcement stalls", async () => {
   const collector = new EventEmitter();

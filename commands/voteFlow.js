@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { EmbedBuilder } = require("discord.js");
 const { guardChannel } = require("../lib/guards");
-const { startVote } = require("../lib/vote");
+const { startVote, getMapVoteShortenReason } = require("../lib/vote");
 const { randomInt } = require("crypto");
 const { pickUniqueMaps, buildMapOptionsFromList, recentMapExclusions } = require("../lib/maps");
 const { buildMatchScenarios, buildTeamScenariosEmbed } = require("../lib/odds");
@@ -503,11 +503,16 @@ return startVote(state, message, {
 
   onVote: async ({ eligible, voted, voteHandle }) => {
     try {
-      const realEligible = eligible.filter(uid => isRealDiscordId(uid));
-      const allVoted = realEligible.every(uid => voted.has(uid));
+      const shortenReason = getMapVoteShortenReason({
+        eligible,
+        voted,
+        counts: voteHandle.counts,
+        options,
+      });
       const timeLeft = Math.max(0, voteHandle.endsAt - Date.now());
 
-      if (allVoted && timeLeft > 10_000) {
+      if (shortenReason && !voteHandle.fastForwarded && timeLeft > 10_000) {
+        voteHandle.fastForwarded = true;
         voteHandle.endsAt = Date.now() + 10_000;
 
         voteHandle.notifyTimers?.forEach(clearAnyTimer);
@@ -521,12 +526,21 @@ return startVote(state, message, {
           } catch {}
         }, 10_000);
 
-        const mentions =
-          realEligible.map(id => `<@${id}>`).join(" ");
+        const mentions = shortenReason.realEligible.map(id => `<@${id}>`).join(" ");
+        let announcement;
+        if (shortenReason.type === "majority") {
+          const names = shortenReason.options.map(option => `**${option.name}**`).join(", ");
+          announcement = `📊 **Map majority reached:** ${names} — **10s left!** ${mentions}`;
+        } else if (shortenReason.type === "one_remaining") {
+          announcement = `⏳ **One player has not voted.** Map vote ending in **10s**! ${mentions}`;
+        } else {
+          announcement = `✅ All players voted. Vote ending early in **10s**! ${mentions}`;
+        }
 
-        await message.channel.send(
-          `✅ All players voted. Vote ending early in **10s**! ${mentions}`
-        );
+        await message.channel.send({
+          content: announcement,
+          allowedMentions: { users: shortenReason.realEligible },
+        });
       }
     } catch (e) {
       console.error("[mapVote onVote shorten]", e);
