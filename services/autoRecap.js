@@ -209,6 +209,7 @@ function attachAutoRecap(ctx, options = {}) {
           serverKey,
           matchId,
           rounds,
+          attachWebm: config.pickupReplayAttachWebm,
         });
         if (clips.length) {
           console.log(`[autoRecap] posted ${clips.length} clean pickup clip(s) for ${matchId}`);

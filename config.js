@@ -45,6 +45,9 @@ module.exports = {
   pickupReplayAutoClips: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_REPLAY_AUTO_CLIPS || "")
   ),
+  pickupReplayAttachWebm: /^(?:1|true|yes|on)$/i.test(
+    String(process.env.PICKUP_REPLAY_ATTACH_WEBM || "")
+  ),
   // Elo V2 is intentionally shadow-only for now. "off" disables all polling
   // and recap posts; "shadow" calculates proposals without changing ratings.
   eloV2Mode: String(process.env.ELO_V2_MODE || "off").trim().toLowerCase(),

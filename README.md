@@ -38,6 +38,24 @@ not implemented yet; setting shadow mode can never mutate `ratings` or
 - SQLite
 - HLDS / RCON
 
+## Automatic pickup clip attachments
+
+Set these variables in the bot's runtime environment to post the rendered replay
+clip as a Discord `.webm` attachment in addition to the replay link:
+
+```env
+PICKUP_REPLAY_AUTO_CLIPS=1
+PICKUP_REPLAY_ATTACH_WEBM=1
+PICKUP_CLIPS_CHANNEL_ID=your_discord_channel_id
+PICKUP_REPLAY_BROWSER_PATH=/usr/bin/chromium
+```
+
+The bot uses headless Chromium to render the same replay-v2 page and download
+the selected clip. Install Chromium on the bot host, restart the bot after
+changing the environment, and check for `posted ... clean pickup clip(s)` in
+the bot log. If the renderer is unavailable, the bot preserves the existing
+link-only post and logs the render error.
+
 ## Status
 Actively developed.
 

@@ -1,6 +1,11 @@
 "use strict";
 
+const fsp = require("node:fs").promises;
+const os = require("node:os");
+const path = require("node:path");
+const { AttachmentBuilder } = require("discord.js");
 const fetchDefault = require("node-fetch");
+const { renderReplayClip } = require("./pickupReplayRenderer");
 
 const DEFAULT_REPLAY_URL = "https://nonamepickup.servehalflife.com/pickup-replay.html";
 const DEFAULT_PADDING_SECONDS = 3;
@@ -119,6 +124,11 @@ function ensureClipTable(db) {
   `);
 }
 
+function clipAttachmentName(matchId, roundNumber) {
+  const safeMatch = String(matchId).replace(/[^a-z0-9_-]+/gi, "-").slice(0, 48) || "replay";
+  return `clean-first-pickup-${safeMatch}-round-${Number(roundNumber)}.webm`;
+}
+
 async function postCleanFirstPickupClips({
   client,
   channelId,
@@ -129,6 +139,9 @@ async function postCleanFirstPickupClips({
   fetchImpl = fetchDefault,
   replayUrl = DEFAULT_REPLAY_URL,
   logger = console,
+  attachWebm = false,
+  renderClip = renderReplayClip,
+  maxAttachmentBytes = 25_000_000,
 }) {
   if (!channelId || !db || !Array.isArray(rounds) || !rounds.length) return [];
   ensureClipTable(db);
@@ -152,14 +165,47 @@ async function postCleanFirstPickupClips({
     }
     if (!clip) continue;
 
-    await channel.send({
-      content: `:eyes: **Clean first pickup → cap** — [Watch clip](${clip.url})`,
-    });
-    db.prepare(`
-      INSERT INTO pickup_replay_auto_clips (server_key, match_id, round_number, posted_at)
-      VALUES (?, ?, ?, ?)
-    `).run(String(serverKey), String(matchId), Number(roundNumber), Date.now());
-    posted.push({ roundNumber: Number(roundNumber), clip });
+    let temporaryDirectory = null;
+    let attachment = null;
+    if (attachWebm) {
+      try {
+        temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-pickup-clip-"));
+        const outputPath = path.join(temporaryDirectory, clipAttachmentName(matchId, roundNumber));
+        await renderClip({
+          url: clip.url,
+          outputPath,
+          matchId,
+          roundNumber: Number(roundNumber),
+          clip,
+        });
+        const stat = await fsp.stat(outputPath);
+        if (!stat.size) throw new Error("renderer produced an empty WebM");
+        if (stat.size > maxAttachmentBytes) {
+          throw new Error(`WebM is ${stat.size} bytes; Discord limit is ${maxAttachmentBytes}`);
+        }
+        attachment = new AttachmentBuilder(outputPath, {
+          name: clipAttachmentName(matchId, roundNumber),
+        });
+      } catch (error) {
+        logger.warn?.(`[pickupReplayClips] WebM render failed for ${matchId}/${roundNumber}: ${error.message}`);
+      }
+    }
+
+    try {
+      await channel.send({
+        content: `:eyes: **Clean first pickup → cap** — [Watch clip](${clip.url})`,
+        ...(attachment ? { files: [attachment] } : {}),
+      });
+      db.prepare(`
+        INSERT INTO pickup_replay_auto_clips (server_key, match_id, round_number, posted_at)
+        VALUES (?, ?, ?, ?)
+      `).run(String(serverKey), String(matchId), Number(roundNumber), Date.now());
+      posted.push({ roundNumber: Number(roundNumber), clip });
+    } finally {
+      if (temporaryDirectory) {
+        await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
+      }
+    }
   }
   return posted;
 }
