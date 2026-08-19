@@ -8,7 +8,10 @@ const path = require("path");
 const { downloadAndUploadLogs } = require("./hldsTransfer");
 const { runRconCommand } = require("./rconClient");
 const { PickupReplayRecorder } = require("./pickupReplayRecorder");
-const { postCleanFirstPickupClips } = require("./pickupReplayClips");
+const {
+  postCleanFirstPickupClips,
+  postLiveCleanPickupClip,
+} = require("./pickupReplayClips");
 const config = require("../config");
 const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
@@ -222,6 +225,41 @@ function attachAutoRecap(ctx, options = {}) {
       // short opportunities to publish the finalized archive before giving up.
       if (attempt < 6) {
         const retry = setTimeout(() => { void scan(); }, 30_000);
+        retry.unref?.();
+      }
+    };
+    void scan();
+  }
+
+  function scheduleLiveClipRelay({ matchId, serverKey, roundNumber, player }) {
+    if (!config.pickupReplayAutoClips || !clipsChannel) return;
+
+    let attempt = 0;
+    const scan = async () => {
+      attempt += 1;
+      try {
+        const clips = await postLiveCleanPickupClip({
+          client,
+          channelId: clipsChannel,
+          db: ctx.matchesStore.db,
+          serverKey,
+          matchId,
+          roundNumber,
+          player,
+        });
+        if (clips.length) {
+          console.log(`[autoRecap] posted live coast-to-coast relay for ${matchId} round ${roundNumber}`);
+          return;
+        }
+      } catch (clipError) {
+        console.warn(`[autoRecap] live coast-to-coast scan failed for ${matchId}:`, clipError.message);
+      }
+
+      // The live forwarder may ingest the replay batch just after HLDS emits
+      // the capture line. Retry briefly so the relay stays immediate without
+      // making the gameplay event queue wait on the website.
+      if (attempt < 6) {
+        const retry = setTimeout(() => { void scan(); }, 2_000);
         retry.unref?.();
       }
     };
@@ -682,6 +720,13 @@ const capPlayer = evt.player || "unknown";
       recapChannel,
       `🏁 Capture ${a.liveCaps} — ${capTeamLabel} (${physicalCapTeam || "unknown"} side, ${evt.player || "unknown"})`
     ).catch?.(() => {});
+
+    scheduleLiveClipRelay({
+      matchId: a.matchId,
+      serverKey: a.serverKey,
+      roundNumber: Math.min((a.half || 0) + 1, 2),
+      player: capPlayer,
+    });
 
     return;
   }

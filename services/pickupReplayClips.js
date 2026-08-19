@@ -8,6 +8,7 @@ const fetchDefault = require("node-fetch");
 const { renderReplayClip } = require("./pickupReplayRenderer");
 
 const DEFAULT_REPLAY_URL = "https://nonamepickup.servehalflife.com/pickup-replay.html";
+const DEFAULT_LIVE_REPLAY_URL = "https://nonamepickup.servehalflife.com/pickup-live.html";
 const DEFAULT_PADDING_SECONDS = 3;
 
 function parseCsvLine(line) {
@@ -88,6 +89,57 @@ function findCleanFirstPickupCap(events, { paddingSeconds = DEFAULT_PADDING_SECO
   return null;
 }
 
+function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS } = {}) {
+  const ordered = [...events].sort((a, b) => a.timeMs - b.timeMs);
+  const clips = [];
+  let pickup = null;
+  let carried = null;
+
+  for (const event of ordered) {
+    if (event.event === "flag_pickup") {
+      pickup = event;
+      carried = null;
+      continue;
+    }
+    if (!pickup) continue;
+
+    if (
+      event.event === "flag_entity_carried" &&
+      event.timeMs >= pickup.timeMs &&
+      event.actorSession === pickup.actorSession &&
+      event.entity > 0
+    ) {
+      carried = event;
+      continue;
+    }
+    if (!carried || event.entity !== carried.entity || event.timeMs < carried.timeMs) continue;
+
+    if (event.event === "flag_entity_dropped") {
+      pickup = null;
+      carried = null;
+      continue;
+    }
+    if (event.event !== "flag_entity_base") continue;
+
+    const padding = Math.max(0, Number(paddingSeconds) || 0);
+    const start = Math.max(0, pickup.timeMs / 1000 - padding);
+    const end = Math.max(start, event.timeMs / 1000 + padding);
+    clips.push({
+      pickupTime: pickup.timeMs / 1000,
+      capTime: event.timeMs / 1000,
+      clipStart: start,
+      clipEnd: end,
+      actorSession: pickup.actorSession,
+      entity: carried.entity,
+      flag: pickup.text || "flag",
+    });
+    pickup = null;
+    carried = null;
+  }
+
+  return clips;
+}
+
 function buildClipUrl(matchId, roundNumber, clip, baseUrl = DEFAULT_REPLAY_URL) {
   const url = new URL(baseUrl);
   url.searchParams.set("matchId", String(matchId));
@@ -95,6 +147,17 @@ function buildClipUrl(matchId, roundNumber, clip, baseUrl = DEFAULT_REPLAY_URL) 
   url.searchParams.set("clipStart", Number(clip.clipStart).toFixed(3));
   url.searchParams.set("clipEnd", Number(clip.clipEnd).toFixed(3));
   url.searchParams.set("clipTitle", "Clean first pickup to cap");
+  return url.toString();
+}
+
+function buildLiveClipUrl(serverKey, matchId, roundNumber, clip, baseUrl = DEFAULT_LIVE_REPLAY_URL) {
+  const url = new URL(baseUrl);
+  url.searchParams.set("server", String(serverKey));
+  url.searchParams.set("matchId", String(matchId));
+  url.searchParams.set("round", String(roundNumber));
+  url.searchParams.set("clipStart", Number(clip.clipStart).toFixed(3));
+  url.searchParams.set("clipEnd", Number(clip.clipEnd).toFixed(3));
+  url.searchParams.set("clipTitle", "Coast-to-coast");
   return url.toString();
 }
 
@@ -112,6 +175,26 @@ async function findCleanClipForRound({
   return clip ? { ...clip, url: buildClipUrl(matchId, roundNumber, clip, replayUrl) } : null;
 }
 
+async function findLiveCleanClipForRound({
+  serverKey,
+  matchId,
+  roundNumber,
+  fetchImpl = fetchDefault,
+  replayUrl = DEFAULT_LIVE_REPLAY_URL,
+}) {
+  const base = new URL(replayUrl);
+  const snapshotUrl = `${base.origin}/api/pickup-live/viewer/${encodeURIComponent(serverKey)}/${encodeURIComponent(matchId)}/${encodeURIComponent(roundNumber)}/snapshot`;
+  const response = await fetchImpl(snapshotUrl, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`Live replay snapshot request failed (${response.status})`);
+  const snapshot = await response.json();
+  const events = parseEventsCsv(snapshot?.files?.["events.csv"] || "");
+  const clips = findCleanPickupCaps(events);
+  const clip = clips.at(-1);
+  return clip
+    ? { ...clip, url: buildLiveClipUrl(serverKey, matchId, roundNumber, clip, replayUrl) }
+    : null;
+}
+
 function ensureClipTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS pickup_replay_auto_clips (
@@ -120,6 +203,19 @@ function ensureClipTable(db) {
       round_number INTEGER NOT NULL,
       posted_at INTEGER NOT NULL,
       PRIMARY KEY (server_key, match_id, round_number)
+    );
+  `);
+}
+
+function ensureLiveClipTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pickup_replay_live_clips (
+      server_key TEXT NOT NULL,
+      match_id TEXT NOT NULL,
+      round_number INTEGER NOT NULL,
+      cap_time REAL NOT NULL,
+      posted_at INTEGER NOT NULL,
+      PRIMARY KEY (server_key, match_id, round_number, cap_time)
     );
   `);
 }
@@ -210,11 +306,64 @@ async function postCleanFirstPickupClips({
   return posted;
 }
 
+async function postLiveCleanPickupClip({
+  client,
+  channelId,
+  db,
+  serverKey,
+  matchId,
+  roundNumber,
+  player,
+  fetchImpl = fetchDefault,
+  replayUrl = DEFAULT_LIVE_REPLAY_URL,
+  logger = console,
+}) {
+  if (!channelId || !db) return [];
+  ensureLiveClipTable(db);
+  const clip = await findLiveCleanClipForRound({
+    serverKey,
+    matchId,
+    roundNumber,
+    fetchImpl,
+    replayUrl,
+  });
+  if (!clip) return [];
+
+  const identity = [String(serverKey), String(matchId), Number(roundNumber), Number(clip.capTime)];
+  const reservation = db.prepare(`
+    INSERT OR IGNORE INTO pickup_replay_live_clips
+      (server_key, match_id, round_number, cap_time, posted_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(...identity, Date.now());
+  if (!reservation.changes) return [];
+
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel?.send) throw new Error("pickup clips channel is unavailable");
+    await channel.send({
+      content: `:eyes: **Coast-to-coast${player ? ` — ${player}` : ""}** — [Watch the live replay](${clip.url})`,
+    });
+    return [{ roundNumber: Number(roundNumber), clip }];
+  } catch (error) {
+    db.prepare(`
+      DELETE FROM pickup_replay_live_clips
+      WHERE server_key=? AND match_id=? AND round_number=? AND cap_time=?
+    `).run(...identity);
+    logger.warn?.(`[pickupReplayClips] live coast-to-coast relay failed for ${matchId}/${roundNumber}: ${error.message}`);
+    throw error;
+  }
+}
+
 module.exports = {
   DEFAULT_REPLAY_URL,
+  DEFAULT_LIVE_REPLAY_URL,
   buildClipUrl,
+  buildLiveClipUrl,
   findCleanClipForRound,
+  findLiveCleanClipForRound,
+  findCleanPickupCaps,
   findCleanFirstPickupCap,
   parseEventsCsv,
+  postLiveCleanPickupClip,
   postCleanFirstPickupClips,
 };
