@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const fetchDefault = require("node-fetch");
+const WebSocketImpl = globalThis.WebSocket || require("ws");
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -44,16 +45,17 @@ async function waitFor(predicate, { timeoutMs, intervalMs = 250, label = "condit
 
 class CdpSession {
   constructor(url) {
-    this.socket = new WebSocket(url);
+    this.socket = new WebSocketImpl(url);
     this.nextId = 1;
     this.pending = new Map();
     this.events = new Map();
     this.ready = new Promise((resolve, reject) => {
-      this.socket.addEventListener("open", resolve, { once: true });
-      this.socket.addEventListener("error", reject, { once: true });
+      addSocketListener(this.socket, "open", resolve, true);
+      addSocketListener(this.socket, "error", reject, true);
     });
-    this.socket.addEventListener("message", event => {
-      const message = JSON.parse(String(event.data));
+    addSocketListener(this.socket, "message", event => {
+      const payload = event?.data === undefined ? event : event.data;
+      const message = JSON.parse(String(payload));
       if (message.id) {
         const pending = this.pending.get(message.id);
         if (!pending) return;
@@ -96,6 +98,16 @@ class CdpSession {
 
   close() {
     try { this.socket.close(); } catch {}
+  }
+}
+
+function addSocketListener(socket, event, listener, once = false) {
+  if (typeof socket.addEventListener === "function") {
+    socket.addEventListener(event, listener, once ? { once: true } : undefined);
+  } else if (once && typeof socket.once === "function") {
+    socket.once(event, listener);
+  } else {
+    socket.on(event, listener);
   }
 }
 
