@@ -8,6 +8,7 @@ const path = require("path");
 const { downloadAndUploadLogs } = require("./hldsTransfer");
 const { runRconCommand } = require("./rconClient");
 const { PickupReplayRecorder } = require("./pickupReplayRecorder");
+const { postCleanFirstPickupClips } = require("./pickupReplayClips");
 const config = require("../config");
 const rconCfg = require("../config/rcon"); // 👈 NEW
 const { state } = require("../lib/state"); 
@@ -177,6 +178,7 @@ function attachAutoRecap(ctx, options = {}) {
   const recapChannel = config.channels.recap;
   const reportChannel = config.channels.pickup;
   const logsChannel = config.channels.logs;
+  const clipsChannel = config.channels.clips;
 
   function getReadyReplayRounds(matchId, serverKey) {
     try {
@@ -193,6 +195,36 @@ function attachAutoRecap(ctx, options = {}) {
       console.warn(`[autoRecap] Could not confirm replay availability for ${matchId}:`, error.message);
       return [];
     }
+  }
+
+  function scheduleCleanClipScan({ matchId, serverKey, rounds }) {
+    let attempt = 0;
+    const scan = async () => {
+      attempt += 1;
+      try {
+        const clips = await postCleanFirstPickupClips({
+          client,
+          channelId: clipsChannel,
+          db: ctx.matchesStore.db,
+          serverKey,
+          matchId,
+          rounds,
+        });
+        if (clips.length) {
+          console.log(`[autoRecap] posted ${clips.length} clean pickup clip(s) for ${matchId}`);
+          return;
+        }
+      } catch (clipError) {
+        console.warn(`[autoRecap] clean pickup clip scan failed for ${matchId}:`, clipError.message);
+      }
+      // The central uploader runs independently of the bot. Give it a few
+      // short opportunities to publish the finalized archive before giving up.
+      if (attempt < 6) {
+        const retry = setTimeout(() => { void scan(); }, 30_000);
+        retry.unref?.();
+      }
+    };
+    void scan();
   }
 
   const windowMin = Math.max(5, Number(options.windowMin || 45));
@@ -870,6 +902,10 @@ try {
   const hampUrl = result.upload?.url;
   const tfcUrl  = result.tfcstats?.url;
   const replayRounds = getReadyReplayRounds(a.matchId, serverKey);
+
+  if (config.pickupReplayAutoClips && clipsChannel && replayRounds.length) {
+    scheduleCleanClipScan({ matchId: a.matchId, serverKey, rounds: replayRounds });
+  }
 
   // 🧠 Update DB with log URLs + scores
   try {
