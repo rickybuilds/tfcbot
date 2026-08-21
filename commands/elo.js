@@ -3,34 +3,9 @@
 
 const { EmbedBuilder, AttachmentBuilder } = require("discord.js");
 const { WinStreakStore } = require("../lib/winstreak");
+const { getNextRank, normalizedRating } = require("../lib/ranks");
 
 /* ---------------- Rank bands ---------------- */
-const RANKS_ASC = [
-  { rank: "1",  min: 300,  max: 720 },
-  { rank: "2",  min: 721,  max: 1050 },
-  { rank: "3",  min: 1051, max: 1390 },
-  { rank: "4",  min: 1391, max: 1640 },
-  { rank: "5",  min: 1641, max: 2000 },
-  { rank: "6",  min: 2001, max: 2460 },
-  { rank: "7",  min: 2461, max: 2730 },
-  { rank: "8",  min: 2731, max: 3010 },
-  { rank: "9",  min: 3011, max: 3200 },
-  { rank: "10", min: 3201, max: 3599 },
-  { rank: "S",  min: 3600, max: Infinity },
-];
-
-function nextRankGap(elo) {
-  for (let i = 0; i < RANKS_ASC.length; i++) {
-    const r = RANKS_ASC[i];
-    if (elo >= r.min && elo <= r.max) {
-      const next = RANKS_ASC[Math.min(i + 1, RANKS_ASC.length - 1)];
-      if (r.name === "S") return { band: "S", next: "S", need: 0 };
-      return { band: r.name, next: next.name, need: Math.max(0, next.min - elo) };
-    }
-  }
-  return { band: RANKS_ASC[0].name, next: RANKS_ASC[0].name, need: 0 };
-}
-
 const pct = (n, d) => (d ? Math.round((n / d) * 100) : 0);
 const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
 const safeName = (msg) =>
@@ -196,13 +171,10 @@ function register(registry, deps) {
       const userId = String(message.author.id);
       const display = safeName(message);
 
-      const currentElo = Math.round(
-        Number(
-          typeof elo.peekRating === "function"
-            ? elo.peekRating(userId, 1200)
-            : elo.getRating(userId, display, { createIfMissing: false })
-        ) || 1200
-      );
+      const currentEloRaw = typeof elo.peekRating === "function"
+        ? elo.peekRating(userId, 1200)
+        : elo.getRating(userId, display, { createIfMissing: false });
+      const currentElo = normalizedRating(currentEloRaw == null ? 1200 : currentEloRaw);
 
       const allRows = getUserHistory(elo, userId);
 
@@ -238,7 +210,7 @@ function register(registry, deps) {
       const last = matchRows[matchRows.length - 1] || null;
       const lastDelta = last ? Math.round(Number(last.delta) || 0) : 0;
       const lastWhen = last ? `<t:${Math.floor(Number(last.ts) || 0)}:R>` : "—";
-      const bandInfo = nextRankGap(currentElo);
+      const bandInfo = getNextRank(currentElo);
 
       const mapCounts = new Map();
       for (const r of matchRows) {
