@@ -159,10 +159,22 @@ async function renderReplayClip({
     cdp = new CdpSession(target.webSocketDebuggerUrl);
     await cdp.command("Page.enable");
     await cdp.command("Runtime.enable");
-    await cdp.command("Page.setDownloadBehavior", {
-      behavior: "allow",
-      downloadPath: outputDir,
-    });
+    // Chrome versions differ on whether downloads are exposed through the
+    // Page or Browser CDP domain. The filesystem is the common source of
+    // truth, so configure whichever command the browser supports and poll
+    // the isolated output directory below.
+    try {
+      await cdp.command("Browser.setDownloadBehavior", {
+        behavior: "allow",
+        downloadPath: outputDir,
+        eventsEnabled: true,
+      });
+    } catch {
+      await cdp.command("Page.setDownloadBehavior", {
+        behavior: "allow",
+        downloadPath: outputDir,
+      });
+    }
     await cdp.command("Page.navigate", { url });
 
     await waitFor(async () => {
@@ -177,19 +189,26 @@ async function renderReplayClip({
       return result.result?.value === true;
     }, { timeoutMs, label: "replay clip editor" });
 
-    const download = cdp.waitForEvent("Page.downloadWillBegin", () => true, timeoutMs);
-    const downloadComplete = cdp.waitForEvent(
-      "Page.downloadProgress",
-      event => event.state === "completed",
-      timeoutMs
-    );
     await cdp.command("Runtime.evaluate", {
       expression: "document.querySelector('#replay-clip-download').click()",
     });
-    const downloadInfo = await download;
-    await downloadComplete;
 
-    const downloadedPath = path.join(outputDir, downloadInfo.suggestedFilename || "tfc-clip.webm");
+    // Do not depend on Page.downloadWillBegin/Page.downloadProgress: those
+    // events are absent or inconsistent in some headless Chrome builds.
+    const downloadedPath = await waitFor(async () => {
+      const entries = await fsp.readdir(outputDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.name.endsWith(".crdownload")) continue;
+        const candidate = path.join(outputDir, entry.name);
+        try {
+          const stat = await fsp.stat(candidate);
+          if (stat.size > 0) return candidate;
+        } catch {
+          // The file may disappear between readdir and stat.
+        }
+      }
+      return null;
+    }, { timeoutMs, label: "downloaded WebM" });
     await waitFor(async () => {
       try {
         const stat = await fsp.stat(downloadedPath);
