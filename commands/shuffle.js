@@ -133,6 +133,19 @@ module.exports = {
     );
     const odds = summarizeSplit(chosenBlue, chosenRed, ratings);
 
+    const pickupChannelId = String(config.channels.pickup || process.env.PICKUP_CHANNEL_ID || "");
+    if (!pickupChannelId) {
+      return message.reply("❌ The pickup channel is not configured.");
+    }
+
+    let pickupChannel = null;
+    try {
+      pickupChannel = await message.client?.channels?.fetch?.(pickupChannelId);
+    } catch {}
+    if (!pickupChannel?.isTextBased?.()) {
+      return message.reply("❌ The configured pickup channel is unavailable.");
+    }
+
     snapshot.selected = scenarioNumber;
     db.prepare(`
       UPDATE matches
@@ -174,6 +187,10 @@ module.exports = {
       })
       .setTimestamp();
 
-    await message.channel.send({ embeds: [embed] });
+    await pickupChannel.send({ embeds: [embed] });
+    await message.reply(
+      `✅ Scenario ${scenarioNumber} applied to match **${matchId}**. ` +
+      `The updated teams were posted in <#${pickupChannelId}>.`
+    );
   },
 };
