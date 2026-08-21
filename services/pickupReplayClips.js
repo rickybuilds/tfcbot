@@ -258,7 +258,7 @@ async function postCleanFirstPickupClips({
   logger = console,
   attachWebm = false,
   renderClip = renderReplayClip,
-  maxAttachmentBytes = 25_000_000,
+  maxAttachmentBytes = 100_000_000,
 }) {
   if (!channelId || !db || !Array.isArray(rounds) || !rounds.length) return [];
   ensureClipTable(db);
@@ -340,7 +340,7 @@ async function postLiveCleanPickupClip({
   logger = console,
   attachWebm = false,
   renderClip = renderReplayClip,
-  maxAttachmentBytes = 25_000_000,
+  maxAttachmentBytes = 100_000_000,
 }) {
   if (!channelId || !db) return [];
   ensureLiveClipTable(db);

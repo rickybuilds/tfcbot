@@ -213,6 +213,7 @@ function attachAutoRecap(ctx, options = {}) {
           matchId,
           rounds,
           attachWebm: config.pickupReplayAttachWebm,
+          maxAttachmentBytes: config.pickupReplayMaxAttachmentBytes,
         });
         if (clips.length) {
           console.log(`[autoRecap] posted ${clips.length} clean pickup clip(s) for ${matchId}`);
@@ -247,6 +248,7 @@ function attachAutoRecap(ctx, options = {}) {
           roundNumber,
           player,
           attachWebm: config.pickupReplayAttachWebm,
+          maxAttachmentBytes: config.pickupReplayMaxAttachmentBytes,
         });
         if (clips.length) {
           console.log(`[autoRecap] posted live coast-to-coast relay for ${matchId} round ${roundNumber}`);

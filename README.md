@@ -46,6 +46,8 @@ clip as a Discord `.webm` attachment in addition to the replay link:
 ```env
 PICKUP_REPLAY_AUTO_CLIPS=1
 PICKUP_REPLAY_ATTACH_WEBM=1
+# 100 for a Level 3 server; use 250 if the server has the larger-upload tier.
+PICKUP_REPLAY_MAX_ATTACHMENT_MB=100
 PICKUP_CLIPS_CHANNEL_ID=your_discord_channel_id
 PICKUP_REPLAY_BROWSER_PATH=/usr/bin/chromium
 ```

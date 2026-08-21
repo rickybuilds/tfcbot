@@ -48,6 +48,14 @@ module.exports = {
   pickupReplayAttachWebm: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_REPLAY_ATTACH_WEBM || "")
   ),
+  // Discord's Level 3 server limit is 100 MB. Some servers may have the
+  // newer 250 MB larger-upload experiment, so keep this configurable.
+  pickupReplayMaxAttachmentBytes: (() => {
+    const megabytes = Number(process.env.PICKUP_REPLAY_MAX_ATTACHMENT_MB || 100);
+    return Number.isFinite(megabytes) && megabytes > 0
+      ? Math.floor(megabytes * 1_000_000)
+      : 100_000_000;
+  })(),
   // Elo V2 is intentionally shadow-only for now. "off" disables all polling
   // and recap posts; "shadow" calculates proposals without changing ratings.
   eloV2Mode: String(process.env.ELO_V2_MODE || "off").trim().toLowerCase(),
