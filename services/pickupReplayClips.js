@@ -92,13 +92,22 @@ function findCleanFirstPickupCap(events, { paddingSeconds = DEFAULT_PADDING_SECO
 function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS } = {}) {
   const ordered = [...events].sort((a, b) => a.timeMs - b.timeMs);
   const clips = [];
+  const flagStates = new Map();
   let pickup = null;
   let carried = null;
+  let carriedFromBase = false;
 
   for (const event of ordered) {
     if (event.event === "flag_pickup") {
       pickup = event;
       carried = null;
+      carriedFromBase = false;
+      continue;
+    }
+    if (event.event === "flag_entity_base" && !pickup) {
+      // A flag may return to base without a pickup being present in the
+      // current event window. Preserve eligibility for the next pickup.
+      flagStates.set(event.entity, "base");
       continue;
     }
     if (!pickup) continue;
@@ -110,31 +119,43 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
       event.entity > 0
     ) {
       carried = event;
+      // A flag is considered eligible at the beginning of a recording and
+      // becomes eligible again only after an explicit return/capture event.
+      // A pickup after a drop therefore cannot be called coast-to-coast.
+      carriedFromBase = flagStates.get(event.entity) !== "dropped" &&
+        flagStates.get(event.entity) !== "carried";
+      flagStates.set(event.entity, "carried");
       continue;
     }
     if (!carried || event.entity !== carried.entity || event.timeMs < carried.timeMs) continue;
 
     if (event.event === "flag_entity_dropped") {
+      flagStates.set(event.entity, "dropped");
       pickup = null;
       carried = null;
+      carriedFromBase = false;
       continue;
     }
     if (event.event !== "flag_entity_base") continue;
 
-    const padding = Math.max(0, Number(paddingSeconds) || 0);
-    const start = Math.max(0, pickup.timeMs / 1000 - padding);
-    const end = Math.max(start, event.timeMs / 1000 + padding);
-    clips.push({
-      pickupTime: pickup.timeMs / 1000,
-      capTime: event.timeMs / 1000,
-      clipStart: start,
-      clipEnd: end,
-      actorSession: pickup.actorSession,
-      entity: carried.entity,
-      flag: pickup.text || "flag",
-    });
+    if (carriedFromBase) {
+      const padding = Math.max(0, Number(paddingSeconds) || 0);
+      const start = Math.max(0, pickup.timeMs / 1000 - padding);
+      const end = Math.max(start, event.timeMs / 1000 + padding);
+      clips.push({
+        pickupTime: pickup.timeMs / 1000,
+        capTime: event.timeMs / 1000,
+        clipStart: start,
+        clipEnd: end,
+        actorSession: pickup.actorSession,
+        entity: carried.entity,
+        flag: pickup.text || "flag",
+      });
+    }
+    flagStates.set(event.entity, "base");
     pickup = null;
     carried = null;
+    carriedFromBase = false;
   }
 
   return clips;
