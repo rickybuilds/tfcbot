@@ -124,6 +124,21 @@ async function waitForDevTools(port, fetchImpl, timeoutMs) {
   }, { timeoutMs, label: "Chromium DevTools" });
 }
 
+async function isWebmFile(filePath) {
+  let handle;
+  try {
+    handle = await fsp.open(filePath, "r");
+    const header = Buffer.alloc(4);
+    const result = await handle.read(header, 0, header.length, 0);
+    // WebM is an EBML container and always starts with this four-byte ID.
+    return result.bytesRead === header.length && header.equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
 async function renderReplayClip({
   url,
   outputPath,
@@ -200,11 +215,16 @@ async function renderReplayClip({
       for (const entry of entries) {
         if (!entry.isFile() || entry.name.endsWith(".crdownload")) continue;
         const candidate = path.join(outputDir, entry.name);
+        let stat;
         try {
-          const stat = await fsp.stat(candidate);
-          if (stat.size > 0) return candidate;
+          stat = await fsp.stat(candidate);
         } catch {
           // The file may disappear between readdir and stat.
+          continue;
+        }
+        if (stat.size > 0) {
+          if (await isWebmFile(candidate)) return candidate;
+          throw new Error(`Downloaded clip is not a WebM (invalid EBML header): ${entry.name}`);
         }
       }
       return null;
@@ -241,6 +261,7 @@ async function reservePort() {
 
 module.exports = {
   CdpSession,
+  isWebmFile,
   renderReplayClip,
   resolveBrowserExecutable,
 };

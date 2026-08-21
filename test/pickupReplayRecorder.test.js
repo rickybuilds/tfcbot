@@ -2,6 +2,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fsp = require("node:fs").promises;
+const os = require("node:os");
+const path = require("node:path");
 const Database = require("better-sqlite3");
 const {
   PickupReplayRecorder,
@@ -10,6 +13,7 @@ const {
 const { attachAutoRecap, armed } = require("../services/autoRecap");
 const rconServers = require("../config/rcon");
 const { sendRecapWithDemos } = require("../services/discordUpload");
+const { isWebmFile } = require("../services/pickupReplayRenderer");
 
 const quietLogger = { info() {}, warn() {}, error() {}, log() {} };
 
@@ -365,4 +369,19 @@ test("pickup recap omits replay links when no recording was confirmed", async ()
 
   assert.doesNotMatch(detailField.value, /Watch Replay/);
   assert.doesNotMatch(detailField.value, /pickup-replay\.html/);
+});
+
+test("WebM renderer validation rejects mislabeled downloads", async () => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-webm-test-"));
+  try {
+    const validPath = path.join(directory, "clip.webm");
+    const invalidPath = path.join(directory, "clip-invalid.webm");
+    await fsp.writeFile(validPath, Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+    await fsp.writeFile(invalidPath, Buffer.from("Cr24"));
+
+    assert.equal(await isWebmFile(validPath), true);
+    assert.equal(await isWebmFile(invalidPath), false);
+  } finally {
+    await fsp.rm(directory, { recursive: true, force: true });
+  }
 });
