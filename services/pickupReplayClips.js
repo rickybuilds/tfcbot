@@ -317,6 +317,9 @@ async function postLiveCleanPickupClip({
   fetchImpl = fetchDefault,
   replayUrl = DEFAULT_LIVE_REPLAY_URL,
   logger = console,
+  attachWebm = false,
+  renderClip = renderReplayClip,
+  maxAttachmentBytes = 25_000_000,
 }) {
   if (!channelId || !db) return [];
   ensureLiveClipTable(db);
@@ -337,11 +340,41 @@ async function postLiveCleanPickupClip({
   `).run(...identity, Date.now());
   if (!reservation.changes) return [];
 
+  let temporaryDirectory = null;
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel?.send) throw new Error("pickup clips channel is unavailable");
+
+    let attachment = null;
+    if (attachWebm) {
+      try {
+        temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-pickup-live-clip-"));
+        const outputPath = path.join(temporaryDirectory, clipAttachmentName(matchId, roundNumber));
+        await renderClip({
+          url: clip.url,
+          outputPath,
+          matchId,
+          roundNumber: Number(roundNumber),
+          clip,
+        });
+        const stat = await fsp.stat(outputPath);
+        if (!stat.size) throw new Error("renderer produced an empty WebM");
+        if (stat.size > maxAttachmentBytes) {
+          throw new Error(`WebM is ${stat.size} bytes; Discord limit is ${maxAttachmentBytes}`);
+        }
+        attachment = new AttachmentBuilder(outputPath, {
+          name: clipAttachmentName(matchId, roundNumber),
+        });
+      } catch (error) {
+        logger.warn?.(`[pickupReplayClips] live WebM render failed for ${matchId}/${roundNumber}: ${error.message}`);
+      }
+    }
+
     await channel.send({
-      content: `:eyes: **Coast-to-coast${player ? ` — ${player}` : ""}** — [Watch the live replay](${clip.url})`,
+      content: attachment
+        ? `:eyes: **Coast-to-coast${player ? ` — ${player}` : ""}**`
+        : `:eyes: **Coast-to-coast${player ? ` — ${player}` : ""}** — [Watch the live replay](${clip.url})`,
+      ...(attachment ? { files: [attachment] } : {}),
     });
     return [{ roundNumber: Number(roundNumber), clip }];
   } catch (error) {
@@ -351,6 +384,10 @@ async function postLiveCleanPickupClip({
     `).run(...identity);
     logger.warn?.(`[pickupReplayClips] live coast-to-coast relay failed for ${matchId}/${roundNumber}: ${error.message}`);
     throw error;
+  } finally {
+    if (temporaryDirectory) {
+      await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
