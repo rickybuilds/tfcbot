@@ -177,6 +177,7 @@ function eligibleStreakPlayers(players, elo) {
 
       const serverVoteDur = settings.getNumber("vote:server_duration", 10);
       const mapVoteDur = settings.getNumber("vote:map_duration", 10);
+      const spinnerDuration = settings.getNumber("vote:spinner_duration", 4);
 
 
 	// 🔒 Filter out any currently locked (in-progress) servers
@@ -211,6 +212,7 @@ function eligibleStreakPlayers(players, elo) {
 	  await startVote(state, message, {
 	  title: "Server Vote",
 	  duration: serverVoteDur,
+	  spinnerDuration,
 	  kind: "server",
 	  options: serverOptions,
 	  showVoters: true, 
@@ -295,6 +297,7 @@ function eligibleStreakPlayers(players, elo) {
 		  rerollCount: 0,
 		  maxRerolls: Number(process.env.MAP_MAX_REROLLS || 2),
 		  mapVoteDur,
+		  spinnerDuration,
 		  maxSelectionsPerUser: config.mapMaxSelectionsPerUser,
 		  elo,
 		  privacy,
@@ -487,7 +490,7 @@ async function cancelVoteAndRequeue(message, config, state, elo, privacy, leaver
   await postQueueBoard(message.channel, state, elo, privacy);
 }
 
-	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, maxSelectionsPerUser, elo, privacy, finalize }) {
+	async function runMapVoteRound({ message, state, title, mapSource, excludeSet, carryName, rerollCount, maxRerolls, mapVoteDur, spinnerDuration, maxSelectionsPerUser, elo, privacy, finalize }) {
 	  const roundList = require("../lib/maps").pickTieredMapsWithCounts(mapSource, excludeSet, carryName);
 	  const options = buildMapOptionsFromList(roundList, rerollCount < maxRerolls);
 
@@ -496,6 +499,7 @@ return startVote(state, message, {
   duration: mapVoteDur,
   kind: "map",
   options,
+  spinnerDuration,
   showVoters: true,
   maxSelectionsPerUser,
   elo,
@@ -599,6 +603,7 @@ return startVote(state, message, {
 			  rerollCount: nextRerollCount,
 			  maxRerolls,
 			  mapVoteDur,
+			  spinnerDuration,
 			  maxSelectionsPerUser,
 			  elo,
 			  privacy,

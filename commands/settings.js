@@ -61,6 +61,7 @@ function register(registry, deps) {
     "backup:time":          "04:00",
     "vote:server_duration": 120,
     "vote:map_duration":    60,
+    "vote:spinner_duration": 4,
     [TEAM1_STARTS_SETTING]: DEFAULT_TEAM1_STARTS,
   };
 
@@ -82,6 +83,7 @@ function register(registry, deps) {
         { name: "Backup Time",           value: settings.getString("backup:time", DEFAULTS["backup:time"]), inline: true },
         { name: "Server Vote Duration (sec)", value: String(settings.getNumber("vote:server_duration", DEFAULTS["vote:server_duration"])), inline: true },
         { name: "Map Vote Duration (sec)",    value: String(settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])), inline: true },
+        { name: "Tiebreaker Spinner (sec)",   value: String(settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])), inline: true },
         { name: "Team 1 Starts", value: settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING]), inline: true },
         { name: "Settings Channel",      value: SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_", inline: false },
       )
@@ -100,6 +102,7 @@ function register(registry, deps) {
         `• Backup Time: ${settings.getString("backup:time", DEFAULTS["backup:time"])}\n` +
         `• Server Vote Duration (sec): ${settings.getNumber("vote:server_duration", DEFAULTS["vote:server_duration"])}\n` +
         `• Map Vote Duration (sec): ${settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])}\n` +
+        `• Tiebreaker Spinner (sec): ${settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])}\n` +
         `• Team 1 Starts: ${settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING])}\n` +
         `• Settings Channel: ${SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_"}`);
     } else {
@@ -128,6 +131,7 @@ function register(registry, deps) {
       "settings:channel_id",
       "vote:server_duration",
       "vote:map_duration",
+      "vote:spinner_duration",
       TEAM1_STARTS_SETTING,
     ]);
     if (!allowed.has(key)) return message.channel.send("Unknown key.");
@@ -210,6 +214,10 @@ function register(registry, deps) {
     } else if (key === "vote:server_duration" || key === "vote:map_duration") {
       n = Number(val);
       if (!Number.isFinite(n) || n < 5 || n > 120) return message.channel.send("Vote durations must be 5–120 seconds.");
+      settings.setNumber(key, n);
+    } else if (key === "vote:spinner_duration") {
+      n = Number(val);
+      if (!Number.isFinite(n) || n < 1 || n > 15) return message.channel.send("`vote:spinner_duration` must be 1–15 seconds.");
       settings.setNumber(key, n);
     }
 
