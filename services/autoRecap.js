@@ -246,6 +246,7 @@ function attachAutoRecap(ctx, options = {}) {
           matchId,
           roundNumber,
           player,
+          attachWebm: config.pickupReplayAttachWebm,
         });
         if (clips.length) {
           console.log(`[autoRecap] posted live coast-to-coast relay for ${matchId} round ${roundNumber}`);
