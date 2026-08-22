@@ -28,9 +28,12 @@ preserve the same V1 team totals. Matches with extra/missing performance rows,
 ambiguous identity mappings, or unavailable stats use an equal 25% split and
 record the fallback reason. Snapshots are stored in `elo_shadow_results`.
 
-`off` is the only other supported mode. Live V2 rating writes are intentionally
-not implemented yet; setting shadow mode can never mutate `ratings` or
-`rating_changes`.
+`off` disables V2. `live-gentle` is the controlled live mode: it prepares the
+V1 team pools without writing them, waits for validated `nn-mvp-v1` scores, and
+then writes the 20%-30% Gentle allocation. If performance data cannot be
+validated before the retry limit, it safely applies the equal 25% split. A
+rating guard refuses to apply a delayed result if another rating change has
+already moved a player's rating.
 
 ## Tech Stack
 - Node.js

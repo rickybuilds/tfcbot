@@ -56,8 +56,9 @@ module.exports = {
       ? Math.floor(megabytes * 1_000_000)
       : 100_000_000;
   })(),
-  // Elo V2 is intentionally shadow-only for now. "off" disables all polling
-  // and recap posts; "shadow" calculates proposals without changing ratings.
+  // "off" disables V2; "shadow" calculates proposals without changing
+  // ratings; "live-gentle" defers the rating write until NN scores arrive and
+  // applies the validated 20%-30% allocation with equal-share fallback.
   eloV2Mode: String(process.env.ELO_V2_MODE || "off").trim().toLowerCase(),
   mapMaxSelectionsPerUser: (() => {
     const value = Math.max(1, Number(process.env.MAP_MAX_SELECTIONS_PER_USER || 1));

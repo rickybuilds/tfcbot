@@ -63,27 +63,28 @@ const moderation = require("./commands/moderation");
 
 // robust Elo import (supports multiple export styles)
 const EloAny = require("./lib/elo");
+const eloDbPath = process.env.DB_PATH || process.env.ELO_DB || "elo.db";
 let elo;
-if (typeof EloAny === "function") elo = new EloAny("elo.db");
-else if (EloAny && typeof EloAny.EloDB === "function") elo = new EloAny.EloDB("elo.db");
-else if (EloAny && typeof EloAny.default === "function") elo = new EloAny.default("elo.db");
+if (typeof EloAny === "function") elo = new EloAny(eloDbPath);
+else if (EloAny && typeof EloAny.EloDB === "function") elo = new EloAny.EloDB(eloDbPath);
+else if (EloAny && typeof EloAny.default === "function") elo = new EloAny.default(eloDbPath);
 else if (EloAny && typeof EloAny.getRating === "function") elo = EloAny;
 else throw new Error("lib/elo: export must be class or instance with getRating()");
 
 // init singletons
 const settings     = new SettingsDB("bot.db");
-const privacy      = new PrivacyDB("elo.db");
-const matchesStore = new MatchStore("/root/tfcbot/elo.db");
+const privacy      = new PrivacyDB(eloDbPath);
+const matchesStore = new MatchStore(eloDbPath);
 const queueStore   = new QueueStore("queue.json");
 const banStore     = new BanStore("bot.db");
-const steamLinks = new SteamLinks();
+const steamLinks = new SteamLinks(eloDbPath);
 
 // Jail system
 const jailStore    = new JailStore();
 
 // WinStreaks (live from elo.db)
 const { WinStreakStore } = require("./lib/winstreak");
-const streaks = new WinStreakStore("/root/tfcbot/elo.db");
+const streaks = new WinStreakStore(eloDbPath);
 const shuffle = require("./commands/shuffle");
 
 // ============================================================================
@@ -359,6 +360,7 @@ memberLeaves(client, config);
 deps.client = client;
 const eloShadow = new EloShadowService({
   db: matchesStore.db,
+  elo,
   client,
   channelId: config.channels.eloTest || config.channels.recap,
   mode: config.eloV2Mode,

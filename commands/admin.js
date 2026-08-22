@@ -91,15 +91,27 @@ function register(reg, deps) {
     try {
       try { elo.unreportMatch(matchId); } catch {}
 
-      // 👇 forward hydrated match object so modeElo sees ADL/rng_multiplier
-      elo.applyTeamResult({
+      // Live Gentle must not write V1 first: NN performance arrives after the
+      // match. Prepare the exact V1 team pools and defer the rating write.
+      const eloArgs = {
         matchId,
         blue,
         red,
         winner: result,
         createdAt: match.createdAt || Date.now(),
         match,
-      });
+      };
+      const liveGentle = config.eloV2Mode === "live-gentle";
+      let preparedLive = null;
+      if (liveGentle) {
+        preparedLive = elo.applyTeamResult(eloArgs, { dryRun: true });
+        preparedLive.winner = result;
+        preparedLive.blue = preparedLive.blue.map(player => ({ ...player, currentDelta: preparedLive.bluePool }));
+        preparedLive.red = preparedLive.red.map(player => ({ ...player, currentDelta: preparedLive.redPool }));
+      } else {
+        // Existing V1 live behavior.
+        elo.applyTeamResult(eloArgs);
+      }
 
               elo.db.prepare(`
           UPDATE matches
@@ -118,11 +130,16 @@ function register(reg, deps) {
           String(matchId)
         );
 
-      // Forward-only V2 shadow calculation. This never mutates live Elo.
-      // Corrected reports explicitly replace and repost their prior snapshot.
       try {
-        deps.eloShadow?.schedule(matchId, { force: forceFix });
+        if (liveGentle) {
+          const scheduled = deps.eloShadow?.scheduleLive(matchId, preparedLive, { delayMs: forceFix ? 1000 : undefined });
+          if (!scheduled?.scheduled && !scheduled?.idempotent) throw new Error("live_gentle_not_scheduled");
+        } else {
+          // Shadow mode remains forward-only and never mutates live Elo.
+          deps.eloShadow?.schedule(matchId, { force: forceFix });
+        }
       } catch (shadowErr) {
+        if (liveGentle) throw shadowErr;
         console.warn(`[elo-shadow] Could not schedule ${matchId}:`, shadowErr);
       }
 

@@ -278,9 +278,11 @@ class EloShadowService {
     if (!options.db?.prepare) throw new Error("EloShadowService requires a better-sqlite3 database");
     this.db = options.db;
     this.client = options.client || null;
+    this.elo = options.elo || null;
     this.channelId = String(options.channelId || "");
     this.mode = String(options.mode || process.env.ELO_V2_MODE || "off").trim().toLowerCase();
-    this.enabled = this.mode === "shadow";
+    this.liveGentle = this.mode === "live-gentle";
+    this.enabled = this.mode === "shadow" || this.liveGentle;
     this.fetch = options.fetch || fetchDefault;
     this.baseUrl = String(options.baseUrl || process.env.NONAME_URL || "https://nonamepickup.servehalflife.com").replace(/\/+$/, "");
     this.formulaVersion = String(options.formulaVersion || process.env.ELO_SHADOW_FORMULA_VERSION || DEFAULT_FORMULA_VERSION);
@@ -318,6 +320,16 @@ class EloShadowService {
       );
       CREATE INDEX IF NOT EXISTS idx_elo_shadow_status ON elo_shadow_results(status, updated_at);
     `);
+    const columns = this.db.prepare("PRAGMA table_info(elo_shadow_results)").all();
+    if (!columns.some(column => column.name === "live_mode")) {
+      this.db.exec("ALTER TABLE elo_shadow_results ADD COLUMN live_mode TEXT NOT NULL DEFAULT 'shadow'");
+    }
+    if (!columns.some(column => column.name === "live_applied")) {
+      this.db.exec("ALTER TABLE elo_shadow_results ADD COLUMN live_applied INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!columns.some(column => column.name === "pending_json")) {
+      this.db.exec("ALTER TABLE elo_shadow_results ADD COLUMN pending_json TEXT");
+    }
   }
 
   start() {
@@ -371,6 +383,23 @@ class EloShadowService {
     return { enabled: true, scheduled: true };
   }
 
+  scheduleLive(matchId, prepared, options = {}) {
+    if (!this.liveGentle) return { enabled: false, reason: "live_gentle_disabled" };
+    const id = String(matchId || "").trim();
+    if (!id || !prepared?.blue?.length || !prepared?.red?.length) throw new Error("Missing prepared live Elo result");
+    this.db.prepare(`
+      INSERT INTO elo_shadow_results(
+        match_id,status,calculation_version,live_mode,live_applied,pending_json
+      ) VALUES (?, 'pending', ?, 'gentle-20-30', 0, ?)
+      ON CONFLICT(match_id) DO UPDATE SET
+        status='pending', calculation_version=excluded.calculation_version,
+        live_mode='gentle-20-30', live_applied=0, pending_json=excluded.pending_json,
+        reason=NULL, payload_json=NULL, updated_at=strftime('%s','now'),
+        calculated_at=NULL, posted_at=NULL
+    `).run(id, CALCULATION_VERSION, JSON.stringify(prepared));
+    return this.schedule(id, { delayMs: options.delayMs ?? this.initialDelayMs });
+  }
+
   async runNow(matchId) {
     const id = String(matchId);
     const timer = this.active.get(id);
@@ -408,16 +437,28 @@ class EloShadowService {
       WHERE c.match_id=?
       ORDER BY c.id
     `).all(String(matchId));
+    const resultRow = this.db.prepare(`
+      SELECT live_mode, pending_json FROM elo_shadow_results WHERE match_id=?
+    `).get(String(matchId));
+    let pending = null;
+    try {
+      if (resultRow?.live_mode === "gentle-20-30" && resultRow.pending_json) {
+        pending = JSON.parse(resultRow.pending_json);
+      }
+    } catch {
+      pending = null;
+    }
     const latest = new Map();
     for (const change of changes) latest.set(String(change.player_id), change);
     const toPlayer = (id, team) => {
       const change = latest.get(String(id));
+      const pendingPlayer = (pending?.[team.toLowerCase()] || []).find(player => String(player.id) === String(id));
       return {
         id: String(id),
-        name: change?.display_name || String(id),
+        name: change?.display_name || pendingPlayer?.name || String(id),
         team,
-        before: finiteNumber(change?.before, NaN),
-        currentDelta: finiteNumber(change?.delta, 0),
+        before: finiteNumber(change?.before ?? pendingPlayer?.before, NaN),
+        currentDelta: finiteNumber(change?.delta ?? pendingPlayer?.currentDelta ?? 0, 0),
         score: null,
         steamId: null,
       };
@@ -430,7 +471,7 @@ class EloShadowService {
     if ([...blue, ...red].some(player => !Number.isFinite(player.before))) {
       throw new Error("missing_v1_rating_snapshot");
     }
-    return { match, blue, red, officialIds };
+    return { match, blue, red, officialIds, pending };
   }
 
   async _fetchPerformance(matchId) {
@@ -547,6 +588,35 @@ class EloShadowService {
     );
   }
 
+  _applyLiveSnapshot(snapshot, roster) {
+    if (!this.liveGentle) return null;
+    if (!this.elo?.applyPreparedTeamResult) throw new Error("live_gentle_requires_elo_service");
+    if (!roster.pending) throw new Error("live_gentle_missing_prepared_result");
+    const existingChanges = this.db.prepare(
+      "SELECT COUNT(*) AS count FROM rating_changes WHERE match_id=?"
+    ).get(snapshot.matchId)?.count || 0;
+    if (existingChanges === roster.officialIds.length) {
+      this.db.prepare(
+        "UPDATE elo_shadow_results SET live_applied=1, updated_at=strftime('%s','now') WHERE match_id=?"
+      ).run(snapshot.matchId);
+      return null;
+    }
+    if (existingChanges !== 0) throw new Error("live_gentle_partial_rating_changes");
+    const gentle = snapshot.scenarios?.gentle?.teams;
+    if (!gentle?.blue || !gentle?.red) throw new Error("live_gentle_missing_allocation");
+    const allocations = [
+      ...gentle.blue.map(player => ({ id: player.id, delta: player.shadowDelta })),
+      ...gentle.red.map(player => ({ id: player.id, delta: player.shadowDelta })),
+    ];
+    const applied = this.elo.applyPreparedTeamResult(roster.pending, allocations, snapshot.matchId);
+    this.db.prepare(`
+      UPDATE elo_shadow_results
+      SET live_applied=1, updated_at=strftime('%s','now')
+      WHERE match_id=?
+    `).run(snapshot.matchId);
+    return applied;
+  }
+
   async _post(snapshot) {
     if (!this.channelId) throw new Error("missing_recap_channel");
     let channel = this.client?.channels?.cache?.get?.(this.channelId);
@@ -589,6 +659,7 @@ class EloShadowService {
       apiPlayerCount: 0,
       fallbackReason: reason,
     }, this);
+    if (this.liveGentle && roster.pending) this._applyLiveSnapshot(snapshot, roster);
     this._persistSnapshot(snapshot);
     return this._post(snapshot);
   }
@@ -638,6 +709,7 @@ class EloShadowService {
         apiPlayerCount: mapping.apiPlayerCount,
         fallbackReason: mapping.fallbackReason,
       }, this);
+      if (this.liveGentle && roster.pending) this._applyLiveSnapshot(snapshot, roster);
       this._persistSnapshot(snapshot);
       return await this._post(snapshot);
     } catch (error) {
