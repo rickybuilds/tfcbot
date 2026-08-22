@@ -133,7 +133,11 @@ function cleanupQueue(state, settings) {
 function queueLines(state, elo, privacy) {
   if (!state.queue.length) return "_empty_";
 
-  return state.queue.map(p => {
+  const displayQueue = state.queue.slice().sort((a, b) =>
+    Number(Boolean(b.captain)) - Number(Boolean(a.captain))
+  );
+
+  return displayQueue.map(p => {
     try {
       const registeredName = getStoredPlayerName(elo, p.id, p.name);
       const base = formatPlayerName(
