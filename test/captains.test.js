@@ -15,9 +15,9 @@ test("captain mode activates only with exactly two captains", () => {
   assert.equal(isCaptainMode(players.slice(0, 1)), false);
 });
 
-test("six-player draft gives each team three picks with the middle snake pick", () => {
-  assert.deepEqual(PICK_ORDER, ["blue", "red", "red", "blue", "blue", "red"]);
+test("six-player draft uses the fixed Team 1/Team 2 order", () => {
+  assert.deepEqual(PICK_ORDER, ["blue", "red", "blue", "red", "red", "blue"]);
   assert.equal(PICK_ORDER.filter(team => team === "blue").length, 3);
   assert.equal(PICK_ORDER.filter(team => team === "red").length, 3);
-  assert.deepEqual(pickOrderFor("red"), ["red", "blue", "blue", "red", "red", "blue"]);
+  assert.deepEqual(pickOrderFor("red"), PICK_ORDER);
 });
