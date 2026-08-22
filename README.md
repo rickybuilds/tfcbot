@@ -5,6 +5,17 @@ A custom Discord bot and server automation platform for Team Fortress Classic pi
 ## Features
 - Queue and matchmaking system
 - Elo tracking and rankings
+
+## Captain drafts
+
+Players can volunteer as captains while joining a pickup with `!addcap`, `++cap`,
+or `**cap`. When exactly two queued players are marked, the full match uses a
+captain draft after the server/map votes. Team 1 is the first captain who joins
+with a captain command; Team 2 is the second. The captains select the remaining
+players with Discord buttons. Before the draft, the captains play blind Rock
+Paper Scissors; ties repeat and the winner picks first. The resulting rosters
+are the teams used for the match and its ELO result. With fewer than two
+captains, the normal ELO balance remains active.
 - Match reporting and history
 - Admin and moderation tools
 - RCON server integration

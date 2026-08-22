@@ -19,6 +19,7 @@ const {
   getStoredPlayerName,
 } = require("../lib/util");
 const { makeBalancedTeams } = require("../lib/balance");
+const { isCaptainMode, runCaptainDraft } = require("../lib/captains");
 const { postQueueBoard, notifyHldsVoteStarted } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 // HLDS auto-recap
@@ -636,8 +637,43 @@ async function finalizeMatch(
     name: getStoredPlayerName(elo, p.id, p.name),
   }));
 
-  // Balance teams (actual teams used in match)
-  const bal = makeBalancedTeams(canonicalPlayers, elo);
+  // Two explicit captains switch this match to a live captain draft. Any
+  // other captain count keeps the normal ELO-balanced path.
+  const captainMode = isCaptainMode(canonicalPlayers);
+  let captainDraft = null;
+  if (captainMode) {
+    try {
+      await channel.send("👑 **Captain mode activated.** The captains will play blind Rock Paper Scissors to decide who picks first.");
+      captainDraft = await runCaptainDraft({ channel }, canonicalPlayers);
+    } catch (err) {
+      console.warn("[captain draft] canceled:", err.message);
+      state.queue = canonicalPlayers.map(p => ({ ...p }));
+      state.queueSnapshot = null;
+      state.serverWinner = null;
+      state.isVotingInProgress = false;
+      state.pendingTeam1Starts = null;
+      await channel.send("⚠️ Captain draft timed out or failed. The match was canceled and the players were returned to the queue.").catch(() => {});
+      await postQueueBoard(channel, state, elo, privacy).catch(() => {});
+      return null;
+    }
+  }
+
+  // These are the actual teams used in the match, and therefore the teams
+  // consumed by the existing result/ELO distribution code.
+  const draftedBlue = captainDraft?.blue || null;
+  const draftedRed = captainDraft?.red || null;
+  const balanced = makeBalancedTeams(canonicalPlayers, elo);
+  const bal = captainDraft
+    ? {
+        ...balanced,
+        blue: draftedBlue,
+        red: draftedRed,
+        sumBlue: draftedBlue.reduce((sum, p) => sum + (Number(p.rating) || Number(elo.getRating(p.id, p.name, { createIfMissing: true })) || 1941), 0),
+        sumRed: draftedRed.reduce((sum, p) => sum + (Number(p.rating) || Number(elo.getRating(p.id, p.name, { createIfMissing: true })) || 1941), 0),
+      }
+    : balanced;
+  bal.avgBlue = Math.round(bal.sumBlue / Math.max(1, bal.blue.length));
+  bal.avgRed = Math.round(bal.sumRed / Math.max(1, bal.red.length));
 
   const blueList = bal.blue.length
     ? bal.blue.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)).join("\n")
@@ -680,7 +716,8 @@ async function finalizeMatch(
 	}
 
 	// Build "Match Ready" embed
-	  const emb = new EmbedBuilder()
+  const matchMode = captainMode ? "CAPTAINS" : MODE;
+  const emb = new EmbedBuilder()
 		.setColor(0x57f287)
 		.setTitle(`Match Ready — ${serverObj?.name || "Unknown Server"} — ${mapObj?.name || "Unknown Map"}`)
 		.setURL(serverObj?.url || null)
@@ -691,7 +728,7 @@ async function finalizeMatch(
 		  (serverObj?.password ? `Password: **${serverObj.password}**\n` : "") +
 		  (serverObj?.url ? `[Click here to join server](${serverObj.url})\n` : "") +
 		  `Map: **${mapObj?.name || "Unknown Map"}** (${mirvLabel(mapObj?.mirv)})\n` +
-		  `Mode: **${MODE}**\n\n` +
+          `Mode: **${matchMode}**\n\n` +
 		  (teamStartResolution.overridden
 		    ? `⚠️ **Map override:** ${teamStartResolution.reason}.\n\n`
 		    : "") +
@@ -834,7 +871,7 @@ async function finalizeMatch(
 	  ON CONFLICT(match_id) DO UPDATE SET
 		map_name=excluded.map_name,
 		server_name=excluded.server_name,
-		mode=excluded.mode,
+	  mode=excluded.mode,
 		avg_blue=excluded.avg_blue,
 		avg_red=excluded.avg_red,
 		rng_multiplier=excluded.rng_multiplier,
@@ -848,7 +885,7 @@ async function finalizeMatch(
 	  Math.floor(Date.now() / 1000),
 	  mapObj?.name || "(unknown)",
 	  serverObj?.name || "(unknown)",
-	  MODE || "STANDARD",
+	  matchMode || "STANDARD",
 	  bal.avgBlue,
 	  bal.avgRed,
 	  bonus?.multiplier || 1.0,
@@ -876,7 +913,11 @@ const record = {
   team1StartsReason: teamStartResolution.reason,
   avgBlue: bal.avgBlue,
   avgRed : bal.avgRed,
-  mode: MODE || "STANDARD",          // 👈 ensure mode is saved
+  mode: matchMode || "STANDARD",     // 👈 ensure mode is saved
+  captains: captainDraft ? {
+    blue: captainDraft.captains.blue.id,
+    red: captainDraft.captains.red.id,
+  } : null,
   rng_multiplier: bonus?.multiplier || 1.0, // 👈 save rng multiplier (or 1.0 if none)
   bonusElo: bonus || null,
   reported: false,

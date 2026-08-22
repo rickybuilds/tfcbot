@@ -719,7 +719,7 @@ client.on("messageCreate", async (message) => {
     const rawLower = raw.toLowerCase();
 
     // ✅ handle bare specials like ++, --, ++adl, --adl (case-insensitive)
-    const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**"]);
+    const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**", "++cap", "**cap"]);
 
     if (BARE_SPECIAL.has(rawLower)) {
       const fn = registry.get(rawLower); // registry keys are lowercase

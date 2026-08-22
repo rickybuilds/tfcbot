@@ -26,6 +26,7 @@ const HLDS_QUEUE_COMMANDS = new Map([
   ["!remove", { action: "remove", adl: false }],
   ["--", { action: "remove", adl: false }],
 ]);
+const CAPTAIN_COMMANDS = new Set(["!addcap", "++cap", "**cap"]);
 
 /* ------------------ local helpers ------------------ */
 function isAdmin(message) {
@@ -35,6 +36,10 @@ function now() { return Date.now(); }
 
 function parseHldsQueueCommand(text) {
   return HLDS_QUEUE_COMMANDS.get(String(text || "").trim().toLowerCase()) || null;
+}
+
+function parseCaptainCommand(text) {
+  return CAPTAIN_COMMANDS.has(String(text || "").trim().toLowerCase());
 }
 
 function safeRconText(text) {
@@ -140,7 +145,7 @@ function queueLines(state, elo, privacy) {
         false
       );
 
-      const name = `${base}${supporterBadge(p.id)}`;
+      const name = `${p.captain ? "[CAP] " : ""}${base}${supporterBadge(p.id)}`;
 
       return p.adlVote ? `${name} (ADL)` : name;
     } catch (e) {
@@ -184,7 +189,7 @@ function register(reg, {
   steamLinks,
   runRconCommand,
 }) {
-  const add = async (message, isAdl = false) => {
+  const add = async (message, isAdl = false, asCaptain = false) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
 
@@ -258,11 +263,17 @@ if (ban) {
     try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
     const name = getStoredPlayerName(elo, id, nameSeed);
     if (!entry) {
-      entry = { id, name, lastSeenAt: Date.now() };
+      entry = { id, name, lastSeenAt: Date.now(), captain: asCaptain };
       state.queue.push(entry);
     } else {
       entry.name = name;
       entry.lastSeenAt = Date.now();
+      if (asCaptain) entry.captain = true;
+    }
+
+    if (asCaptain && state.queue.filter(p => p.captain).length > 2) {
+      entry.captain = false;
+      return message.reply("❌ This pickup already has two captains.");
     }
 
     // mark ADL voters + register vote
@@ -522,6 +533,9 @@ if (ban) {
 // aliases
 reg.set("++", (msg) => add(msg, false));
 reg.set("add", (msg) => add(msg, false));
+reg.set("addcap", (msg) => add(msg, false, true));
+reg.set("++cap", (msg) => add(msg, false, true));
+reg.set("**cap", (msg) => add(msg, false, true));
 reg.set("--", remove);
 reg.set("addadl", (msg) => add(msg, true));
 reg.set("++adl", (msg) => add(msg, true));
@@ -833,5 +847,6 @@ module.exports = {
   maybeStartAutoFullVote,
   notifyHldsVoteStarted,
   parseHldsQueueCommand,
+  parseCaptainCommand,
   safeRconText,
 };
