@@ -258,22 +258,19 @@ if (ban) {
 }
 
     let entry = state.queue.find(p => p.id === id);
+    const captainCount = state.queue.filter(p => p.captain).length;
+    const canPromote = asCaptain && (entry?.captain || captainCount < 2);
     const discordName = message.member?.displayName || message.author.username;
     const nameSeed = entry?.name || discordName;
     try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
     const name = getStoredPlayerName(elo, id, nameSeed);
     if (!entry) {
-      entry = { id, name, lastSeenAt: Date.now(), captain: asCaptain };
+      entry = { id, name, lastSeenAt: Date.now(), captain: canPromote };
       state.queue.push(entry);
     } else {
       entry.name = name;
       entry.lastSeenAt = Date.now();
-      if (asCaptain) entry.captain = true;
-    }
-
-    if (asCaptain && state.queue.filter(p => p.captain).length > 2) {
-      entry.captain = false;
-      return message.reply("❌ This pickup already has two captains.");
+      if (canPromote) entry.captain = true;
     }
 
     // mark ADL voters + register vote
