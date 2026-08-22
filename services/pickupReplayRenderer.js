@@ -213,7 +213,9 @@ async function renderReplayClip({
     const downloadedPath = await waitFor(async () => {
       const entries = await fsp.readdir(outputDir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isFile() || entry.name.endsWith(".crdownload")) continue;
+        // Chromium can leave auxiliary pages such as downloads.html in the
+        // directory. Only the named media artifact is eligible here.
+        if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".webm")) continue;
         const candidate = path.join(outputDir, entry.name);
         let stat;
         try {
