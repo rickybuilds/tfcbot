@@ -247,7 +247,7 @@ function attachAutoRecap(ctx, options = {}) {
           matchId,
           roundNumber,
           player,
-          attachWebm: config.pickupReplayAttachWebm,
+          attachWebm: config.pickupReplayLiveAttachWebm,
           maxAttachmentBytes: config.pickupReplayMaxAttachmentBytes,
         });
         if (clips.length) {

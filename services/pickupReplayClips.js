@@ -138,7 +138,11 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
 
     if (event.event !== "flag_entity_base") continue;
 
-    if (releaseCandidate) {
+    // A confirmed score is not enough by itself.  If the flag was picked up
+    // after being dropped, this is a normal recovery cap, not a coast-to-coast
+    // carry.  Keep the origin check separate from score confirmation because
+    // several maps emit the same score/release sequence for both cases.
+    if (carriedFromBase && releaseCandidate) {
       const padding = Math.max(0, Number(paddingSeconds) || 0);
       const start = Math.max(0, pickup.timeMs / 1000 - padding);
       const capTime = scoreCandidate.timeMs / 1000;

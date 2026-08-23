@@ -48,6 +48,12 @@ module.exports = {
   pickupReplayAttachWebm: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_REPLAY_ATTACH_WEBM || "")
   ),
+  // Live cap notifications should remain link-only on small bot hosts. A
+  // WebM render starts Chromium plus a VP9 encoder, so opt into this separately
+  // from the finalized post-match clip attachments.
+  pickupReplayLiveAttachWebm: /^(?:1|true|yes|on)$/i.test(
+    String(process.env.PICKUP_REPLAY_LIVE_ATTACH_WEBM || "")
+  ),
   // Discord's Level 3 server limit is 100 MB. Some servers may have the
   // newer 250 MB larger-upload experiment, so keep this configurable.
   pickupReplayMaxAttachmentBytes: (() => {

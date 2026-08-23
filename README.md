@@ -59,7 +59,9 @@ clip as a Discord `.webm` attachment in addition to the replay link:
 
 ```env
 PICKUP_REPLAY_AUTO_CLIPS=1
-PICKUP_REPLAY_ATTACH_WEBM=1
+PICKUP_REPLAY_ATTACH_WEBM=0
+# Live cap alerts are link-only on small hosts; opt in only if desired.
+PICKUP_REPLAY_LIVE_ATTACH_WEBM=0
 # 100 for a Level 3 server; use 250 if the server has the larger-upload tier.
 PICKUP_REPLAY_MAX_ATTACHMENT_MB=100
 PICKUP_CLIPS_CHANNEL_ID=your_discord_channel_id
@@ -71,6 +73,10 @@ the selected clip. Install Chromium on the bot host, restart the bot after
 changing the environment, and check for `posted ... clean pickup clip(s)` in
 the bot log. If the renderer is unavailable, the bot preserves the existing
 link-only post and logs the render error.
+
+Live coast-to-coast alerts are link-only unless `PICKUP_REPLAY_LIVE_ATTACH_WEBM`
+is enabled. This avoids starting a Chromium render and VP9 encode for every
+capture on small bot hosts.
 
 ### Offline replay QA
 
