@@ -196,7 +196,10 @@ async function normalizeWebmDuration(inputPath, outputPath, targetDurationSecond
       "-hide_banner",
       "-loglevel", "error",
       "-i", inputPath,
-      "-vf", `setpts=${speed.toFixed(9)}*PTS,format=yuv420p`,
+      // The software WebGL render can produce repeated frames under load.
+      // Interpolate after retiming so the final clip has smoother motion
+      // instead of simply showing those repeats faster.
+      "-vf", `setpts=${speed.toFixed(9)}*PTS,minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,format=yuv420p`,
       "-an",
       "-c:v", "libvpx-vp9",
       "-crf", "30",
