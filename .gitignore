@@ -109,7 +109,6 @@ reimportOneHampalyzerMatch.js
 !/scripts/
 !/scripts/
 /scripts/*
-!/scripts/testPickupReplay.js
 
 speedrun-replay.html
 speedrun-replay.css
