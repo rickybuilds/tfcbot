@@ -55,38 +55,7 @@ function parseEventsCsv(csv) {
 }
 
 function findCleanFirstPickupCap(events, { paddingSeconds = DEFAULT_PADDING_SECONDS } = {}) {
-  const ordered = [...events].sort((a, b) => a.timeMs - b.timeMs);
-  const pickup = ordered.find(event => event.event === "flag_pickup");
-  if (!pickup) return null;
-
-  // flag_pickup carries the authoritative actor/team transition, while the
-  // objective stream identifies the exact flag entity being carried.
-  const carried = ordered.find(event =>
-    event.timeMs >= pickup.timeMs &&
-    event.event === "flag_entity_carried" &&
-    event.actorSession === pickup.actorSession &&
-    event.entity > 0
-  );
-  if (!carried) return null;
-
-  for (const event of ordered) {
-    if (event.timeMs < carried.timeMs || event.entity !== carried.entity) continue;
-    if (event.event === "flag_entity_dropped") return null;
-    if (event.event === "flag_entity_base") {
-      const start = Math.max(0, pickup.timeMs / 1000 - Math.max(0, Number(paddingSeconds) || 0));
-      const end = Math.max(start, event.timeMs / 1000 + Math.max(0, Number(paddingSeconds) || 0));
-      return {
-        pickupTime: pickup.timeMs / 1000,
-        capTime: event.timeMs / 1000,
-        clipStart: start,
-        clipEnd: end,
-        actorSession: pickup.actorSession,
-        entity: carried.entity,
-        flag: pickup.text || "flag",
-      };
-    }
-  }
-  return null;
+  return findCleanPickupCaps(events, { paddingSeconds })[0] || null;
 }
 
 function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS } = {}) {
@@ -96,12 +65,16 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
   let pickup = null;
   let carried = null;
   let carriedFromBase = false;
+  let scoreCandidate = null;
+  let releaseCandidate = null;
 
   for (const event of ordered) {
     if (event.event === "flag_pickup") {
       pickup = event;
       carried = null;
       carriedFromBase = false;
+      scoreCandidate = null;
+      releaseCandidate = null;
       continue;
     }
     if (event.event === "flag_entity_base" && !pickup) {
@@ -111,6 +84,19 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
       continue;
     }
     if (!pickup) continue;
+
+    // The recorder emits a team_score immediately before the carrier's
+    // flag_release on a successful capture. Keep it provisional until the
+    // matching release/base transition confirms that this was a score rather
+    // than one of the periodic scoreboard snapshots.
+    if (
+      carried &&
+      event.event === "team_score" &&
+      event.timeMs >= carried.timeMs
+    ) {
+      scoreCandidate = event;
+      continue;
+    }
 
     if (
       event.event === "flag_entity_carried" &&
@@ -127,6 +113,17 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
       flagStates.set(event.entity, "carried");
       continue;
     }
+    if (
+      carried &&
+      event.event === "flag_release" &&
+      event.actorSession === carried.actorSession &&
+      scoreCandidate &&
+      event.timeMs >= scoreCandidate.timeMs &&
+      event.timeMs - scoreCandidate.timeMs <= 2_000
+    ) {
+      releaseCandidate = event;
+      continue;
+    }
     if (!carried || event.entity !== carried.entity || event.timeMs < carried.timeMs) continue;
 
     if (event.event === "flag_entity_dropped") {
@@ -134,17 +131,21 @@ function findCleanPickupCaps(events, { paddingSeconds = DEFAULT_PADDING_SECONDS 
       pickup = null;
       carried = null;
       carriedFromBase = false;
+      scoreCandidate = null;
+      releaseCandidate = null;
       continue;
     }
+
     if (event.event !== "flag_entity_base") continue;
 
-    if (carriedFromBase) {
+    if (releaseCandidate) {
       const padding = Math.max(0, Number(paddingSeconds) || 0);
       const start = Math.max(0, pickup.timeMs / 1000 - padding);
+      const capTime = scoreCandidate.timeMs / 1000;
       const end = Math.max(start, event.timeMs / 1000 + padding);
       clips.push({
         pickupTime: pickup.timeMs / 1000,
-        capTime: event.timeMs / 1000,
+        capTime,
         clipStart: start,
         clipEnd: end,
         actorSession: pickup.actorSession,
@@ -168,6 +169,9 @@ function buildClipUrl(matchId, roundNumber, clip, baseUrl = DEFAULT_REPLAY_URL) 
   url.searchParams.set("clipStart", Number(clip.clipStart).toFixed(3));
   url.searchParams.set("clipEnd", Number(clip.clipEnd).toFixed(3));
   url.searchParams.set("clipTitle", "Clean first pickup to cap");
+  if (Number.isSafeInteger(Number(clip.actorSession)) && Number(clip.actorSession) > 0) {
+    url.searchParams.set("playerSession", String(Number(clip.actorSession)));
+  }
   return url.toString();
 }
 
@@ -179,6 +183,9 @@ function buildLiveClipUrl(serverKey, matchId, roundNumber, clip, baseUrl = DEFAU
   url.searchParams.set("clipStart", Number(clip.clipStart).toFixed(3));
   url.searchParams.set("clipEnd", Number(clip.clipEnd).toFixed(3));
   url.searchParams.set("clipTitle", "Coast-to-coast");
+  if (Number.isSafeInteger(Number(clip.actorSession)) && Number(clip.actorSession) > 0) {
+    url.searchParams.set("playerSession", String(Number(clip.actorSession)));
+  }
   return url.toString();
 }
 
