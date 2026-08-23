@@ -7,6 +7,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const fetchDefault = require("node-fetch");
 const WebSocketImpl = globalThis.WebSocket || require("ws");
+const ffmpegPath = require("ffmpeg-static");
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -139,6 +140,82 @@ async function isWebmFile(filePath) {
   }
 }
 
+function runProcess(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout?.on("data", chunk => { output += chunk.toString(); });
+    child.stderr?.on("data", chunk => { output += chunk.toString(); });
+    child.once("error", reject);
+    child.once("close", code => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`${path.basename(command)} exited with code ${code}: ${output.slice(-1000)}`));
+    });
+  });
+}
+
+function lastFfmpegTimeSeconds(output) {
+  const matches = [...String(output || "").matchAll(/time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/g)];
+  const match = matches.at(-1);
+  if (!match) return null;
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+}
+
+function requestedClipDuration(url, clip) {
+  const fromClip = Number(clip?.clipEnd) - Number(clip?.clipStart);
+  if (fromClip > 0) return fromClip;
+  try {
+    const query = new URL(url).searchParams;
+    const fromUrl = Number(query.get("clipEnd")) - Number(query.get("clipStart"));
+    return fromUrl > 0 ? fromUrl : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function normalizeWebmDuration(inputPath, outputPath, targetDurationSeconds) {
+  if (!ffmpegPath || !(targetDurationSeconds > 0)) {
+    await fsp.rename(inputPath, outputPath);
+    return outputPath;
+  }
+
+  const probeOutput = await runProcess(ffmpegPath, [
+    "-hide_banner",
+    "-i", inputPath,
+    "-f", "null",
+    "-",
+  ]);
+  const sourceDuration = lastFfmpegTimeSeconds(probeOutput);
+  if (!(sourceDuration > 0)) throw new Error("Could not determine rendered WebM duration");
+
+  const speed = targetDurationSeconds / sourceDuration;
+  const temporaryPath = `${outputPath}.normalizing-${process.pid}-${Date.now()}.webm`;
+  try {
+    await runProcess(ffmpegPath, [
+      "-y",
+      "-hide_banner",
+      "-loglevel", "error",
+      "-i", inputPath,
+      "-vf", `setpts=${speed.toFixed(9)}*PTS,format=yuv420p`,
+      "-an",
+      "-c:v", "libvpx-vp9",
+      "-crf", "30",
+      "-b:v", "0",
+      "-row-mt", "1",
+      "-deadline", "good",
+      "-cpu-used", "4",
+      "-r", "60",
+      "-fps_mode", "cfr",
+      temporaryPath,
+    ]);
+    await fsp.rename(temporaryPath, outputPath);
+  } finally {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => {});
+    await fsp.rm(inputPath, { force: true }).catch(() => {});
+  }
+  return outputPath;
+}
+
 async function renderReplayClip({
   url,
   outputPath,
@@ -146,6 +223,7 @@ async function renderReplayClip({
   timeoutMs = DEFAULT_TIMEOUT_MS,
   fetchImpl = fetchDefault,
   spawnImpl = spawn,
+  clip = null,
 } = {}) {
   if (!url || !outputPath) throw new Error("Replay render requires a URL and output path");
   if (!browserPath) {
@@ -153,6 +231,7 @@ async function renderReplayClip({
   }
 
   const outputDir = path.dirname(outputPath);
+  const renderStartedAt = Date.now();
   await fsp.mkdir(outputDir, { recursive: true });
   const profileDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-replay-browser-"));
   const port = await reservePort();
@@ -224,6 +303,7 @@ async function renderReplayClip({
           // The file may disappear between readdir and stat.
           continue;
         }
+        if (stat.mtimeMs < renderStartedAt) continue;
         if (stat.size > 0) {
           if (await isWebmFile(candidate)) return candidate;
           throw new Error(`Downloaded clip is not a WebM (invalid EBML header): ${entry.name}`);
@@ -239,6 +319,10 @@ async function renderReplayClip({
         return false;
       }
     }, { timeoutMs, label: "downloaded WebM" });
+    const targetDuration = requestedClipDuration(url, clip);
+    if (targetDuration > 0) {
+      return normalizeWebmDuration(downloadedPath, outputPath, targetDuration);
+    }
     if (downloadedPath !== outputPath) await fsp.rename(downloadedPath, outputPath);
     return outputPath;
   } finally {
