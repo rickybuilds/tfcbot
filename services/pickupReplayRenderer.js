@@ -4,9 +4,13 @@ const fs = require("node:fs");
 const fsp = fs.promises;
 const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
+const { once } = require("node:events");
 const fetchDefault = require("node-fetch");
-const WebSocketImpl = globalThis.WebSocket || require("ws");
+const WebSocketPackage = require("ws");
+const WebSocketImpl = globalThis.WebSocket || WebSocketPackage;
+const { WebSocketServer } = WebSocketPackage;
 const ffmpegPath = require("ffmpeg-static");
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -424,6 +428,171 @@ async function encodeMjpegFrames(inputPath, outputPath, targetDurationSeconds, p
   return outputPath;
 }
 
+async function createRawFrameReceiver({ outputPath, targetDurationSeconds, profile, mark, timeoutMs }) {
+  if (!ffmpegPath) throw new Error("FFmpeg is required for raw replay frame export");
+  const token = crypto.randomBytes(24).toString("hex");
+  const temporaryPath = `${outputPath}.raw-encoding-${process.pid}-${Date.now()}.webm`;
+  const server = new WebSocketServer({
+    host: "127.0.0.1",
+    port: 0,
+    maxPayload: profile.exportWidth * profile.exportHeight * 4 + 1024,
+  });
+  await new Promise((resolve, reject) => {
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    const onError = error => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+  });
+  const port = server.address().port;
+  let encoder = null;
+  let connectedSocket = null;
+  let receivedFrames = 0;
+  let expectedFrames = 0;
+  let streamStarted = false;
+  let streamEnded = false;
+  let settled = false;
+  let rejectCompletion;
+  let resolveCompletion;
+  const completion = new Promise((resolve, reject) => {
+    resolveCompletion = resolve;
+    rejectCompletion = reject;
+  });
+  const timer = setTimeout(() => fail(new Error("Timed out receiving raw replay frames")), timeoutMs);
+
+  function finish(error, result) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (error) rejectCompletion(error);
+    else resolveCompletion(result);
+  }
+
+  function fail(error) {
+    try { encoder?.kill(); } catch {}
+    try { connectedSocket?.close(); } catch {}
+    finish(error);
+  }
+
+  server.on("connection", (socket, request) => {
+    let suppliedToken = "";
+    try {
+      suppliedToken = new URL(request.url, "http://127.0.0.1").searchParams.get("token") || "";
+    } catch {}
+    if (suppliedToken !== token || connectedSocket) {
+      socket.close(1008, "invalid stream");
+      return;
+    }
+    connectedSocket = socket;
+    socket.send("ready");
+    socket.on("message", (data, isBinary) => {
+      void (async () => {
+        if (isBinary) {
+          if (!streamStarted || streamEnded || !encoder) throw new Error("Raw replay frame arrived out of order");
+          const frame = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          const expectedBytes = profile.exportWidth * profile.exportHeight * 4;
+          if (frame.length !== expectedBytes) {
+            throw new Error(`Raw replay frame has ${frame.length} bytes; expected ${expectedBytes}`);
+          }
+          if (!encoder.stdin.write(frame)) await once(encoder.stdin, "drain");
+          receivedFrames += 1;
+          socket.send("frame");
+          return;
+        }
+
+        const message = JSON.parse(String(data));
+        if (message.type === "start") {
+          if (streamStarted || message.width !== profile.exportWidth ||
+              message.height !== profile.exportHeight || message.fps !== profile.exportFps) {
+            throw new Error("Raw replay frame stream profile mismatch");
+          }
+          expectedFrames = Number(message.frames);
+          if (!Number.isSafeInteger(expectedFrames) || expectedFrames < 1 || expectedFrames > 10000) {
+            throw new Error("Invalid raw replay frame count");
+          }
+          encoder = spawn(ffmpegPath, [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-f", "rawvideo",
+            "-pixel_format", "rgba",
+            "-video_size", `${profile.exportWidth}x${profile.exportHeight}`,
+            "-framerate", String(profile.exportFps),
+            "-i", "pipe:0",
+            "-t", targetDurationSeconds.toFixed(6),
+            "-an",
+            "-vf", "format=yuv420p",
+            "-c:v", "libvpx-vp9",
+            "-crf", String(profile.crf),
+            "-b:v", "0",
+            "-row-mt", "1",
+            "-threads", "1",
+            "-deadline", profile.deadline,
+            "-cpu-used", String(profile.cpuUsed),
+            "-r", String(profile.fps),
+            "-fps_mode", "cfr",
+            temporaryPath,
+          ], { stdio: ["pipe", "ignore", "pipe"] });
+          let stderr = "";
+          encoder.stderr.on("data", chunk => { stderr += chunk.toString(); });
+          encoder.once("error", fail);
+          encoder.result = new Promise((resolve, reject) => {
+            encoder.once("close", code => {
+              if (code === 0) resolve();
+              else reject(new Error(`FFmpeg raw replay encode exited with code ${code}: ${stderr.slice(-1000)}`));
+            });
+          });
+          streamStarted = true;
+          mark(
+            `Raw frame VP9 pipeline started (${profile.exportWidth}x${profile.exportHeight}, ` +
+            `${profile.exportFps}fps)`
+          );
+          socket.send("start");
+          return;
+        }
+        if (message.type === "end") {
+          if (!streamStarted || streamEnded || receivedFrames !== expectedFrames ||
+              Number(message.frames) !== receivedFrames) {
+            throw new Error(
+              `Raw replay frame stream ended with ${receivedFrames}/${expectedFrames} frames`
+            );
+          }
+          streamEnded = true;
+          encoder.stdin.end();
+          await encoder.result;
+          await fsp.rm(outputPath, { force: true });
+          await fsp.rename(temporaryPath, outputPath);
+          mark(`Raw frame VP9 pipeline finished (${receivedFrames} frames)`);
+          socket.send("complete");
+          finish(null, outputPath);
+        }
+      })().catch(fail);
+    });
+    socket.once("error", fail);
+    socket.once("close", () => {
+      if (!settled && !streamEnded) fail(new Error("Raw replay frame connection closed early"));
+    });
+  });
+
+  return {
+    port,
+    token,
+    completion,
+    async close() {
+      clearTimeout(timer);
+      try { encoder?.kill(); } catch {}
+      try { connectedSocket?.close(); } catch {}
+      await new Promise(resolve => server.close(resolve));
+      await fsp.rm(temporaryPath, { force: true }).catch(() => {});
+    }
+  };
+}
+
 async function renderReplayClip({
   url,
   outputPath,
@@ -442,6 +611,18 @@ async function renderReplayClip({
   const profile = getRenderProfile();
   const mark = createTimingLogger();
   const renderStartedAt = Date.now();
+  const targetDuration = requestedClipDuration(url, clip);
+  await fsp.mkdir(outputDir, { recursive: true });
+  let rawFrameReceiver = null;
+  if (profile.fast && targetDuration > 0) {
+    rawFrameReceiver = await createRawFrameReceiver({
+      outputPath,
+      targetDurationSeconds: targetDuration,
+      profile,
+      mark,
+      timeoutMs,
+    });
+  }
   let navigationUrl;
   try {
     const parsedUrl = new URL(url);
@@ -451,12 +632,16 @@ async function renderReplayClip({
       parsedUrl.searchParams.set("clipWidth", String(profile.exportWidth));
       parsedUrl.searchParams.set("clipHeight", String(profile.exportHeight));
       parsedUrl.searchParams.set("clipFps", String(profile.exportFps));
+      if (rawFrameReceiver) {
+        parsedUrl.searchParams.set("clipStreamPort", String(rawFrameReceiver.port));
+        parsedUrl.searchParams.set("clipStreamToken", rawFrameReceiver.token);
+      }
     }
     navigationUrl = parsedUrl.href;
   } catch {
+    await rawFrameReceiver?.close().catch(() => {});
     throw new Error("Replay render requires a valid absolute URL");
   }
-  await fsp.mkdir(outputDir, { recursive: true });
   const profileDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-replay-browser-"));
   const port = await reservePort();
   const browser = spawnImpl(browserPath, [
@@ -466,6 +651,7 @@ async function renderReplayClip({
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
+    ...(rawFrameReceiver ? ["--allow-running-insecure-content"] : []),
     `--window-size=${profile.width},${profile.height}`,
     "--force-device-scale-factor=1",
     `--remote-debugging-port=${port}`,
@@ -540,6 +726,26 @@ async function renderReplayClip({
     });
     mark("Replay download clicked");
 
+    if (rawFrameReceiver) {
+      const result = await rawFrameReceiver.completion;
+      mark("Raw replay frame stream encoded");
+      const exportDiagnostics = await replayPageDiagnostics(cdp);
+      mark(
+        `Replay page export state (preview passes=${exportDiagnostics?.previewPasses ?? "unknown"}, ` +
+        `export passes=${exportDiagnostics?.exportPasses ?? "unknown"}, ` +
+        `mode=${exportDiagnostics?.lastExportMode || "unknown"})`
+      );
+      mark(`Replay page export milestones (${formatPageMilestones(exportDiagnostics, [
+        "export-render-start",
+        "raw-frame-stream-start",
+        "raw-frame-stream-end",
+        "export-render-end",
+        "raw-frame-encode-complete"
+      ])})`);
+      mark("Render complete");
+      return result;
+    }
+
     // Do not depend on Page.downloadWillBegin/Page.downloadProgress: those
     // events are absent or inconsistent in some headless Chrome builds.
     const downloadedPath = await waitFor(async () => {
@@ -593,7 +799,6 @@ async function renderReplayClip({
       "frame-stream-finalized",
       "frame-stream-download"
     ])})`);
-    const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
       if (downloadedPath.toLowerCase().endsWith(".mjpg")) {
         const result = await encodeMjpegFrames(
@@ -623,6 +828,7 @@ async function renderReplayClip({
     try { await cdp?.command("Browser.close"); } catch {}
     cdp?.close();
     browser.kill?.();
+    await rawFrameReceiver?.close().catch(() => {});
     await fsp.rm(profileDir, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -641,6 +847,7 @@ async function reservePort() {
 
 module.exports = {
   CdpSession,
+  createRawFrameReceiver,
   isMjpegFile,
   isWebmFile,
   renderReplayClip,
