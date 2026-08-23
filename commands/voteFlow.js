@@ -124,6 +124,18 @@ function eligibleStreakPlayers(players, elo) {
 	  const voteStartToken = Symbol("vote-start");
 	  state.voteStartToken = voteStartToken;
 	  const voteStartCancelled = () => state.voteStartToken !== voteStartToken;
+    const cancelToken = { cancelled: false, cancel: null };
+    state.activeFlowCancel = async (reason = "Active match flow canceled", removedIds = []) => {
+      cancelToken.cancelled = true;
+      state.cancelledFlowPlayerIds = new Set((removedIds || []).map(String));
+      try { cancelToken.cancel?.(); } catch (error) {
+        console.error("[voteFlow] active flow cancellation failed:", error);
+      }
+      try { await state.vote?.cancelVote?.(reason); } catch (error) {
+        console.error("[voteFlow] active vote cancellation failed:", error);
+      }
+      state.voteStartToken = null;
+    };
 
     try {
       if (!(await guardChannel(message, config.channels.pickup))) return;
@@ -342,6 +354,8 @@ function eligibleStreakPlayers(players, elo) {
       }
       await message.channel.send("❌ Something went wrong during the vote.");
 	  } finally {
+	    if (state.activeFlowCancel) state.activeFlowCancel = null;
+	    state.cancelledFlowPlayerIds = null;
 	    if (state.voteStartToken === voteStartToken) {
 	      state.voteStartToken = null;
 	      state.isVoteStarting = false;
@@ -644,10 +658,11 @@ async function finalizeMatch(
   if (captainMode) {
     try {
       await channel.send("👑 **Captain mode activated.** The captains will play blind Rock Paper Scissors to decide who picks first.");
-      captainDraft = await runCaptainDraft({ channel }, canonicalPlayers);
+      captainDraft = await runCaptainDraft({ channel }, canonicalPlayers, { cancelToken });
     } catch (err) {
       console.warn("[captain draft] canceled:", err.message);
-      state.queue = canonicalPlayers.map(p => ({ ...p }));
+      const removed = state.cancelledFlowPlayerIds || new Set();
+      state.queue = canonicalPlayers.filter(p => !removed.has(String(p.id))).map(p => ({ ...p }));
       state.queueSnapshot = null;
       state.serverWinner = null;
       state.isVotingInProgress = false;

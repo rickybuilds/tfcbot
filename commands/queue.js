@@ -300,11 +300,20 @@ if (ban) {
     return;
   }
 
-  // Handle active vote removal cleanly
+  // Handle active vote/draft removal cleanly
   if (state.isVotingInProgress || state.vote) {
     try {
       const reason = `Player <@${id}> left during vote. Requeuing remaining players.`;
-      if (state.vote?.cancelVote) {
+      if (state.activeFlowCancel) {
+        await state.activeFlowCancel(reason, [id]);
+        state.queue = state.queue.filter(p => String(p.id) !== String(id));
+        if (Array.isArray(state.queueSnapshot)) {
+          state.queueSnapshot = state.queueSnapshot.filter(p => String(p.id) !== String(id));
+        }
+        state.isVotingInProgress = false;
+        state.voteLock = false;
+        await message.channel.send(`⚠️ ${reason} Vote canceled.`);
+      } else if (state.vote?.cancelVote) {
         await state.vote.cancelVote(reason, id);
       } else {
         // Vote startup is still awaiting its first Discord message. Cancel
@@ -738,8 +747,8 @@ reg.set("**", (msg) => add(msg, true));
 
 /* ---------------- scheduled cleanup ---------------- */
 setInterval(async () => {
-  // 🚫 Do not AFK kick anyone while a vote is already in progress
-  if (state.isVotingInProgress || state.vote) {
+  // Never run AFK cleanup while a server/map vote or captain flow is active.
+  if (state.isVotingInProgress || state.vote || state.activeFlowCancel) {
     return;
   }
 
