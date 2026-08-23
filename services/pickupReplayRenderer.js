@@ -69,6 +69,20 @@ function getRenderProfile() {
   };
 }
 
+function createTimingLogger() {
+  const enabled = envEnabled(process.env.PICKUP_REPLAY_RENDER_TIMINGS);
+  const started = process.hrtime.bigint();
+  let previous = started;
+  return label => {
+    if (!enabled) return;
+    const now = process.hrtime.bigint();
+    const elapsed = Number(now - started) / 1e9;
+    const delta = Number(now - previous) / 1e9;
+    previous = now;
+    console.log(`[pickup-replay timing] ${label}: +${elapsed.toFixed(2)}s (delta ${delta.toFixed(2)}s)`);
+  };
+}
+
 function browserCandidates() {
   return [
     process.env.PICKUP_REPLAY_BROWSER_PATH,
@@ -236,22 +250,26 @@ async function normalizeWebmDuration(
   outputPath,
   targetDurationSeconds,
   profile = getRenderProfile(),
+  mark = () => {},
 ) {
   if (!ffmpegPath || !(targetDurationSeconds > 0)) {
     await fsp.rename(inputPath, outputPath);
     return outputPath;
   }
 
+  mark("FFmpeg duration probe started");
   const probeOutput = await runProcess(ffmpegPath, [
     "-hide_banner",
     "-i", inputPath,
     "-f", "null",
     "-",
   ]);
+  mark("FFmpeg duration probe finished");
   const sourceDuration = lastFfmpegTimeSeconds(probeOutput);
   if (!(sourceDuration > 0)) throw new Error("Could not determine rendered WebM duration");
 
   if (Math.abs(sourceDuration - targetDurationSeconds) <= profile.durationTolerance) {
+    mark(`duration already within tolerance (${sourceDuration.toFixed(3)}s)`);
     await fsp.rename(inputPath, outputPath);
     return outputPath;
   }
@@ -259,6 +277,7 @@ async function normalizeWebmDuration(
   const speed = targetDurationSeconds / sourceDuration;
   const temporaryPath = `${outputPath}.normalizing-${process.pid}-${Date.now()}.webm`;
   try {
+    mark(`VP9 encode started (${sourceDuration.toFixed(3)}s -> ${targetDurationSeconds.toFixed(3)}s)`);
     await runProcess(ffmpegPath, [
       "-y",
       "-hide_banner",
@@ -278,6 +297,7 @@ async function normalizeWebmDuration(
       "-fps_mode", "cfr",
       temporaryPath,
     ]);
+    mark("VP9 encode finished");
     await fsp.rename(temporaryPath, outputPath);
   } finally {
     await fsp.rm(temporaryPath, { force: true }).catch(() => {});
@@ -302,6 +322,7 @@ async function renderReplayClip({
 
   const outputDir = path.dirname(outputPath);
   const profile = getRenderProfile();
+  const mark = createTimingLogger();
   const renderStartedAt = Date.now();
   await fsp.mkdir(outputDir, { recursive: true });
   const profileDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-replay-browser-"));
@@ -319,10 +340,12 @@ async function renderReplayClip({
     `--user-data-dir=${profileDir}`,
     "about:blank",
   ], { stdio: ["ignore", "ignore", "ignore"] });
+  mark(`Chrome spawned (${profile.width}x${profile.height}, ${profile.fps}fps, fast=${profile.fast})`);
 
   let cdp = null;
   try {
     const target = await waitForDevTools(port, fetchImpl, timeoutMs);
+    mark("Chrome DevTools ready");
     cdp = new CdpSession(target.webSocketDebuggerUrl);
     await cdp.command("Page.enable");
     await cdp.command("Runtime.enable");
@@ -343,6 +366,7 @@ async function renderReplayClip({
       });
     }
     await cdp.command("Page.navigate", { url });
+    mark("Replay page navigation started");
 
     await waitFor(async () => {
       const result = await cdp.command("Runtime.evaluate", {
@@ -355,10 +379,12 @@ async function renderReplayClip({
       });
       return result.result?.value === true;
     }, { timeoutMs, label: "replay clip editor" });
+    mark("Replay clip editor ready");
 
     await cdp.command("Runtime.evaluate", {
       expression: "document.querySelector('#replay-clip-download').click()",
     });
+    mark("Replay download clicked");
 
     // Do not depend on Page.downloadWillBegin/Page.downloadProgress: those
     // events are absent or inconsistent in some headless Chrome builds.
@@ -384,6 +410,7 @@ async function renderReplayClip({
       }
       return null;
     }, { timeoutMs, label: "downloaded WebM" });
+    mark("WebM file appeared");
     await waitFor(async () => {
       try {
         const stat = await fsp.stat(downloadedPath);
@@ -392,11 +419,21 @@ async function renderReplayClip({
         return false;
       }
     }, { timeoutMs, label: "downloaded WebM" });
+    mark("WebM file finished writing");
     const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
-      return normalizeWebmDuration(downloadedPath, outputPath, targetDuration, profile);
+      const result = await normalizeWebmDuration(
+        downloadedPath,
+        outputPath,
+        targetDuration,
+        profile,
+        mark,
+      );
+      mark("Render complete");
+      return result;
     }
     if (downloadedPath !== outputPath) await fsp.rename(downloadedPath, outputPath);
+    mark("Render complete");
     return outputPath;
   } finally {
     try { await cdp?.command("Browser.close"); } catch {}
