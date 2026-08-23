@@ -280,6 +280,9 @@ class EloShadowService {
     this.client = options.client || null;
     this.elo = options.elo || null;
     this.channelId = String(options.channelId || "");
+    this.postingEnabled = options.postingEnabled ?? /^(?:1|true|yes|on)$/i.test(
+      String(process.env.ELO_SHADOW_POSTING_ENABLED || "true")
+    );
     this.mode = String(options.mode || process.env.ELO_V2_MODE || "off").trim().toLowerCase();
     this.liveGentle = this.mode === "live-gentle";
     this.enabled = this.mode === "shadow" || this.liveGentle;
@@ -345,7 +348,7 @@ class EloShadowService {
     `).all();
     for (const row of pending) this.schedule(row.match_id, { delayMs: 1000 });
     this.logger.info?.(
-      `[elo-shadow] enabled; channel=${this.channelId || "missing"}; resumed ${pending.length} pending match(es)`
+      `[elo-shadow] enabled; posting=${this.postingEnabled ? "on" : "off"}; channel=${this.channelId || "missing"}; resumed ${pending.length} pending match(es)`
     );
     return { enabled: true, resumed: pending.length };
   }
@@ -618,6 +621,15 @@ class EloShadowService {
   }
 
   async _post(snapshot) {
+    if (!this.postingEnabled) {
+      this.db.prepare(`
+        UPDATE elo_shadow_results
+        SET status='suppressed', posted_at=strftime('%s','now'), updated_at=strftime('%s','now')
+        WHERE match_id=?
+      `).run(snapshot.matchId);
+      this.logger.info?.(`[elo-shadow] posting suppressed for ${snapshot.matchId}`);
+      return snapshot;
+    }
     if (!this.channelId) throw new Error("missing_recap_channel");
     let channel = this.client?.channels?.cache?.get?.(this.channelId);
     if (!channel) channel = await this.client?.channels?.fetch?.(this.channelId);

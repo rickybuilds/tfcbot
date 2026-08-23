@@ -363,6 +363,7 @@ const eloShadow = new EloShadowService({
   elo,
   client,
   channelId: config.channels.eloTest || config.channels.recap,
+  postingEnabled: config.eloShadowPostingEnabled,
   mode: config.eloV2Mode,
 });
 deps.eloShadow = eloShadow;

@@ -66,6 +66,9 @@ module.exports = {
   // ratings; "live-gentle" defers the rating write until NN scores arrive and
   // applies the validated 20%-30% allocation with equal-share fallback.
   eloV2Mode: String(process.env.ELO_V2_MODE || "off").trim().toLowerCase(),
+  eloShadowPostingEnabled: /^(?:1|true|yes|on)$/i.test(
+    String(process.env.ELO_SHADOW_POSTING_ENABLED || "true")
+  ),
   mapMaxSelectionsPerUser: (() => {
     const value = Math.max(1, Number(process.env.MAP_MAX_SELECTIONS_PER_USER || 1));
     return Number.isFinite(value) ? value : 1;
