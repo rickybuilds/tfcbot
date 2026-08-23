@@ -302,7 +302,8 @@ async function replayPageDiagnostics(cdp) {
           frames: event.frames,
           renderCpuMs: event.renderCpuMs,
           codec: event.codec,
-          fps: event.fps
+          fps: event.fps,
+          message: event.message
         }))
       };
     })()`,
@@ -463,12 +464,12 @@ async function createRawFrameReceiver({ outputPath, targetDurationSeconds, profi
     resolveCompletion = resolve;
     rejectCompletion = reject;
   });
-  const timer = setTimeout(() => fail(new Error("Timed out receiving raw replay frames")), timeoutMs);
+  let timer = null;
 
   function finish(error, result) {
     if (settled) return;
     settled = true;
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     if (error) rejectCompletion(error);
     else resolveCompletion(result);
   }
@@ -583,8 +584,13 @@ async function createRawFrameReceiver({ outputPath, targetDurationSeconds, profi
     port,
     token,
     completion,
+    arm() {
+      if (!timer && !settled) {
+        timer = setTimeout(() => fail(new Error("Timed out receiving raw replay frames")), timeoutMs);
+      }
+    },
     async close() {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       try { encoder?.kill(); } catch {}
       try { connectedSocket?.close(); } catch {}
       await new Promise(resolve => server.close(resolve));
@@ -652,6 +658,9 @@ async function renderReplayClip({
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     ...(rawFrameReceiver ? ["--allow-running-insecure-content"] : []),
+    ...(rawFrameReceiver ? [
+      "--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessChecks,PrivateNetworkAccessSendPreflights,LocalNetworkAccessChecks"
+    ] : []),
     `--window-size=${profile.width},${profile.height}`,
     "--force-device-scale-factor=1",
     `--remote-debugging-port=${port}`,
@@ -724,9 +733,18 @@ async function renderReplayClip({
     await cdp.command("Runtime.evaluate", {
       expression: "document.querySelector('#replay-clip-download').click()",
     });
+    rawFrameReceiver?.arm();
     mark("Replay download clicked");
 
     if (rawFrameReceiver) {
+      await wait(750);
+      const initialDiagnostics = await replayPageDiagnostics(cdp);
+      const initialExportError = [...(initialDiagnostics?.events || [])]
+        .reverse()
+        .find(event => event.name === "export-error");
+      if (initialExportError) {
+        throw new Error(`Replay page raw-frame export failed: ${initialExportError.message || "unknown error"}`);
+      }
       const result = await rawFrameReceiver.completion;
       mark("Raw replay frame stream encoded");
       const exportDiagnostics = await replayPageDiagnostics(cdp);
