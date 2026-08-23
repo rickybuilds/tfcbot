@@ -245,6 +245,26 @@ function requestedClipDuration(url, clip) {
   }
 }
 
+async function replayPageDiagnostics(cdp) {
+  const result = await cdp.command("Runtime.evaluate", {
+    expression: `(() => {
+      const timing = window.__replayClipTiming;
+      if (!timing) return null;
+      const lastExportEvent = [...(timing.events || [])].reverse().find(event =>
+        event.name === "webm-download" || event.name === "export-render-end"
+      );
+      return {
+        mode: timing.mode,
+        previewPasses: timing.previewPasses,
+        exportPasses: timing.exportPasses,
+        lastExportMode: lastExportEvent?.mode || ""
+      };
+    })()`,
+    returnByValue: true,
+  });
+  return result.result?.value || null;
+}
+
 async function normalizeWebmDuration(
   inputPath,
   outputPath,
@@ -324,6 +344,14 @@ async function renderReplayClip({
   const profile = getRenderProfile();
   const mark = createTimingLogger();
   const renderStartedAt = Date.now();
+  let navigationUrl;
+  try {
+    const parsedUrl = new URL(url);
+    parsedUrl.searchParams.set("clipExport", "1");
+    navigationUrl = parsedUrl.href;
+  } catch {
+    throw new Error("Replay render requires a valid absolute URL");
+  }
   await fsp.mkdir(outputDir, { recursive: true });
   const profileDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-replay-browser-"));
   const port = await reservePort();
@@ -365,7 +393,7 @@ async function renderReplayClip({
         downloadPath: outputDir,
       });
     }
-    await cdp.command("Page.navigate", { url });
+    await cdp.command("Page.navigate", { url: navigationUrl });
     mark("Replay page navigation started");
 
     await waitFor(async () => {
@@ -373,13 +401,28 @@ async function renderReplayClip({
         expression: `(() => {
           const button = document.querySelector("#replay-clip-download");
           const editor = document.querySelector("#replay-clip-editor");
-          return Boolean(button && !button.disabled && editor && !editor.hidden);
+          return {
+            ready: Boolean(button && !button.disabled && editor && !editor.hidden),
+            mode: document.documentElement.dataset.replayClipMode || ""
+          };
         })()`,
         returnByValue: true,
       });
-      return result.result?.value === true;
+      const readiness = result.result?.value;
+      if (!readiness?.ready) return false;
+      if (readiness.mode !== "direct") {
+        throw new Error(
+          `Replay page did not enter direct export mode (reported ${readiness.mode || "unknown"})`
+        );
+      }
+      return true;
     }, { timeoutMs, label: "replay clip editor" });
-    mark("Replay clip editor ready");
+    mark("Replay clip editor ready (direct export mode confirmed)");
+    const readyDiagnostics = await replayPageDiagnostics(cdp);
+    mark(
+      `Replay page state (mode=${readyDiagnostics?.mode || "unknown"}, ` +
+      `preview passes=${readyDiagnostics?.previewPasses ?? "unknown"})`
+    );
 
     await cdp.command("Runtime.evaluate", {
       expression: "document.querySelector('#replay-clip-download').click()",
@@ -420,6 +463,12 @@ async function renderReplayClip({
       }
     }, { timeoutMs, label: "downloaded WebM" });
     mark("WebM file finished writing");
+    const exportDiagnostics = await replayPageDiagnostics(cdp);
+    mark(
+      `Replay page export state (preview passes=${exportDiagnostics?.previewPasses ?? "unknown"}, ` +
+      `export passes=${exportDiagnostics?.exportPasses ?? "unknown"}, ` +
+      `mode=${exportDiagnostics?.lastExportMode || "unknown"})`
+    );
     const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
       const result = await normalizeWebmDuration(
