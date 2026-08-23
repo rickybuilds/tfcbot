@@ -78,6 +78,19 @@ Live coast-to-coast alerts are link-only unless `PICKUP_REPLAY_LIVE_ATTACH_WEBM`
 is enabled. This avoids starting a Chromium render and VP9 encode for every
 capture on small bot hosts.
 
+For manual rendering on a small CPU-only host, enable the faster profile before
+running the renderer test:
+
+```bash
+export PICKUP_REPLAY_RENDER_FAST=1
+```
+
+The fast profile uses an 854x480 software-WebGL viewport, 30 FPS, faster VP9
+settings, and skips the VP9 re-encode when the downloaded clip is already close
+to the requested duration. Override individual values with
+`PICKUP_REPLAY_RENDER_WIDTH`, `PICKUP_REPLAY_RENDER_HEIGHT`,
+`PICKUP_REPLAY_RENDER_FPS`, or `PICKUP_REPLAY_RENDER_CPU_USED` if needed.
+
 ### Offline replay QA
 
 Inspect a completed match without starting a recorder or posting to Discord:

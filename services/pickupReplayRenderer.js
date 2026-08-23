@@ -11,6 +11,64 @@ const ffmpegPath = require("ffmpeg-static");
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+function envEnabled(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value || ""));
+}
+
+function boundedNumber(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(maximum, Math.max(minimum, number));
+}
+
+function getRenderProfile() {
+  const fast = envEnabled(process.env.PICKUP_REPLAY_RENDER_FAST);
+  return {
+    fast,
+    width: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_WIDTH,
+      fast ? 854 : 1280,
+      320,
+      1920,
+    )),
+    height: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_HEIGHT,
+      fast ? 480 : 720,
+      240,
+      1080,
+    )),
+    fps: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_FPS,
+      fast ? 30 : 60,
+      15,
+      60,
+    )),
+    crf: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_CRF,
+      fast ? 32 : 22,
+      0,
+      63,
+    )),
+    cpuUsed: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_CPU_USED,
+      fast ? 6 : 2,
+      0,
+      8,
+    )),
+    deadline: String(
+      process.env.PICKUP_REPLAY_RENDER_DEADLINE || (fast ? "realtime" : "good")
+    ),
+    // Avoid a second full VP9 encode when the replay page already produced
+    // essentially the requested duration.
+    durationTolerance: boundedNumber(
+      process.env.PICKUP_REPLAY_RENDER_DURATION_TOLERANCE,
+      fast ? 0.20 : 0.05,
+      0,
+      2,
+    ),
+  };
+}
+
 function browserCandidates() {
   return [
     process.env.PICKUP_REPLAY_BROWSER_PATH,
@@ -173,7 +231,12 @@ function requestedClipDuration(url, clip) {
   }
 }
 
-async function normalizeWebmDuration(inputPath, outputPath, targetDurationSeconds) {
+async function normalizeWebmDuration(
+  inputPath,
+  outputPath,
+  targetDurationSeconds,
+  profile = getRenderProfile(),
+) {
   if (!ffmpegPath || !(targetDurationSeconds > 0)) {
     await fsp.rename(inputPath, outputPath);
     return outputPath;
@@ -188,6 +251,11 @@ async function normalizeWebmDuration(inputPath, outputPath, targetDurationSecond
   const sourceDuration = lastFfmpegTimeSeconds(probeOutput);
   if (!(sourceDuration > 0)) throw new Error("Could not determine rendered WebM duration");
 
+  if (Math.abs(sourceDuration - targetDurationSeconds) <= profile.durationTolerance) {
+    await fsp.rename(inputPath, outputPath);
+    return outputPath;
+  }
+
   const speed = targetDurationSeconds / sourceDuration;
   const temporaryPath = `${outputPath}.normalizing-${process.pid}-${Date.now()}.webm`;
   try {
@@ -201,12 +269,12 @@ async function normalizeWebmDuration(inputPath, outputPath, targetDurationSecond
       "-vf", `setpts=${speed.toFixed(9)}*PTS,format=yuv420p`,
       "-an",
       "-c:v", "libvpx-vp9",
-      "-crf", "22",
+      "-crf", String(profile.crf),
       "-b:v", "0",
       "-row-mt", "1",
-      "-deadline", "good",
-      "-cpu-used", "2",
-      "-r", "60",
+      "-deadline", profile.deadline,
+      "-cpu-used", String(profile.cpuUsed),
+      "-r", String(profile.fps),
       "-fps_mode", "cfr",
       temporaryPath,
     ]);
@@ -233,6 +301,7 @@ async function renderReplayClip({
   }
 
   const outputDir = path.dirname(outputPath);
+  const profile = getRenderProfile();
   const renderStartedAt = Date.now();
   await fsp.mkdir(outputDir, { recursive: true });
   const profileDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tfc-replay-browser-"));
@@ -244,7 +313,7 @@ async function renderReplayClip({
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
-    "--window-size=1280,720",
+    `--window-size=${profile.width},${profile.height}`,
     "--force-device-scale-factor=1",
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profileDir}`,
@@ -325,7 +394,7 @@ async function renderReplayClip({
     }, { timeoutMs, label: "downloaded WebM" });
     const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
-      return normalizeWebmDuration(downloadedPath, outputPath, targetDuration);
+      return normalizeWebmDuration(downloadedPath, outputPath, targetDuration, profile);
     }
     if (downloadedPath !== outputPath) await fsp.rename(downloadedPath, outputPath);
     return outputPath;
