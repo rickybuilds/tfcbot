@@ -133,6 +133,7 @@ test_api.js
 !/test/hldsQueue.test.js
 !/test/voteTransition.test.js
 !/test/pickupReplayRecorder.test.js
+!/test/pickupReplayClips.test.js
 !/test/eloShadow.test.js
 !/test/backup.test.js
 !/test/mergeDiscordAccount.test.js
