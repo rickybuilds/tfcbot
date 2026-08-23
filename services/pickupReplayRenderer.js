@@ -51,7 +51,7 @@ function getRenderProfile() {
     )),
     exportFps: Math.round(boundedNumber(
       process.env.PICKUP_REPLAY_EXPORT_FPS,
-      10,
+      30,
       5,
       30,
     )),
