@@ -72,6 +72,19 @@ changing the environment, and check for `posted ... clean pickup clip(s)` in
 the bot log. If the renderer is unavailable, the bot preserves the existing
 link-only post and logs the render error.
 
+### Offline replay QA
+
+Inspect a completed match without starting a recorder or posting to Discord:
+
+```bash
+node scripts/testPickupReplay.js YZV8LE
+node scripts/testPickupReplay.js YZV8LE 1 --base-url https://nonamepickup.servehalflife.com/pickup-replay.html
+```
+
+The command reports the first confirmed scoring carry, its carrier session,
+clip bounds, and the replay URL. This is the safe path for validating player
+selection and clip timing before enabling automatic live posts.
+
 ## Status
 Actively developed.
 
