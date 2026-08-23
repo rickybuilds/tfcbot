@@ -257,12 +257,36 @@ async function replayPageDiagnostics(cdp) {
         mode: timing.mode,
         previewPasses: timing.previewPasses,
         exportPasses: timing.exportPasses,
-        lastExportMode: lastExportEvent?.mode || ""
+        lastExportMode: lastExportEvent?.mode || "",
+        events: (timing.events || []).map(event => ({
+          name: event.name,
+          atMs: event.atMs,
+          jsHeapMb: event.jsHeapMb,
+          frames: event.frames,
+          renderCpuMs: event.renderCpuMs,
+          codec: event.codec,
+          fps: event.fps
+        }))
       };
     })()`,
     returnByValue: true,
   });
   return result.result?.value || null;
+}
+
+function formatPageMilestones(diagnostics, names) {
+  const selected = (diagnostics?.events || []).filter(event => names.includes(event.name));
+  return selected.map(event => {
+    const details = [
+      `${event.name}=${(Number(event.atMs) / 1000).toFixed(2)}s`,
+      Number.isFinite(event.jsHeapMb) ? `heap=${event.jsHeapMb}MB` : "",
+      Number.isFinite(event.frames) ? `frames=${event.frames}` : "",
+      Number.isFinite(event.renderCpuMs) ? `renderCpu=${event.renderCpuMs}ms` : "",
+      event.codec ? `codec=${event.codec}` : "",
+      Number.isFinite(event.fps) ? `fps=${event.fps}` : ""
+    ].filter(Boolean);
+    return details.join(" ");
+  }).join(", ");
 }
 
 async function normalizeWebmDuration(
@@ -348,6 +372,7 @@ async function renderReplayClip({
   try {
     const parsedUrl = new URL(url);
     parsedUrl.searchParams.set("clipExport", "1");
+    if (profile.fast) parsedUrl.searchParams.set("clipFast", "1");
     navigationUrl = parsedUrl.href;
   } catch {
     throw new Error("Replay render requires a valid absolute URL");
@@ -423,6 +448,13 @@ async function renderReplayClip({
       `Replay page state (mode=${readyDiagnostics?.mode || "unknown"}, ` +
       `preview passes=${readyDiagnostics?.previewPasses ?? "unknown"})`
     );
+    mark(`Replay page load milestones (${formatPageMilestones(readyDiagnostics, [
+      "replay-metadata-loaded",
+      "replay-telemetry-loaded",
+      "replay-data-load-end",
+      "map-load-end",
+      "editor-ready"
+    ])})`);
 
     await cdp.command("Runtime.evaluate", {
       expression: "document.querySelector('#replay-clip-download').click()",
@@ -469,6 +501,14 @@ async function renderReplayClip({
       `export passes=${exportDiagnostics?.exportPasses ?? "unknown"}, ` +
       `mode=${exportDiagnostics?.lastExportMode || "unknown"})`
     );
+    mark(`Replay page export milestones (${formatPageMilestones(exportDiagnostics, [
+      "export-render-start",
+      "webcodecs-start",
+      "webcodecs-end",
+      "export-render-end",
+      "webm-finalized",
+      "webm-download"
+    ])})`);
     const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
       const result = await normalizeWebmDuration(
