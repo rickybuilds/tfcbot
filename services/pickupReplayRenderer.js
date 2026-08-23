@@ -37,6 +37,24 @@ function getRenderProfile() {
       240,
       1080,
     )),
+    exportWidth: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_EXPORT_WIDTH,
+      1280,
+      320,
+      1920,
+    )),
+    exportHeight: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_EXPORT_HEIGHT,
+      720,
+      240,
+      1080,
+    )),
+    exportFps: Math.round(boundedNumber(
+      process.env.PICKUP_REPLAY_EXPORT_FPS,
+      10,
+      5,
+      30,
+    )),
     fps: Math.round(boundedNumber(
       process.env.PICKUP_REPLAY_RENDER_FPS,
       fast ? 30 : 60,
@@ -45,7 +63,7 @@ function getRenderProfile() {
     )),
     crf: Math.round(boundedNumber(
       process.env.PICKUP_REPLAY_RENDER_CRF,
-      fast ? 32 : 22,
+      fast ? 30 : 22,
       0,
       63,
     )),
@@ -245,6 +263,21 @@ function requestedClipDuration(url, clip) {
   }
 }
 
+async function isMjpegFile(filePath) {
+  let handle;
+  try {
+    handle = await fsp.open(filePath, "r");
+    const header = Buffer.alloc(3);
+    const result = await handle.read(header, 0, header.length, 0);
+    return result.bytesRead === header.length &&
+      header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
 async function replayPageDiagnostics(cdp) {
   const result = await cdp.command("Runtime.evaluate", {
     expression: `(() => {
@@ -350,6 +383,47 @@ async function normalizeWebmDuration(
   return outputPath;
 }
 
+async function encodeMjpegFrames(inputPath, outputPath, targetDurationSeconds, profile, mark) {
+  if (!ffmpegPath || !(targetDurationSeconds > 0)) {
+    throw new Error("FFmpeg is required to encode replay frame streams");
+  }
+  const temporaryPath = `${outputPath}.encoding-${process.pid}-${Date.now()}.webm`;
+  try {
+    mark(
+      `Native VP9 encode started (${profile.exportWidth}x${profile.exportHeight}, ` +
+      `${profile.exportFps}fps source -> ${profile.fps}fps WebM)`
+    );
+    await runProcess(ffmpegPath, [
+      "-y",
+      "-hide_banner",
+      "-loglevel", "error",
+      "-f", "image2pipe",
+      "-framerate", String(profile.exportFps),
+      "-c:v", "mjpeg",
+      "-i", inputPath,
+      "-t", targetDurationSeconds.toFixed(6),
+      "-an",
+      "-vf", "format=yuv420p",
+      "-c:v", "libvpx-vp9",
+      "-crf", String(profile.crf),
+      "-b:v", "0",
+      "-row-mt", "1",
+      "-threads", "1",
+      "-deadline", profile.deadline,
+      "-cpu-used", String(profile.cpuUsed),
+      "-r", String(profile.fps),
+      "-fps_mode", "cfr",
+      temporaryPath,
+    ]);
+    mark("Native VP9 encode finished");
+    await fsp.rename(temporaryPath, outputPath);
+  } finally {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => {});
+    await fsp.rm(inputPath, { force: true }).catch(() => {});
+  }
+  return outputPath;
+}
+
 async function renderReplayClip({
   url,
   outputPath,
@@ -372,7 +446,12 @@ async function renderReplayClip({
   try {
     const parsedUrl = new URL(url);
     parsedUrl.searchParams.set("clipExport", "1");
-    if (profile.fast) parsedUrl.searchParams.set("clipFast", "1");
+    if (profile.fast) {
+      parsedUrl.searchParams.set("clipFast", "1");
+      parsedUrl.searchParams.set("clipWidth", String(profile.exportWidth));
+      parsedUrl.searchParams.set("clipHeight", String(profile.exportHeight));
+      parsedUrl.searchParams.set("clipFps", String(profile.exportFps));
+    }
     navigationUrl = parsedUrl.href;
   } catch {
     throw new Error("Replay render requires a valid absolute URL");
@@ -468,7 +547,7 @@ async function renderReplayClip({
       for (const entry of entries) {
         // Chromium can leave auxiliary pages such as downloads.html in the
         // directory. Only the named media artifact is eligible here.
-        if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".webm")) continue;
+        if (!entry.isFile() || !/\.(?:webm|mjpg)$/i.test(entry.name)) continue;
         const candidate = path.join(outputDir, entry.name);
         let stat;
         try {
@@ -479,13 +558,14 @@ async function renderReplayClip({
         }
         if (stat.mtimeMs < renderStartedAt) continue;
         if (stat.size > 0) {
-          if (await isWebmFile(candidate)) return candidate;
-          throw new Error(`Downloaded clip is not a WebM (invalid EBML header): ${entry.name}`);
+          if (entry.name.toLowerCase().endsWith(".webm") && await isWebmFile(candidate)) return candidate;
+          if (entry.name.toLowerCase().endsWith(".mjpg") && await isMjpegFile(candidate)) return candidate;
+          throw new Error(`Downloaded replay artifact has an invalid header: ${entry.name}`);
         }
       }
       return null;
-    }, { timeoutMs, label: "downloaded WebM" });
-    mark("WebM file appeared");
+    }, { timeoutMs, label: "downloaded replay artifact" });
+    mark("Replay artifact appeared");
     await waitFor(async () => {
       try {
         const stat = await fsp.stat(downloadedPath);
@@ -493,8 +573,8 @@ async function renderReplayClip({
       } catch {
         return false;
       }
-    }, { timeoutMs, label: "downloaded WebM" });
-    mark("WebM file finished writing");
+    }, { timeoutMs, label: "downloaded replay artifact" });
+    mark("Replay artifact finished writing");
     const exportDiagnostics = await replayPageDiagnostics(cdp);
     mark(
       `Replay page export state (preview passes=${exportDiagnostics?.previewPasses ?? "unknown"}, ` +
@@ -507,10 +587,25 @@ async function renderReplayClip({
       "webcodecs-end",
       "export-render-end",
       "webm-finalized",
-      "webm-download"
+      "webm-download",
+      "frame-stream-start",
+      "frame-stream-end",
+      "frame-stream-finalized",
+      "frame-stream-download"
     ])})`);
     const targetDuration = requestedClipDuration(url, clip);
     if (targetDuration > 0) {
+      if (downloadedPath.toLowerCase().endsWith(".mjpg")) {
+        const result = await encodeMjpegFrames(
+          downloadedPath,
+          outputPath,
+          targetDuration,
+          profile,
+          mark,
+        );
+        mark("Render complete");
+        return result;
+      }
       const result = await normalizeWebmDuration(
         downloadedPath,
         outputPath,
@@ -546,6 +641,7 @@ async function reservePort() {
 
 module.exports = {
   CdpSession,
+  isMjpegFile,
   isWebmFile,
   renderReplayClip,
   resolveBrowserExecutable,
