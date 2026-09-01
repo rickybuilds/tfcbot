@@ -5,6 +5,10 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { PICK_ORDER, captainIds, isCaptainMode, pickOrderFor } = require("../lib/captains");
 const { finalizeMatch } = require("../commands/voteFlow");
+const {
+  buildSubstitutionScenarios,
+  replaceCaptainId,
+} = require("../commands/sub");
 
 test("captain mode activates only with exactly two captains", () => {
   const players = [
@@ -94,4 +98,41 @@ test("captain finalization starts RPS after the map is chosen", async () => {
   assert.ok(sent.includes(
     "⚠️ Captain draft canceled. The remaining players were returned to the queue."
   ));
+});
+
+test("captain substitutions preserve the drafted teams as Scenario 1", () => {
+  const ratings = new Map([
+    ["1", 3000], ["2", 2900], ["3", 2800], ["9", 2700],
+    ["5", 1200], ["6", 1100], ["7", 1000], ["8", 900],
+  ]);
+  const elo = {
+    db: {
+      prepare: () => ({
+        get: id => ({
+          display_name: `Player ${id}`,
+          name: `Player ${id}`,
+          rating: ratings.get(String(id)),
+        }),
+      }),
+    },
+  };
+  const player = id => ({ id, name: `Player ${id}` });
+  const blue = ["1", "2", "3", "9"].map(player);
+  const red = ["5", "6", "7", "8"].map(player);
+
+  const scenarios = buildSubstitutionScenarios(blue, red, "CAPTAINS", elo);
+
+  assert.deepEqual(scenarios[0].blue.map(p => p.id), ["1", "2", "3", "9"]);
+  assert.deepEqual(scenarios[0].red.map(p => p.id), ["5", "6", "7", "8"]);
+});
+
+test("substituting a captain transfers the saved captain slot", () => {
+  assert.deepEqual(
+    replaceCaptainId({ blue: "1", red: "5" }, "1", "9"),
+    { blue: "9", red: "5" }
+  );
+  assert.deepEqual(
+    replaceCaptainId({ blue: "1", red: "5" }, "3", "9"),
+    { blue: "1", red: "5" }
+  );
 });

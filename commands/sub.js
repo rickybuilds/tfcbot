@@ -5,11 +5,11 @@ const { isAdmin } = require("../lib/guards");
 const {
   buildTeamObjects,
   generateFairScenarios,
+  buildMatchScenarios,
   buildTeamScenariosEmbed,
 } = require("../lib/odds");
 
 const servers = require("../config/rcon");
-const { finalizeMatch } = require("./voteFlow"); 
 const {
   getTeamStartPlan,
   readTeam1Starts,
@@ -54,6 +54,26 @@ function toArray(x) {
 
 function fromArray(arr) {
   return arr.join(",");
+}
+
+function isCaptainsMatch(mode) {
+  return String(mode || "").trim().toUpperCase() === "CAPTAINS";
+}
+
+function buildSubstitutionScenarios(blue, red, mode, elo) {
+  const players = [...blue, ...red];
+  return isCaptainsMatch(mode)
+    ? buildMatchScenarios(blue, red, players, elo, 4)
+    : generateFairScenarios(players, elo, 4);
+}
+
+function replaceCaptainId(captains, oldId, newId) {
+  if (!captains || typeof captains !== "object") return captains;
+  const next = { ...captains };
+  for (const team of ["blue", "red"]) {
+    if (String(next[team] || "") === String(oldId)) next[team] = String(newId);
+  }
+  return next;
 }
 
 /* ------------------------------------------------------------ */
@@ -205,13 +225,21 @@ async function run(message, args, deps) {
 
   let rebuiltBlue = buildTeamObjects(toArray(dbMatch.blue_ids), elo);
   let rebuiltRed = buildTeamObjects(toArray(dbMatch.red_ids), elo);
-  const allPlayers = [...rebuiltBlue, ...rebuiltRed];
+  const captainsMatch = isCaptainsMatch(dbMatch.mode || match.mode);
 
   /* ------------------------------------------------------------ */
   /* Recalculate odds                                             */
   /* ------------------------------------------------------------ */
 
-  const scenarios = generateFairScenarios(allPlayers, elo, 4);
+  // Captain drafts are intentional team assignments. A substitute inherits
+  // the outgoing player's exact color; Elo may update the odds and suggested
+  // alternatives, but it must never replace the drafted Scenario 1.
+  const scenarios = buildSubstitutionScenarios(
+    rebuiltBlue,
+    rebuiltRed,
+    captainsMatch ? "CAPTAINS" : dbMatch.mode,
+    elo
+  );
 
 	// ------------------------------------------------------------
 	// Scenario 1 = actual team assignment after substitution
@@ -290,7 +318,11 @@ async function run(message, args, deps) {
 
   // Confirmation in pickup channel
   await message.channel.send(
-    `🔄 Substitution applied in match \`${matchId}\`:\n<@${oldId}> → <@${newId}>\n♻️ Odds recalculated.`
+    `🔄 Substitution applied in match \`${matchId}\`:\n<@${oldId}> → <@${newId}>\n` +
+    (captainsMatch
+      ? `👑 Captain-drafted teams preserved; the substitute stays on **${inBlue ? "Team 1 🔵" : "Team 2 🔴"}**.\n`
+      : "") +
+    `♻️ Odds recalculated.`
   );
 
   // Full odds embed → odds channel
@@ -362,12 +394,27 @@ if (idx !== -1) {
     id: p.id,
     name: p.name
   }));
+  if (captainsMatch) {
+    state.matches[idx].captains = replaceCaptainId(
+      state.matches[idx].captains,
+      oldId,
+      newId
+    );
+  }
 }
 
 // 🔥 NEW: ensure match object (from matchesStore or state) also gets team hydration
 match.blueTeam = rebuiltBlue.map(p => ({ id: p.id, name: p.name }));
 match.redTeam  = rebuiltRed.map(p => ({ id: p.id, name: p.name }));
+if (captainsMatch) {
+  match.captains = replaceCaptainId(match.captains, oldId, newId);
+}
 
 console.log(`[sub] Updated ${matchId}: ${oldId} → ${newId}`);
 }
-module.exports = { run };
+module.exports = {
+  run,
+  buildSubstitutionScenarios,
+  isCaptainsMatch,
+  replaceCaptainId,
+};
