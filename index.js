@@ -42,7 +42,11 @@ const removeadl = require("./commands/removeadl");
 const health    = require("./commands/health");
 
 // HLDS log listener + auto-recap
-const { startHldsLogReceiver, isPickupServerKey } = require("./services/hldsLogs");
+const {
+  startHldsLogReceiver,
+  isPickupServerKey,
+  shouldWarnBlockedPickupSource,
+} = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
@@ -474,6 +478,8 @@ startSpeedrunPlayerLinkSync({
     const udpPort = Number(process.env.HL_LOG_PORT || 27500);
     const allowedSources = (process.env.HL_ALLOWED_SOURCE || "108.61.128.120")
       .split(",").map(s => s.trim()).filter(Boolean);
+    const blockedHldsWarningAt = new Map();
+    const blockedHldsWarningIntervalMs = 5 * 60 * 1000;
 
     startHldsLogReceiver(client, {
       port: udpPort,
@@ -485,10 +491,22 @@ startSpeedrunPlayerLinkSync({
     // hldsLogs has already performed tracker/identity writes. Only configured
     // pickup endpoints may cross this boundary into gameplay consumers.
     if (!isPickupServerKey(evt?.serverKey)) {
-      console.warn(
-        `[HLDS route] tracker-only/unresolved source blocked from pickup lifecycle: ` +
-        `${evt?.serverKey || "unknown"} ${evt?.from || "?"}:${evt?.sourcePort || "?"}`
-      );
+      // A configured tracking-only server is expected to stop here, so do not
+      // fill the logs for every normal connect/kill/chat packet it produces.
+      // Unknown sources remain visible, but at most once per source per five
+      // minutes so a bad endpoint cannot flood PM2 output either.
+      if (shouldWarnBlockedPickupSource(evt?.serverKey)) {
+        const sourceKey = evt?.sourceKey || `${evt?.from || "?"}:${evt?.sourcePort || "?"}`;
+        const now = Date.now();
+        const lastWarningAt = blockedHldsWarningAt.get(sourceKey) || 0;
+        if (now - lastWarningAt >= blockedHldsWarningIntervalMs) {
+          blockedHldsWarningAt.set(sourceKey, now);
+          console.warn(
+            `[HLDS route] unresolved source blocked from pickup lifecycle: ` +
+            `${evt?.serverKey || "unknown"} ${evt?.from || "?"}:${evt?.sourcePort || "?"}`
+          );
+        }
+      }
       return;
     }
 

@@ -61,6 +61,10 @@ function isPickupServerKey(serverKey) {
 function isTrackingOnlyServerKey(serverKey) {
   return Boolean(serverKey && servers[serverKey]?.trackingOnly);
 }
+
+function shouldWarnBlockedPickupSource(serverKey) {
+  return !isPickupServerKey(serverKey) && !isTrackingOnlyServerKey(serverKey);
+}
 /* -------------------------------------------------------------------------- */
 /* Log Parser */
 /* -------------------------------------------------------------------------- */
@@ -337,5 +341,6 @@ module.exports = {
   updateScorePair,
   isPickupServerKey,
   isTrackingOnlyServerKey,
+  shouldWarnBlockedPickupSource,
   startHldsLogReceiver,
 };

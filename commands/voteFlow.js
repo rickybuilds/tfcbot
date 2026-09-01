@@ -125,7 +125,7 @@ function eligibleStreakPlayers(players, elo) {
 	  state.voteStartToken = voteStartToken;
 	  const voteStartCancelled = () => state.voteStartToken !== voteStartToken;
     const cancelToken = { cancelled: false, cancel: null };
-    state.activeFlowCancel = async (reason = "Active match flow canceled", removedIds = []) => {
+    const activeFlowCancel = async (reason = "Active match flow canceled", removedIds = []) => {
       cancelToken.cancelled = true;
       state.cancelledFlowPlayerIds = new Set((removedIds || []).map(String));
       try { cancelToken.cancel?.(); } catch (error) {
@@ -136,6 +136,7 @@ function eligibleStreakPlayers(players, elo) {
       }
       state.voteStartToken = null;
     };
+    state.activeFlowCancel = activeFlowCancel;
 
     try {
       if (!(await guardChannel(message, config.channels.pickup))) return;
@@ -324,22 +325,33 @@ function eligibleStreakPlayers(players, elo) {
 			  );
 			}
 
-			await finalizeMatch(
-			  message.channel,
-			  registry,
-			  settings,
-			  state,
-			  state.serverWinner,
-			  mapRef,
-			  elo,
-			  privacy,
-			  matchesStore,
-			  config,
-			  MODE,
-			  streaks,
-			  null,
-			  { team1Starts }
-			);
+			// startVote is event-driven, so runFullVoteFlow's outer finally has
+			// already released this handler by the time the map is chosen. Put it
+			// back for the interactive captain phase and pass its token explicitly.
+			state.activeFlowCancel = activeFlowCancel;
+			try {
+			  await finalizeMatch(
+			    message.channel,
+			    registry,
+			    settings,
+			    state,
+			    state.serverWinner,
+			    mapRef,
+			    elo,
+			    privacy,
+			    matchesStore,
+			    config,
+			    MODE,
+			    streaks,
+			    null,
+			    { team1Starts, cancelToken }
+			  );
+			} finally {
+			  if (state.activeFlowCancel === activeFlowCancel) {
+			    state.activeFlowCancel = null;
+			  }
+			  state.cancelledFlowPlayerIds = null;
+			}
 
 		  }
 		});
@@ -354,7 +366,7 @@ function eligibleStreakPlayers(players, elo) {
       }
       await message.channel.send("❌ Something went wrong during the vote.");
 	  } finally {
-	    if (state.activeFlowCancel) state.activeFlowCancel = null;
+	    if (state.activeFlowCancel === activeFlowCancel) state.activeFlowCancel = null;
 	    state.cancelledFlowPlayerIds = null;
 	    if (state.voteStartToken === voteStartToken) {
 	      state.voteStartToken = null;
@@ -639,6 +651,7 @@ async function finalizeMatch(
   forceMatchId = null,   // 👈 new arg
   options = {}
 ) {
+  const cancelToken = options.cancelToken || null;
   const players =
     Array.isArray(state.queueSnapshot) && state.queueSnapshot.length
       ? state.queueSnapshot
@@ -660,14 +673,24 @@ async function finalizeMatch(
       await channel.send("👑 **Captain mode activated.** The captains will play blind Rock Paper Scissors to decide who picks first.");
       captainDraft = await runCaptainDraft({ channel }, canonicalPlayers, { cancelToken });
     } catch (err) {
-      console.warn("[captain draft] canceled:", err.message);
+      const wasCanceled = Boolean(cancelToken?.cancelled);
+      if (wasCanceled) {
+        console.info("[captain draft] canceled:", err?.message || err);
+      } else {
+        // Include the full error/stack. Startup failures must never masquerade
+        // as a timeout again (the draft itself has no timeout).
+        console.error("[captain draft] failed:", err);
+      }
       const removed = state.cancelledFlowPlayerIds || new Set();
       state.queue = canonicalPlayers.filter(p => !removed.has(String(p.id))).map(p => ({ ...p }));
       state.queueSnapshot = null;
       state.serverWinner = null;
       state.isVotingInProgress = false;
       state.pendingTeam1Starts = null;
-      await channel.send("⚠️ Captain draft timed out or failed. The match was canceled and the players were returned to the queue.").catch(() => {});
+      await channel.send(wasCanceled
+        ? "⚠️ Captain draft canceled. The remaining players were returned to the queue."
+        : "⚠️ Captain draft failed to start. The players were returned to the queue; check the bot logs for the error."
+      ).catch(() => {});
       await postQueueBoard(channel, state, elo, privacy).catch(() => {});
       return null;
     }

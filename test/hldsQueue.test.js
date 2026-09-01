@@ -15,6 +15,7 @@ const {
   updateScorePair,
   isPickupServerKey,
   isTrackingOnlyServerKey,
+  shouldWarnBlockedPickupSource,
 } = require("../services/hldsLogs");
 
 test("recognizes regular in-game queue commands", () => {
@@ -72,6 +73,9 @@ test("tracking-only endpoints cannot cross the pickup lifecycle boundary", () =>
     assert.equal(isTrackingOnlyServerKey("testPickup"), false);
     assert.equal(isPickupServerKey("testSkills"), false);
     assert.equal(isTrackingOnlyServerKey("testSkills"), true);
+    assert.equal(shouldWarnBlockedPickupSource("testSkills"), false);
+    assert.equal(shouldWarnBlockedPickupSource("testPickup"), false);
+    assert.equal(shouldWarnBlockedPickupSource("missingServer"), true);
   } finally {
     delete rconServers.testPickup;
     delete rconServers.testSkills;
