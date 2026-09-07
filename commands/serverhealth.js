@@ -9,12 +9,12 @@ const SERVERS = servers.map(s => ({
   url: `http://${s.ip.split(":")[0]}:7010/health`
 }));
 
-async function getHealth(server){
-  const res = await fetch(server.url,{
-    signal:AbortSignal.timeout(3000)
+async function getHealth(server) {
+  const res = await fetch(server.url, {
+    signal: AbortSignal.timeout(3000)
   });
 
-  if(!res.ok){
+  if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
 
@@ -23,101 +23,121 @@ async function getHealth(server){
 
 const REGIONS = ["east", "central", "west"];
 
-function getRegion(value){
-  const normalized=String(value||"").toLowerCase();
+function getRegion(value) {
+  const normalized = String(value || "").toLowerCase();
   return REGIONS.find(region => normalized.includes(region));
 }
 
-function displayServerName(server,h){
-  const expectedRegion=getRegion(server.name);
-  const reportedName=h.server||"unknown";
-  const reportedRegion=getRegion(reportedName);
+function displayServerName(server, h) {
+  const expectedRegion = getRegion(server.name);
+  const reportedName = h.server || "unknown";
+  const reportedRegion = getRegion(reportedName);
 
   // A health agent can be cloned with a stale server name. Do not let one
   // region identify itself as another region in the combined status embed.
-  if(expectedRegion && reportedRegion && expectedRegion!==reportedRegion){
+  if (
+    expectedRegion &&
+    reportedRegion &&
+    expectedRegion !== reportedRegion
+  ) {
     return expectedRegion.toUpperCase();
   }
 
   return reportedName;
 }
 
-function statusLine(server,h){
+function kbToGb(kb) {
+  const value = Number(kb);
 
-  const udp=h.udp||{};
+  if (!Number.isFinite(value) || value <= 0) {
+    return "n/a";
+  }
 
-const bad =
-  Number(udp.packet_receive_errors || 0) > 0 ||
-  Number(udp.receive_buffer_errors || 0) > 0 ||
-  Number(udp.send_buffer_errors || 0) > 0 ||
-  Number(h.hlds?.cpu || 0) > 75;
-
-  const icon=bad?"🔴":"🟢";
-
-  return [
-`${icon} ${displayServerName(server,h)}`,
-`Uptime: \`${h.uptime||"n/a"}\``,
-`Load: \`${h.load||"n/a"}\``,
-`Memory: \`${h.memory||"n/a"}\``,
-`HLDS: \`${h.hlds?.running||0}\` running`,
-`CPU: \`${h.hlds?.cpu||0}%\`  MEM: \`${h.hlds?.mem||0}%\``,
-`UDP RX/TX: \`${udp.packets_received||0}/${udp.packets_sent||0}\``,
-`UDP ERR: \`${udp.packet_receive_errors||0}\``,
-`RXBUF: \`${udp.receive_buffer_errors||0}\``,
-`TXBUF: \`${udp.send_buffer_errors||0}\``
-  ].join("\n");
-
+  return (value / 1024 / 1024).toFixed(1);
 }
 
-module.exports={
+function statusLine(server, h) {
+  const udp = h.udp || {};
+  const cpu = h.cpu || {};
+  const disk = h.disk || {};
 
-  name:"serverhealth",
-  description:"Show server health",
+  const bad =
+    Number(udp.packet_receive_errors || 0) > 0 ||
+    Number(udp.receive_buffer_errors || 0) > 0 ||
+    Number(udp.send_buffer_errors || 0) > 0 ||
+    Number(h.hlds?.cpu || 0) > 75;
 
-  async execute(message,args,deps){
+  const icon = bad ? "🔴" : "🟢";
 
-    if(!isAdmin(message,deps?.config)){
+  const diskFree =
+    disk.available_kb != null
+      ? `${kbToGb(disk.available_kb)} GB`
+      : "n/a";
+
+  const diskUsed =
+    disk.used_percent != null
+      ? `${disk.used_percent}%`
+      : "n/a";
+
+  return [
+    `${icon} ${displayServerName(server, h)}`,
+    `Uptime: \`${h.uptime || "n/a"}\``,
+    `Load: \`${h.load || "n/a"}\``,
+    `Memory: \`${h.memory || "n/a"}\``,
+    `System CPU: \`${cpu.usage ?? "n/a"}%\`  Cores: \`${cpu.cores ?? "n/a"}\``,
+    `Disk: \`${diskFree} free\`  Used: \`${diskUsed}\``,
+    `HLDS: \`${h.hlds?.running || 0}\` running`,
+    `HLDS CPU: \`${h.hlds?.cpu || 0}%\`  MEM: \`${h.hlds?.mem || 0}%\``,
+    `UDP RX/TX: \`${udp.packets_received || 0}/${udp.packets_sent || 0}\``,
+    `UDP ERR: \`${udp.packet_receive_errors || 0}\``,
+    `RXBUF: \`${udp.receive_buffer_errors || 0}\``,
+    `TXBUF: \`${udp.send_buffer_errors || 0}\``
+  ].join("\n");
+}
+
+module.exports = {
+  name: "serverhealth",
+  description: "Show server health",
+
+  async execute(message, args, deps) {
+    if (!isAdmin(message, deps?.config)) {
       return;
     }
 
-    const fields=[];
+    const fields = [];
 
-    for(const server of SERVERS){
-
-      try{
-
-        const health=await getHealth(server);
+    for (const server of SERVERS) {
+      try {
+        const health = await getHealth(server);
 
         fields.push({
-          name:server.name,
-          value:statusLine(server,health),
-          inline:true
+          name: server.name,
+          value: statusLine(server, health),
+          inline: true
         });
 
-      }catch(err){
-
+      } catch (err) {
         fields.push({
-          name:server.name,
-          value:`🔴 Failed\n\`${err.message}\``,
-          inline:true
+          name: server.name,
+          value: `🔴 Failed\n\`${err.message}\``,
+          inline: true
         });
-
       }
-
     }
 
-    const embed=new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setTitle("🖥️ Server Health")
       .setColor(0x72d8ff)
       .setTimestamp()
       .addFields(fields);
 
     await message.channel.send({
-      embeds:[embed]
+      embeds: [embed]
     });
-
   }
-
 };
 
-module.exports._private={ displayServerName, statusLine };
+module.exports._private = {
+  displayServerName,
+  statusLine
+};
