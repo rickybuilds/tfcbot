@@ -356,21 +356,20 @@ test("unsafe match IDs and invalid round numbers are rejected before RCON", asyn
 
 test("pickup recap links only recorder-confirmed replay rounds", async () => {
   const embed = await renderPickupRecap([1]);
-  const detailField = embed.fields.find(field => field.name === "Blue Team 🔵");
 
-  assert.equal(embed.fields.length, 2);
-  assert.equal(detailField.value.indexOf("Score: **100**\nWinner:"), 0);
-  assert.match(detailField.value, /Watch Replay: \[Round 1\]/);
-  assert.match(detailField.value, /matchId=ZY9NGT&round=1/);
-  assert.doesNotMatch(detailField.value, /Round 2/);
+  assert.equal(embed.fields?.length || 0, 0);
+  assert.match(embed.description, /Blue Team 🔵.*Score: \*\*100\*\*.*Red Team 🔴.*Score: \*\*110\*\*/);
+  assert.match(embed.description, /Score: \*\*110\*\*\nWinner:/);
+  assert.match(embed.description, /Watch Replay: \[Round 1\]/);
+  assert.match(embed.description, /matchId=ZY9NGT&round=1/);
+  assert.doesNotMatch(embed.description, /Round 2/);
 });
 
 test("pickup recap omits replay links when no recording was confirmed", async () => {
   const embed = await renderPickupRecap([]);
-  const detailField = embed.fields.find(field => field.name === "Blue Team 🔵");
 
-  assert.doesNotMatch(detailField.value, /Watch Replay/);
-  assert.doesNotMatch(detailField.value, /pickup-replay\.html/);
+  assert.doesNotMatch(embed.description, /Watch Replay/);
+  assert.doesNotMatch(embed.description, /pickup-replay\.html/);
 });
 
 test("WebM renderer validation rejects mislabeled downloads", async () => {

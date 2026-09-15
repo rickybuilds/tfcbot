@@ -103,27 +103,18 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
   const resultLinks = `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "View TFCStats"} • ${
     hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "View Hampalyzer"
   }`;
+  const scoreLine = `**Blue Team 🔵** — Score: **${scoreBlue ?? "?"}**  **Red Team 🔴** — Score: **${scoreRed ?? "?"}**`;
+  const resultDetails = [
+    scoreLine,
+    `Winner: **${winner?.toUpperCase() || "Unknown"}**`,
+    resultLinks,
+    ...(replayLinks ? [replayLinks] : []),
+  ].join("\n");
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
     .setTitle(embedTitle)
-    .addFields(
-      {
-        name: "Blue Team 🔵",
-        value: [
-          `Score: **${scoreBlue ?? "?"}**`,
-          `Winner: **${winner?.toUpperCase() || "Unknown"}**`,
-          resultLinks,
-          ...(replayLinks ? [replayLinks] : []),
-        ].join("\n"),
-        inline: true,
-      },
-      {
-        name: "Red Team 🔴",
-        value: `Score: **${scoreRed ?? "?"}**`,
-        inline: true,
-      }
-    )
+    .setDescription(resultDetails)
     .setTimestamp();
 
   await ch.send({
