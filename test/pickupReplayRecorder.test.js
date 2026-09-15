@@ -356,8 +356,10 @@ test("unsafe match IDs and invalid round numbers are rejected before RCON", asyn
 
 test("pickup recap links only recorder-confirmed replay rounds", async () => {
   const embed = await renderPickupRecap([1]);
-  const detailField = embed.fields.find(field => field.name === "\u200B");
+  const detailField = embed.fields.find(field => field.name === "Blue Team 🔵");
 
+  assert.equal(embed.fields.length, 2);
+  assert.equal(detailField.value.indexOf("Score: **100**\nWinner:"), 0);
   assert.match(detailField.value, /Watch Replay: \[Round 1\]/);
   assert.match(detailField.value, /matchId=ZY9NGT&round=1/);
   assert.doesNotMatch(detailField.value, /Round 2/);
@@ -365,7 +367,7 @@ test("pickup recap links only recorder-confirmed replay rounds", async () => {
 
 test("pickup recap omits replay links when no recording was confirmed", async () => {
   const embed = await renderPickupRecap([]);
-  const detailField = embed.fields.find(field => field.name === "\u200B");
+  const detailField = embed.fields.find(field => field.name === "Blue Team 🔵");
 
   assert.doesNotMatch(detailField.value, /Watch Replay/);
   assert.doesNotMatch(detailField.value, /pickup-replay\.html/);

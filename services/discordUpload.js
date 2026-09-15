@@ -100,6 +100,9 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
   if (displayId) embedTitleParts.push(`— ID: ${displayId}`);
   const embedTitle = embedTitleParts.join(" ");
   const replayLinks = buildPickupReplayLinks(displayId, replayRounds);
+  const resultLinks = `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "View TFCStats"} • ${
+    hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "View Hampalyzer"
+  }`;
 
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
@@ -107,24 +110,18 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
     .addFields(
       {
         name: "Blue Team 🔵",
-        value: `Score: **${scoreBlue ?? "?"}**`,
+        value: [
+          `Score: **${scoreBlue ?? "?"}**`,
+          `Winner: **${winner?.toUpperCase() || "Unknown"}**`,
+          resultLinks,
+          ...(replayLinks ? [replayLinks] : []),
+        ].join("\n"),
         inline: true,
       },
       {
         name: "Red Team 🔴",
         value: `Score: **${scoreRed ?? "?"}**`,
         inline: true,
-      },
-      {
-        name: "\u200B",
-        value: [
-          `Winner: **${winner?.toUpperCase() || "Unknown"}**`,
-          `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "View TFCStats"} • ${
-            hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "View Hampalyzer"
-          }`,
-          ...(replayLinks ? [replayLinks] : []),
-        ].join("\n"),
-        inline: false,
       }
     )
     .setTimestamp();
