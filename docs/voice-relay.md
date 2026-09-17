@@ -31,6 +31,39 @@ streams are removed and subscribed again when that player speaks. A new TCP
 connection replaces that team's old buffer. Slow TCP sends reset rather than
 accumulating stale speech. Shutdown releases sockets, decoders and timers.
 
+### Follow-up for robotic audio with zero dropped bytes
+
+The first Node replacement had a separate defect: its timer consumed input
+frames even when its readable output was backpressured, then discarded the
+mixed result. These losses were invisible to `droppedBytes`. The mixer now
+checks output demand before consuming anything. Prolonged backpressure can
+still overflow the bounded input queues, but those losses are counted.
+
+Both stages now prebuffer three frames (60 ms) to tolerate packet jitter and
+independent timer phases. Set `VOICE_JITTER_FRAMES` to an integer from 1 to 8
+in each role's env file to adjust this. The default adds roughly 120 ms of
+input buffering across both stages, plus Discord/codec buffering. Incomplete
+frames are retained until complete instead of padding and consuming each TCP
+fragment. Short utterances flush after a bounded wait even below the target.
+
+Startup identifies this revision as `Audio pipeline v2`. Health counters now
+include `underflows` (buffer starvation after playback started; team speech
+pauses also cause these), `backpressureTicks` (20 ms mixer opportunities held
+for a slow consumer), `lateTicks` (timer lateness above 10 ms), byte accounting,
+and `outputFrames`. `loopMaxMs` is the maximum sampled event-loop delay in the
+last minute, not cumulative; other mixer counters are cumulative. Input
+counters reset when that input is removed/replaced. Zero overflow alone does
+not establish healthy playback or rule out packet loss upstream of decoding.
+
+This revision fixes a reproduced loss bug, not a confirmed diagnosis of all
+live robotic audio. Deploy `voicebot.js` and `lib/voicePcm.js` together and
+restart all three PM2 voice processes between games. On the Ubuntu host, use
+the existing operator order: `pm2 restart tfcbot-spectator`, wait for
+`SPECTATOR READY`, then `pm2 restart tfcbot-red tfcbot-blue`. Preserve the new
+health lines from all roles if the problem returns. The reported spontaneous
+recovery is consistent with a transient timing problem but does not identify
+which stage is responsible.
+
 The spectator gain remains 0.25, matching the old FFmpeg volume setting. Set
 `SPECTATOR_GAIN` in `.env.spectator` to tune it (0 through 2). Peak limiting
 prevents integer overflow when speakers overlap; this is not loudness
@@ -46,6 +79,13 @@ chunks, 400 ms stalls, and a Red disconnect/reconnect at minute 26. It checks
 sample alignment throughout and bounded queues. Additional tests check mixing,
 clipping, backpressure and PM2 lifecycle failures. This is simulated PCM time,
 not a 35-minute live Discord/Opus/network test.
+
+A second 35-minute simulation uses six producers per team with independent
+phases and jitter, team and spectator clocks with different phases, TCP
+fragments delivered in separate events, and an 80 ms playback pause at minute
+26. It asserts the exact twelve-speaker sum after warmup, no underflows or
+unaccounted sample losses, and bounded queues. The backpressure regression
+test was verified to fail against the first Node replacement.
 
 The host needs Node 22.12+ and a functioning native `@discordjs/opus` install.
 This relay no longer needs an FFmpeg process; FFmpeg dependencies remain for

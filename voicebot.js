@@ -2,6 +2,7 @@
 
 require("dotenv").config({ path: process.env.ENV_FILE || ".env" });
 const net = require("node:net");
+const { monitorEventLoopDelay } = require("node:perf_hooks");
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel, entersState, VoiceConnectionStatus,
@@ -31,6 +32,8 @@ async function main() {
     throw new Error("PCM ports must be distinct integers");
   }
   const gain = numberSetting("SPECTATOR_GAIN", 0.25, 0, 2);
+  const jitterFrames = numberSetting("VOICE_JITTER_FRAMES", 3, 1, 8);
+  if (!Number.isInteger(jitterFrames)) throw new Error("VOICE_JITTER_FRAMES must be an integer");
   const log = (...args) => console.log(new Date().toISOString(), `[${role}]`, ...args);
   const client = new Client({ intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers,
@@ -85,7 +88,7 @@ async function main() {
       });
       await entersState(connection, VoiceConnectionStatus.Ready, 30000);
       if (stopped) return;
-      const mixer = new LiveMixer({ gain: role === "spectator" ? gain : 1 });
+      const mixer = new LiveMixer({ gain: role === "spectator" ? gain : 1, prebufferFrames: jitterFrames });
       cleanup.push(() => mixer.destroy());
       mixer.on("error", fail);
 
@@ -185,9 +188,15 @@ async function main() {
         player.play(createAudioResource(mixer, { inputType: StreamType.Raw }));
         log("SPECTATOR READY - audio live");
       }
+      const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+      loopDelay.enable();
+      cleanup.push(() => loopDelay.disable());
+      log(`Audio pipeline v2: jitterFrames=${jitterFrames} (20 ms each)`);
       const health = setInterval(() => {
         const inputs = [...mixer.inputs.values()];
-        log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${inputs.reduce((n, input) => n + input.droppedBytes, 0)} voice=${connection.state.status}`);
+        const sum = key => inputs.reduce((n, input) => n + input[key], 0);
+        log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${sum("droppedBytes")} underflows=${sum("underflows")} receivedBytes=${sum("writtenBytes")} consumedBytes=${sum("consumedBytes")} backpressureTicks=${mixer.backpressureTicks} lateTicks=${mixer.lateTicks} outputFrames=${mixer.outputFrames} loopMaxMs=${(loopDelay.max / 1e6).toFixed(1)} voice=${connection.state.status}`);
+        loopDelay.reset();
       }, 60000);
       cleanup.push(() => clearInterval(health));
       log(`Joined ${channel.name}`);

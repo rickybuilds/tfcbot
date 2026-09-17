@@ -42,16 +42,20 @@ test("both teams sum, absent teams are silent, and peaks never wrap", () => {
   assert.equal(clipped.readInt16LE(2), -32767);
 });
 
-test("slow consumers do not create unbounded output or stop draining inputs", () => {
+test("backpressure preserves speech until the consumer requests the next frame", () => {
   const mixer = new LiveMixer({ clock: false });
   const input = mixer.add("speaker");
   mixer._read();
-  for (let i = 0; i < 1000; i++) {
-    input.write(stereo(100, -100));
-    mixer.tick();
-  }
+  input.write(stereo(100, -100));
+  mixer.tick();
+  input.write(stereo(200, -200));
+  mixer.tick();
   assert.equal(mixer.readableLength, FRAME_BYTES);
-  assert.equal(input.buffer.length, 0);
+  assert.equal(input.buffer.length, FRAME_BYTES, "second frame must not disappear under backpressure");
+  assert.deepEqual(mixer.read(FRAME_BYTES), stereo(100, -100));
+  mixer._read();
+  mixer.tick();
+  assert.deepEqual(mixer.read(FRAME_BYTES), stereo(200, -200));
   mixer.destroy();
   assert.equal(mixer.inputs.size, 0);
 });
@@ -81,6 +85,102 @@ test("all twelve speakers contribute to the spectator's exact mixed samples", ()
     spectator._read();
     spectator.tick();
     assert.deepEqual(spectator.read(FRAME_BYTES), stereo(100, -100));
+  } finally {
+    teams.forEach(team => team.destroy());
+    spectator.destroy();
+  }
+});
+
+test("jitter buffering waits for complete frames and flushes short utterances", () => {
+  const input = new PcmBuffer(10, 3);
+  const frame = stereo(1234, -2345);
+  input.write(frame.subarray(0, 7));
+  assert.deepEqual(input.readFrame(), Buffer.alloc(FRAME_BYTES));
+  assert.equal(input.buffer.length, 7);
+  input.write(frame.subarray(7));
+  assert.deepEqual(input.readFrame(), Buffer.alloc(FRAME_BYTES));
+  assert.deepEqual(input.readFrame(), frame);
+  assert.deepEqual(input.readFrame(), Buffer.alloc(FRAME_BYTES));
+  assert.equal(input.underflows, 1);
+  assert.equal(input.writtenBytes, input.consumedBytes);
+});
+
+test("prolonged backpressure remains bounded and every dropped byte is accounted for", () => {
+  const mixer = new LiveMixer({ clock: false });
+  const input = mixer.add("speaker");
+  mixer._read();
+  for (let tick = 0; tick < 100; tick++) {
+    input.write(stereo(100, -100));
+    mixer.tick();
+  }
+  assert.equal(mixer.readableLength, FRAME_BYTES);
+  assert.equal(input.buffer.length, input.limit);
+  assert.equal(input.writtenBytes, input.consumedBytes + input.droppedBytes + input.buffer.length);
+  assert.equal(input.droppedBytes, 89 * FRAME_BYTES);
+  assert.equal(mixer.backpressureTicks, 99);
+  mixer.destroy();
+});
+
+test("35-minute independent-clock simulation: 12 speakers, jitter, TCP fragmentation and playback pause", () => {
+  const teams = [new LiveMixer({ clock: false, prebufferFrames: 3 }), new LiveMixer({ clock: false, prebufferFrames: 3 })];
+  const spectator = new LiveMixer({ clock: false, prebufferFrames: 3, gain: 0.25 });
+  const speakers = teams.flatMap(team => Array.from({ length: 6 }, (_, person) => team.add(person)));
+  const feeds = [spectator.add("blue"), spectator.add("red")];
+  const frames = speakers.map((_, person) => stereo((person + 1) * 100, -(person + 1) * 100));
+  const events = [];
+  const allInputs = [...speakers, ...feeds];
+  let silentAfterWarmup = 0;
+  let played = 0;
+  try {
+    for (let tick = 0; tick < 35 * 60 * 50; tick++) {
+      const base = tick * 20;
+      // Producers have independent phase offsets and +/- 4 ms packet jitter.
+      speakers.forEach((input, person) => {
+        events.push({ at: base + 4 + person % 7 + (tick + person) % 5, run: () => input.write(frames[person]) });
+      });
+      teams.forEach((team, index) => {
+        events.push({ at: base + 2 + index * 5, run: () => {
+          team._read();
+          team.tick();
+          const frame = team.read(FRAME_BYTES);
+          // Split TCP data across separate events, not consecutive writes.
+          feeds[index].write(frame.subarray(0, 101));
+          events.push({ at: base + 6 + index * 5, run: () => feeds[index].write(frame.subarray(101)) });
+        } });
+      });
+      events.push({ at: base + 12, run: () => spectator.tick() });
+      events.push({ at: base + 16, run: () => {
+        // At minute 26 the encoder stops accepting PCM for 80 ms. The old
+        // implementation deleted frames in this situation with droppedBytes=0.
+        if (tick >= 26 * 60 * 50 && tick < 26 * 60 * 50 + 4) return;
+        const frame = spectator.read(FRAME_BYTES);
+        spectator._read();
+        if (tick > 20) {
+          assert.ok(frame, `missing playout frame at ${tick}`);
+          if (frame.readInt16LE(0) === 0) silentAfterWarmup++;
+          assert.deepEqual(frame, stereo(1950, -1950), `lost speaker or broken frame at ${tick}`);
+          played++;
+        }
+      } });
+      while (events.length) {
+        events.sort((a, b) => a.at - b.at);
+        events.shift().run();
+      }
+      if (tick % 1000 === 0) {
+        for (const input of allInputs) {
+          assert.equal(input.writtenBytes, input.consumedBytes + input.droppedBytes + input.buffer.length);
+          assert.ok(input.buffer.length <= input.limit);
+        }
+      }
+    }
+    assert.ok(played > 100000);
+    assert.equal(silentAfterWarmup, 0);
+    assert.ok(spectator.backpressureTicks >= 3);
+    for (const input of allInputs) {
+      assert.equal(input.underflows, 0);
+      assert.equal(input.droppedBytes, 0);
+      assert.equal(input.writtenBytes, input.consumedBytes + input.buffer.length);
+    }
   } finally {
     teams.forEach(team => team.destroy());
     spectator.destroy();
