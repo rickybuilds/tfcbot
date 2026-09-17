@@ -650,6 +650,7 @@ try {
 		  try {
 			await voiceStart();
 		  } catch (err) {
+			a.voiceArmed = false;
 			console.warn("[autoRecap] Failed to start voice bots:", err);
 		  }
 		}
@@ -1055,8 +1056,12 @@ await sendRecapWithDemos(client, logsChannel, {
 		if (a.voiceArmed) {
 		  console.log(`[autoRecap] 🎤 Voice bots disarming for match ${a.matchId}`);
 
-		  await voiceStop();
-		  a.voiceArmed = false;
+		  try {
+		    await voiceStop();
+		    a.voiceArmed = false;
+		  } catch (err) {
+		    console.warn("[autoRecap] Failed to stop voice bots at match completion:", err);
+		  }
 		}
 
     try {

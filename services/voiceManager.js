@@ -1,107 +1,60 @@
-// services/voiceManager.js
 "use strict";
 
 const pm2 = require("pm2");
-
 const BOT_SPECTATOR = "tfcbot-spectator";
 const BOT_BLUE = "tfcbot-blue";
 const BOT_RED = "tfcbot-red";
 
-function connectPM2() {
-  return new Promise((res, rej) => {
-    pm2.connect((err) => (err ? rej(err) : res()));
+function call(method, ...args) {
+  return new Promise((resolve, reject) => {
+    pm2[method](...args, (error, result) => error ? reject(error) : resolve(result));
   });
 }
 
-function startProcess(name) {
-  return new Promise((resolve) => {
-    pm2.start(name, (err) => {
-      if (err) {
-        console.error(`[VoiceManager] ❌ Failed to start ${name}:`, err.message);
-      } else {
-        console.log(`[VoiceManager] ✅ Started ${name}`);
-      }
-      resolve();
-    });
+// Serialize match lifecycle requests so a late start cannot undo a stop.
+let pending = Promise.resolve();
+function serialized(action) {
+  const result = pending.then(action);
+  pending = result.catch(() => {});
+  return result;
+}
+
+function startVoiceBots() {
+  return serialized(async () => {
+    await call("connect");
+    try {
+      // Team senders reconnect until the spectator is listening. No log-bus
+      // subscription or leaked readiness timeout is needed for ordering.
+      await call("start", BOT_SPECTATOR);
+      const results = await Promise.allSettled([
+        call("start", BOT_BLUE), call("start", BOT_RED),
+      ]);
+      const failure = results.find(result => result.status === "rejected");
+      if (failure) throw failure.reason;
+      console.log("[VoiceManager] Voice processes started; see spectator READY for audio readiness.");
+    } catch (error) {
+      // Do not leave a partial match relay running after a failed start.
+      await Promise.allSettled([BOT_BLUE, BOT_RED, BOT_SPECTATOR].map(name => call("stop", name)));
+      throw error;
+    } finally {
+      pm2.disconnect();
+    }
   });
 }
 
-function stopProcess(name) {
-  return new Promise((resolve) => {
-    pm2.stop(name, (err) => {
-      if (err) {
-        console.error(`[VoiceManager] ⚠️ Failed to stop ${name}:`, err.message);
-      } else {
-        console.log(`[VoiceManager] 🛑 Stopped ${name}`);
-      }
-      resolve();
-    });
+function stopVoiceBots() {
+  return serialized(async () => {
+    await call("connect");
+    try {
+      const teams = await Promise.allSettled([call("stop", BOT_BLUE), call("stop", BOT_RED)]);
+      const spectator = await Promise.allSettled([call("stop", BOT_SPECTATOR)]);
+      const errors = [...teams, ...spectator].filter(result => result.status === "rejected");
+      if (errors.length) throw new AggregateError(errors.map(result => result.reason), "Could not stop all voice bots");
+      console.log("[VoiceManager] All voice bots stopped.");
+    } finally {
+      pm2.disconnect();
+    }
   });
-}
-
-async function startVoiceBots() {
-  await connectPM2();
-  console.log("[VoiceManager] 🚀 Arming voice bots...");
-
-  // Wait for spectator READY before starting blue/red
-  const readyPromise = new Promise((resolve) => {
-    pm2.launchBus((err, bus) => {
-      if (err) {
-        console.error("[VoiceManager] PM2 bus error:", err);
-        return resolve();
-      }
-
-      let done = false;
-
-      bus.on("log:out", (packet) => {
-        if (packet.process.name !== BOT_SPECTATOR) return;
-
-        const line = (packet.data || "").toString().trim();
-
-        if (!done && (line.includes("SPECTATOR READY") || line.endsWith("READY"))) {
-          done = true;
-          console.log("[VoiceManager] 🎧 Spectator READY (matched:", line, ")");
-          resolve();
-
-          try { bus.close && bus.close(); } catch (_) {}
-        }
-      });
-
-      // Safety fallback: max 15 seconds
-      setTimeout(() => {
-        if (!done) {
-          console.log("[VoiceManager] ⚠️ Spectator READY timeout — starting blue/red anyway");
-          resolve();
-        }
-      }, 15000);
-    });
-  });
-
-  await startProcess(BOT_SPECTATOR);
-
-  console.log("[VoiceManager] Waiting for spectator to say READY...");
-  await readyPromise;
-
-  // Start blue and red after the spectator is ready to accept their TCP streams.
-  await Promise.all([startProcess(BOT_BLUE), startProcess(BOT_RED)]);
-
-  pm2.disconnect();
-  console.log("[VoiceManager] ✅ All voice bots online.");
-}
-
-async function stopVoiceBots() {
-  await connectPM2();
-  console.log("[VoiceManager] 🔻 Disarming voice bots...");
-
-  // Stop blue/red first so they stop sending audio to the spectator.
-  await stopProcess(BOT_BLUE);
-  await stopProcess(BOT_RED);
-
-  // No recording conversion is performed, so the spectator can stop immediately.
-  await stopProcess(BOT_SPECTATOR);
-
-  pm2.disconnect();
-  console.log("[VoiceManager] 💤 All voice bots stopped.");
 }
 
 module.exports = { startVoiceBots, stopVoiceBots };

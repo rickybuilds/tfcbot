@@ -1,374 +1,205 @@
 "use strict";
 
-const envPath = process.env.ENV_FILE || ".env";
-require("dotenv").config({ path: envPath });
-console.log(`[dotenv] loaded from ${envPath}`);
-
-const net  = require("net");
-const { spawn } = require("child_process");
+require("dotenv").config({ path: process.env.ENV_FILE || ".env" });
+const net = require("node:net");
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
-  joinVoiceChannel,
-  VoiceConnectionStatus,
-  createAudioPlayer,
-  createAudioResource,
-  NoSubscriberBehavior,
-  StreamType,
-  EndBehaviorType,
+  joinVoiceChannel, entersState, VoiceConnectionStatus,
+  createAudioPlayer, createAudioResource, AudioPlayerStatus,
+  NoSubscriberBehavior, StreamType, EndBehaviorType,
 } = require("@discordjs/voice");
 const prism = require("prism-media");
-const { Readable, PassThrough } = require("stream");
+const { LiveMixer } = require("./lib/voicePcm");
 
-/* -------------------------------------------------------------------------- */
-/* CONFIG                                                                     */
-/* -------------------------------------------------------------------------- */
-const ROLE = (process.env.BOT_ROLE || "").toLowerCase();
-if (!["blue", "red", "spectator"].includes(ROLE)) {
-  console.error("BOT_ROLE must be 'blue', 'red', or 'spectator'");
-  process.exit(1);
+function numberSetting(name, fallback, min, max) {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+  return value;
 }
 
-const BLUE_PORT = Number(process.env.BLUE_PCM_PORT || 7001);
-const RED_PORT  = Number(process.env.RED_PCM_PORT  || 7002);
-
-function tlog(...args) {
-  const ts = new Date().toISOString().replace("T", " ").replace("Z", "");
-  console.log(`[${ts}]`, ...args);
-}
-
-// Swallow unhandled errors globally so one bad socket never crashes the process
-process.on("uncaughtException", (err) => {
-  tlog(`[uncaughtException] ${err.message}`);
-});
-process.on("unhandledRejection", (err) => {
-  tlog(`[unhandledRejection] ${err}`);
-});
-
-/* -------------------------------------------------------------------------- */
-/* TEAM MIXER                                                                 */
-/* -------------------------------------------------------------------------- */
-class TeamVoiceMixer extends Readable {
-  constructor(role) {
-    super({ objectMode: false, highWaterMark: 3840 * 20 });
-    this.role      = role;
-    this.streams   = new Map();
-    this.frameSize = 3840;
-    this._paused   = false;
-    this._clock    = setInterval(() => this._flush(), 20);
-    tlog(`[${role}] Mixer started`);
+async function main() {
+  const role = (process.env.BOT_ROLE || "").toLowerCase();
+  if (!["blue", "red", "spectator"].includes(role)) throw new Error("Invalid BOT_ROLE");
+  for (const name of ["DISCORD_TOKEN", "GUILD_ID", "VOICE_CHANNEL_ID"]) {
+    if (!process.env[name]) throw new Error(`Missing ${name}`);
   }
-
-  _read() {
-    this._paused = false;
+  const bluePort = numberSetting("BLUE_PCM_PORT", 7001, 1, 65535);
+  const redPort = numberSetting("RED_PCM_PORT", 7002, 1, 65535);
+  if (!Number.isInteger(bluePort) || !Number.isInteger(redPort) || bluePort === redPort) {
+    throw new Error("PCM ports must be distinct integers");
   }
+  const gain = numberSetting("SPECTATOR_GAIN", 0.25, 0, 2);
+  const log = (...args) => console.log(new Date().toISOString(), `[${role}]`, ...args);
+  const client = new Client({ intents: [
+    GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers,
+  ] });
+  const cleanup = [];
+  let stopped = false;
+  let connection;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    for (const dispose of cleanup.reverse()) {
+      try { dispose(); } catch (error) { log("Cleanup:", error.message); }
+    }
+    connection?.destroy();
+    client.destroy();
+  };
+  const fail = error => {
+    console.error(`[${role}] Fatal:`, error.message);
+    process.exitCode = 1;
+    stop(); // Let PM2 restart cleanly instead of swallowing a broken pipeline.
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  client.on("error", fail);
 
-  addStream(userId, opusStream) {
-    if (this.streams.has(userId)) return;
-    const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
-    const entry   = { decoder, buffer: Buffer.alloc(0), opusStream };
-    this.streams.set(userId, entry);
-    opusStream.pipe(decoder);
-    decoder.on("data", (chunk) => {
-      const s = this.streams.get(userId);
-      if (s) s.buffer = Buffer.concat([s.buffer, chunk]);
-    });
-    decoder.on("error", (e) => tlog(`[${this.role}] decoder error ${userId}: ${e.message}`));
-    opusStream.on("error", (e) => tlog(`[${this.role}] opus error ${userId}: ${e.message}`));
-    opusStream.on("close", () => this.removeStream(userId));
-    tlog(`[${this.role}] +stream ${userId} (total=${this.streams.size})`);
-  }
+  client.once("clientReady", () => {
+    void (async () => {
+      const guild = await client.guilds.fetch(process.env.GUILD_ID);
+      const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
+      if (stopped) return;
+      if (!channel?.isVoiceBased()) throw new Error("VOICE_CHANNEL_ID must identify a voice channel");
+      connection = joinVoiceChannel({
+        channelId: channel.id, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: role === "spectator", selfMute: role !== "spectator",
+      });
+      connection.on("error", fail);
+      let recovering = false;
+      connection.on(VoiceConnectionStatus.Disconnected, () => {
+        if (recovering || stopped) return;
+        recovering = true;
+        void (async () => {
+          try {
+            try { await entersState(connection, VoiceConnectionStatus.Ready, 5000); }
+            catch {
+              if (stopped) return;
+              connection.rejoin();
+              await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+            }
+          } catch (error) { if (!stopped) fail(error); }
+          finally { recovering = false; }
+        })();
+      });
+      await entersState(connection, VoiceConnectionStatus.Ready, 30000);
+      if (stopped) return;
+      const mixer = new LiveMixer({ gain: role === "spectator" ? gain : 1 });
+      cleanup.push(() => mixer.destroy());
+      mixer.on("error", fail);
 
-  removeStream(userId) {
-    const s = this.streams.get(userId);
-    if (!s) return;
-    try { s.decoder.destroy(); }    catch {}
-    try { s.opusStream.destroy(); } catch {}
-    this.streams.delete(userId);
-    tlog(`[${this.role}] -stream ${userId} (total=${this.streams.size})`);
-  }
-
-  _flush() {
-    if (this._paused) return;
-    const frame = Buffer.alloc(this.frameSize, 0);
-
-    if (this.streams.size > 0) {
-      for (let i = 0; i < this.frameSize; i += 4) {
-        let lSum = 0, rSum = 0;
-        this.streams.forEach((s) => {
-          if (s.buffer.length >= i + 4) {
-            lSum += s.buffer.readInt16LE(i);
-            rSum += s.buffer.readInt16LE(i + 2);
+      if (role !== "spectator") {
+        const streams = new Map();
+        const remove = uid => {
+          const entry = streams.get(uid);
+          if (!entry) return;
+          streams.delete(uid);
+          mixer.inputs.delete(uid);
+          entry.opus.unpipe(entry.decoder);
+          entry.opus.destroy();
+          entry.decoder.destroy();
+        };
+        const subscribe = uid => {
+          const member = channel.members.get(uid);
+          if (stopped || !member || member.user.bot || streams.has(uid)) return;
+          const opus = connection.receiver.subscribe(uid, { end: { behavior: EndBehaviorType.Manual } });
+          const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+          const input = mixer.add(uid);
+          streams.set(uid, { opus, decoder });
+          const removeCurrent = () => { if (streams.get(uid)?.opus === opus) remove(uid); };
+          for (const stream of [opus, decoder]) {
+            stream.on("error", error => { log("Receive stream:", error.message); removeCurrent(); });
+            stream.once("close", removeCurrent);
           }
+          decoder.on("data", chunk => input.write(chunk));
+          opus.pipe(decoder);
+        };
+        connection.receiver.speaking.on("start", subscribe);
+        const onVoiceState = (before, after) => {
+          if (before.guild.id !== guild.id) return;
+          if (after.channelId !== channel.id) remove(after.id);
+          else subscribe(after.id);
+        };
+        client.on("voiceStateUpdate", onVoiceState);
+        cleanup.push(() => {
+          connection.receiver.speaking.off("start", subscribe);
+          client.off("voiceStateUpdate", onVoiceState);
+          for (const uid of [...streams.keys()]) remove(uid);
         });
-        const peak = Math.max(Math.abs(lSum), Math.abs(rSum));
-        if (peak > 32767) {
-          const scale = 32767 / peak;
-          lSum = Math.round(lSum * scale);
-          rSum = Math.round(rSum * scale);
-        }
-        frame.writeInt16LE(Math.max(-32768, Math.min(32767, lSum)), i);
-        frame.writeInt16LE(Math.max(-32768, Math.min(32767, rSum)), i + 2);
-      }
-      this.streams.forEach((s) => {
-        s.buffer = s.buffer.length >= this.frameSize
-          ? s.buffer.slice(this.frameSize)
-          : Buffer.alloc(0);
-      });
-    }
+        channel.members.forEach(member => subscribe(member.id));
 
-    const ok = this.push(frame);
-    if (!ok) this._paused = true;
-  }
-
-  destroy() {
-    clearInterval(this._clock);
-    this.streams.forEach((_, uid) => this.removeStream(uid));
-    try { this.push(null); } catch {}
-    super.destroy();
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/* DISCORD CLIENT                                                             */
-/* -------------------------------------------------------------------------- */
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMembers,
-  ],
-});
-
-client.once("clientReady", async () => {
-  tlog(`Logged in as ${client.user.tag} (role=${ROLE})`);
-
-  const guild   = await client.guilds.fetch(process.env.GUILD_ID);
-  const channel = await guild.channels.fetch(process.env.VOICE_CHANNEL_ID);
-
-  const connection = joinVoiceChannel({
-    channelId:      channel.id,
-    guildId:        guild.id,
-    adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf:       false,
-    selfMute:       ROLE !== "spectator",
-  });
-
-  /* -----------------------------------------------------------------------
-     BLUE / RED
-     ----------------------------------------------------------------------- */
-  if (ROLE === "blue" || ROLE === "red") {
-    const TARGET_PORT = ROLE === "blue" ? BLUE_PORT : RED_PORT;
-    const mixer       = new TeamVoiceMixer(ROLE);
-
-    function connectToSpectator() {
-      tlog(`[${ROLE}] Connecting to spectator on port ${TARGET_PORT}...`);
-      const sock = net.connect(TARGET_PORT, "127.0.0.1");
-
-      // Must attach error handler before connect fires to avoid unhandled error crash
-      sock.on("error", (err) => {
-        tlog(`[${ROLE}] Socket error: ${err.message} — retry in 2s`);
-      });
-
-      sock.on("connect", () => {
-        tlog(`[${ROLE}] Connected to spectator — streaming PCM`);
-        mixer.pipe(sock);
-        mixer.resume();
-      });
-
-      sock.on("close", () => {
-        tlog(`[${ROLE}] Socket closed — retry in 2s`);
-        try { mixer.unpipe(sock); } catch {}
-        setTimeout(connectToSpectator, 2000);
-      });
-    }
-
-    connection.on(VoiceConnectionStatus.Ready, () => {
-      tlog(`[${ROLE}] Joined voice: ${channel.name}`);
-
-      channel.members.forEach((member) => {
-        if (member.id === client.user.id) return;
-        const sub = connection.receiver.subscribe(member.id, {
-          end: { behavior: EndBehaviorType.Manual },
+        let socket;
+        let retry;
+        // Drain continuously; a blocked local socket must not accumulate stale comms.
+        mixer.on("data", frame => {
+          if (socket?.readyState === "open" && !socket.write(frame)) socket.destroy();
         });
-        mixer.addStream(member.id, sub);
-      });
-
-      connection.receiver.speaking.on("start", (uid) => {
-        if (uid === client.user.id || mixer.streams.has(uid)) return;
-        const sub = connection.receiver.subscribe(uid, {
-          end: { behavior: EndBehaviorType.Manual },
-        });
-        mixer.addStream(uid, sub);
-      });
-
-      client.on("voiceStateUpdate", (oldState, newState) => {
-        const uid = newState.member?.id;
-        if (!uid || uid === client.user.id) return;
-        if (newState.channelId === channel.id && oldState.channelId !== channel.id) {
-          if (!mixer.streams.has(uid)) {
-            const sub = connection.receiver.subscribe(uid, {
-              end: { behavior: EndBehaviorType.Manual },
+        const connect = () => {
+          if (stopped) return;
+          const current = net.connect(role === "blue" ? bluePort : redPort, "127.0.0.1");
+          socket = current;
+          current.setNoDelay(true);
+          current.on("connect", () => log("Sending team audio to spectator"));
+          current.on("error", error => log("Relay:", error.message));
+          current.on("close", () => {
+            if (socket === current) socket = null;
+            if (!stopped) retry = setTimeout(connect, 2000);
+          });
+        };
+        cleanup.push(() => { clearTimeout(retry); socket?.destroy(); });
+        connect();
+      } else {
+        const listen = (port, label) => new Promise((resolve, reject) => {
+          let active;
+          const server = net.createServer(socket => {
+            if (stopped) { socket.destroy(); return; }
+            active?.destroy();
+            active = socket;
+            socket.setNoDelay(true);
+            const input = mixer.add(label);
+            socket.on("data", chunk => input.write(chunk));
+            socket.on("error", error => log(`${label} relay:`, error.message));
+            socket.on("close", () => {
+              if (active !== socket) return;
+              active = null;
+              mixer.inputs.delete(label);
+              log(`${label} disconnected; other team continues`);
             });
-            mixer.addStream(uid, sub);
-          }
-        }
-        if (oldState.channelId === channel.id && newState.channelId !== channel.id) {
-          mixer.removeStream(uid);
-        }
-      });
-
-      connectToSpectator();
-    });
-  }
-
-  /* -----------------------------------------------------------------------
-     SPECTATOR
-     ----------------------------------------------------------------------- */
-  else if (ROLE === "spectator") {
-
-    const bluePass = new PassThrough({ highWaterMark: 3840 * 20 });
-    const redPass  = new PassThrough({ highWaterMark: 3840 * 20 });
-
-    // Swallow errors on the PassThroughs themselves so a reset never bubbles up
-    bluePass.on("error", (e) => tlog(`[Spectator] bluePass error: ${e.message}`));
-    redPass.on("error",  (e) => tlog(`[Spectator] redPass error: ${e.message}`));
-
-    function makePcmServer(port, label, dest) {
-      const server = net.createServer((sock) => {
-        tlog(`[Spectator] ${label} bot connected`);
-        sock.on("error", (e) => tlog(`[Spectator] ${label} socket error: ${e.message}`));
-        sock.on("close", () => tlog(`[Spectator] ${label} bot disconnected`));
-        sock.pipe(dest, { end: false });
-      });
-      server.on("error", (e) => tlog(`[Spectator] ${label} server error: ${e.message}`));
-      server.listen(port, "127.0.0.1", () => {
-        tlog(`[Spectator] Listening for ${label} PCM on port ${port}`);
-      });
-    }
-
-    makePcmServer(BLUE_PORT, "blue", bluePass);
-    makePcmServer(RED_PORT,  "red",  redPass);
-
-    connection.on(VoiceConnectionStatus.Ready, () => {
-      tlog(`[Spectator] Joined voice: ${channel.name}`);
-
-      // Small highWaterMark — we want Discord to consume immediately, not buffer up
-      const audioPass = new PassThrough({ highWaterMark: 3840 * 4 });
-      audioPass.on("error", (e) => tlog(`[Spectator] audioPass error: ${e.message}`));
-
-      // Drain the buffer if it grows beyond ~200ms worth of audio (38400 bytes).
-      // This is what keeps the bot "live" — if Discord falls behind we drop old
-      // audio instead of letting the delay snowball over time.
-      const MAX_BUFFER = 3840 * 10; // ~200ms
-      setInterval(() => {
-        const buffered = audioPass.readableLength;
-        if (buffered > MAX_BUFFER) {
-          const drop = audioPass.read(buffered - MAX_BUFFER);
-          if (drop) tlog(`[Spectator] ⏩ Dropped ${(drop.length / 1024).toFixed(1)} KB to stay live`);
-        }
-      }, 200);
-
-      const player = createAudioPlayer({
-        behaviors: { noSubscriber: NoSubscriberBehavior.Play },
-      });
-      connection.subscribe(player);
-
-      const resource = createAudioResource(audioPass, {
-        inputType: StreamType.Raw,
-        inlineVolume: true,
-      });
-      resource.volume?.setVolume(1.0);
-      player.play(resource);
-
-      let ffmpegProc     = null;
-      let bytesSinceLast = 0;
-      let emptyWindows   = 0;
-
-      function startFfmpeg() {
-        // Clean up old process first
-        if (ffmpegProc) {
-          try { bluePass.unpipe(ffmpegProc.stdio[3]); } catch {}
-          try { redPass.unpipe(ffmpegProc.stdio[4]);  } catch {}
-          try { ffmpegProc.stdio[3].destroy(); }        catch {}
-          try { ffmpegProc.stdio[4].destroy(); }        catch {}
-          try { ffmpegProc.kill("SIGKILL"); }           catch {}
-          ffmpegProc = null;
-        }
-
-        tlog("[Spectator] Starting ffmpeg mixer...");
-
-        ffmpegProc = spawn("ffmpeg", [
-          "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "512", "-i", "pipe:3",
-          "-f", "s16le", "-ar", "48000", "-ac", "2", "-thread_queue_size", "512", "-i", "pipe:4",
-          "-filter_complex",
-          "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,volume=.25",
-          "-f", "s16le", "-ar", "48000", "-ac", "2",
-          "pipe:1",
-        ], {
-          stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"],
+            log(`${label} connected`);
+          });
+          cleanup.push(() => { active?.destroy(); server.close(); });
+          server.once("error", reject);
+          server.on("error", fail);
+          server.listen(port, "127.0.0.1", resolve);
         });
-
-        // Error handlers on ffmpeg's stdio pipes — missing these caused the ECONNRESET crash
-        ffmpegProc.stdio[1].on("error", (e) => tlog(`[Spectator] ffmpeg stdout error: ${e.message}`));
-        ffmpegProc.stdio[2].on("error", (e) => tlog(`[Spectator] ffmpeg stderr error: ${e.message}`));
-        ffmpegProc.stdio[3].on("error", (e) => tlog(`[Spectator] ffmpeg pipe3 error: ${e.message}`));
-        ffmpegProc.stdio[4].on("error", (e) => tlog(`[Spectator] ffmpeg pipe4 error: ${e.message}`));
-
-        bluePass.pipe(ffmpegProc.stdio[3], { end: false });
-        redPass.pipe(ffmpegProc.stdio[4],  { end: false });
-
-        ffmpegProc.stderr.on("data", () => {});
-
-        ffmpegProc.stdout.on("data", (chunk) => {
-          bytesSinceLast += chunk.length;
-          audioPass.write(chunk);
+        await Promise.all([listen(bluePort, "blue"), listen(redPort, "red")]);
+        if (stopped) return;
+        const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+        player.on("error", fail);
+        player.on(AudioPlayerStatus.Idle, () => {
+          if (!stopped) fail(new Error("Spectator audio stream ended unexpectedly"));
         });
-
-        ffmpegProc.on("close", (code) => {
-          tlog(`[Spectator] ffmpeg exited (${code}) — restarting in 500ms`);
-          try { bluePass.unpipe(ffmpegProc.stdio[3]); } catch {}
-          try { redPass.unpipe(ffmpegProc.stdio[4]);  } catch {}
-          ffmpegProc = null;
-          setTimeout(startFfmpeg, 500);
-        });
-
-        ffmpegProc.on("error", (err) => tlog(`[Spectator] ffmpeg error: ${err.message}`));
+        cleanup.push(() => player.stop(true));
+        connection.subscribe(player);
+        player.play(createAudioResource(mixer, { inputType: StreamType.Raw }));
+        log("SPECTATOR READY - audio live");
       }
-
-      setInterval(() => {
-        if (bytesSinceLast > 0) {
-          tlog(`[Spectator] ✅ Relaying — ${(bytesSinceLast / 1024).toFixed(1)} KB in last 10s`);
-          emptyWindows = 0;
-        } else {
-          emptyWindows++;
-          tlog(`[Spectator] ⚠️  No audio (${emptyWindows}/3 empty windows)`);
-          if (emptyWindows >= 3) {
-            tlog("[Spectator] Pipeline stalled — restarting ffmpeg");
-            emptyWindows = 0;
-            startFfmpeg();
-          }
-        }
-        bytesSinceLast = 0;
-      }, 10000);
-
-      startFfmpeg();
-      tlog("SPECTATOR READY — audio live");
-    });
-  }
-
-  /* -----------------------------------------------------------------------
-     RECONNECT
-     ----------------------------------------------------------------------- */
-  connection.on(VoiceConnectionStatus.Disconnected, () => {
-    tlog("Voice disconnected — rejoining in 2s...");
-    setTimeout(() => joinVoiceChannel({
-      channelId:      channel.id,
-      guildId:        guild.id,
-      adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf:       false,
-      selfMute:       ROLE !== "spectator",
-    }), 2000);
+      const health = setInterval(() => {
+        const inputs = [...mixer.inputs.values()];
+        log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${inputs.reduce((n, input) => n + input.droppedBytes, 0)} voice=${connection.state.status}`);
+      }, 60000);
+      cleanup.push(() => clearInterval(health));
+      log(`Joined ${channel.name}`);
+    })().catch(fail);
   });
+  try { await client.login(process.env.DISCORD_TOKEN); }
+  catch (error) { fail(error); }
+}
+
+if (require.main === module) main().catch(error => {
+  console.error("Voice bot startup failed:", error.message);
+  process.exitCode = 1;
 });
 
-client.login(process.env.DISCORD_TOKEN);
+module.exports = { main };

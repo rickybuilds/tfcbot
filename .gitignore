@@ -137,6 +137,8 @@ test_api.js
 !/test/eloShadow.test.js
 !/test/backup.test.js
 !/test/mergeDiscordAccount.test.js
+!/test/voicePcm.test.js
+!/test/voiceManager.test.js
 /output/documents
 /.tmp
 !/scripts/

@@ -29,7 +29,8 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "node --test test",
+    "test": "node --test \"test/*.test.js\"",
+    "test:voice": "node --test test/voicePcm.test.js test/voiceManager.test.js",
     "1v1:migrate:check": "node scripts/migrate-one-v-one.js"
   },
   "keywords": [],

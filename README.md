@@ -21,6 +21,9 @@ captains, the normal ELO balance remains active.
 - RCON server integration
 - Voice relay / spectator support
 
+The spectator voice relay merges Blue and Red team comms with bounded PCM
+buffers and no FFmpeg mixing process. See [voice relay details and rollout](docs/voice-relay.md).
+
 ## Elo V2 shadow mode
 
 Set `ELO_V2_MODE=shadow` to calculate and persist proposed Elo V2 results
