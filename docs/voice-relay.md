@@ -51,9 +51,17 @@ include `underflows` (buffer starvation after playback started; team speech
 pauses also cause these), `backpressureTicks` (20 ms mixer opportunities held
 for a slow consumer), `lateTicks` (timer lateness above 10 ms), byte accounting,
 and `outputFrames`. `loopMaxMs` is the maximum sampled event-loop delay in the
-last minute, not cumulative; other mixer counters are cumulative. Input
+last 15-second logging window, not cumulative; other mixer counters are cumulative. Input
 counters reset when that input is removed/replaced. Zero overflow alone does
 not establish healthy playback or rule out packet loss upstream of decoding.
+
+Every role emits `Health` and `Window` lines every 15 seconds. `Health` retains
+the running counters; `Window` shows changes since the previous sample and the
+actual elapsed seconds. Its `outputFps` should be around 50. This makes brief
+glitches easier to correlate with audio drops, late ticks, clock skips and
+backpressure. An input created and removed entirely between samples is not
+included in these sampled input counters. Faster logging does not measure
+Discord packet loss or prove the cause of audible distortion.
 
 This revision fixes a reproduced loss bug, not a confirmed diagnosis of all
 live robotic audio. Deploy `voicebot.js` and `lib/voicePcm.js` together and
@@ -127,7 +135,7 @@ them by name for a controlled test). Do not run duplicate copies of a role.
 Before declaring the robotic-audio issue resolved, listen through a live match
 for at least 35 minutes with six participants in each team channel. Verify each
 team independently, overlapping speech, and one sender restarting while the
-other continues. Check spectator `SPECTATOR READY` and per-minute `Health` logs:
+other continues. Check spectator `SPECTATOR READY` and 15-second `Health` logs:
 queued bytes must stay bounded; continually increasing dropped bytes indicate
 a timing/load problem worth investigating. Also check host CPU and Discord
 packet loss if noise persists. No live deployment is performed by the tests.

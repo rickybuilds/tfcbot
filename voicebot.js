@@ -2,7 +2,7 @@
 
 require("dotenv").config({ path: process.env.ENV_FILE || ".env" });
 const net = require("node:net");
-const { monitorEventLoopDelay } = require("node:perf_hooks");
+const { monitorEventLoopDelay, performance } = require("node:perf_hooks");
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel, entersState, VoiceConnectionStatus,
@@ -191,13 +191,41 @@ async function main() {
       const loopDelay = monitorEventLoopDelay({ resolution: 20 });
       loopDelay.enable();
       cleanup.push(() => loopDelay.disable());
-      log(`Audio pipeline v3: jitterFrames=${jitterFrames} (20 ms each), bounded clock catch-up`);
+      log(`Audio pipeline v3: jitterFrames=${jitterFrames} (20 ms each), bounded clock catch-up, health every 15s`);
+      let previousTime = performance.now();
+      let previousInputs = new Map([...mixer.inputs.values()].map(input => [input, {
+        droppedBytes: input.droppedBytes, underflows: input.underflows,
+      }]));
+      let previousMixer = {
+        lateTicks: mixer.lateTicks, clockSkippedFrames: mixer.clockSkippedFrames,
+        backpressureTicks: mixer.backpressureTicks, outputFrames: mixer.outputFrames,
+      };
       const health = setInterval(() => {
         const inputs = [...mixer.inputs.values()];
         const sum = key => inputs.reduce((n, input) => n + input[key], 0);
         log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${sum("droppedBytes")} underflows=${sum("underflows")} receivedBytes=${sum("writtenBytes")} consumedBytes=${sum("consumedBytes")} backpressureTicks=${mixer.backpressureTicks} lateTicks=${mixer.lateTicks} clockSkippedFrames=${mixer.clockSkippedFrames} outputFrames=${mixer.outputFrames} loopMaxMs=${(loopDelay.max / 1e6).toFixed(1)} voice=${connection.state.status}`);
+        // Keep the prior input objects until this sample so departures/reconnects
+        // cannot turn their counters into negative interval deltas.
+        let droppedBytes = 0;
+        let underflows = 0;
+        for (const input of new Set([...previousInputs.keys(), ...inputs])) {
+          const prior = previousInputs.get(input);
+          droppedBytes += input.droppedBytes - (prior?.droppedBytes ?? 0);
+          underflows += input.underflows - (prior?.underflows ?? 0);
+        }
+        const now = performance.now();
+        const seconds = (now - previousTime) / 1000;
+        log(`Window: seconds=${seconds.toFixed(2)} droppedBytes=${droppedBytes} underflows=${underflows} lateTicks=${mixer.lateTicks - previousMixer.lateTicks} clockSkippedFrames=${mixer.clockSkippedFrames - previousMixer.clockSkippedFrames} backpressureTicks=${mixer.backpressureTicks - previousMixer.backpressureTicks} outputFps=${((mixer.outputFrames - previousMixer.outputFrames) / seconds).toFixed(2)}`);
+        previousInputs = new Map(inputs.map(input => [input, {
+          droppedBytes: input.droppedBytes, underflows: input.underflows,
+        }]));
+        previousMixer = {
+          lateTicks: mixer.lateTicks, clockSkippedFrames: mixer.clockSkippedFrames,
+          backpressureTicks: mixer.backpressureTicks, outputFrames: mixer.outputFrames,
+        };
+        previousTime = now;
         loopDelay.reset();
-      }, 60000);
+      }, 15000);
       cleanup.push(() => clearInterval(health));
       log(`Joined ${channel.name}`);
     })().catch(fail);
