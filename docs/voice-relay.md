@@ -39,14 +39,14 @@ mixed result. These losses were invisible to `droppedBytes`. The mixer now
 checks output demand before consuming anything. Prolonged backpressure can
 still overflow the bounded input queues, but those losses are counted.
 
-Both stages now prebuffer three frames (60 ms) to tolerate packet jitter and
+Both stages now prebuffer four frames (80 ms) to tolerate packet jitter and
 independent timer phases. Set `VOICE_JITTER_FRAMES` to an integer from 1 to 8
-in each role's env file to adjust this. The default adds roughly 120 ms of
+in each role's env file to adjust this. The default adds roughly 160 ms of
 input buffering across both stages, plus Discord/codec buffering. Incomplete
 frames are retained until complete instead of padding and consuming each TCP
 fragment. Short utterances flush after a bounded wait even below the target.
 
-Startup identifies this revision as `Audio pipeline v2`. Health counters now
+Startup identifies the current revision as `Audio pipeline v3`. Health counters now
 include `underflows` (buffer starvation after playback started; team speech
 pauses also cause these), `backpressureTicks` (20 ms mixer opportunities held
 for a slow consumer), `lateTicks` (timer lateness above 10 ms), byte accounting,
@@ -63,6 +63,29 @@ the existing operator order: `pm2 restart tfcbot-spectator`, wait for
 health lines from all roles if the problem returns. The reported spontaneous
 recovery is consistent with a transient timing problem but does not identify
 which stage is responsible.
+
+### Spectator clock correction (v3)
+
+Subsequent live logs showed growing spectator overflow with zero backpressure
+and no spectator underflows, while both team senders had zero overflow. The
+v2 timer reset its deadline to `now + 20` whenever it fell more than a frame
+behind. Repeated short scheduling stalls therefore permanently reduced its
+output rate relative to the incoming team streams. The next revision preserves
+the original deadline and catches up one frame per callback (at least 1 ms
+between callbacks), while still respecting output backpressure. Early timer
+callbacks wait until the deadline instead of producing frames early.
+
+Catch-up is capped at 100 ms of clock debt. A multi-second freeze skips excess
+clock time, recorded as `clockSkippedFrames`; input overflow is still counted
+in `droppedBytes`. Short delays can increase `lateTicks` without permanently
+reducing output rate. This corrects a reproduced scheduler defect; the logs
+do not prove every audible artifact was caused by that defect.
+
+The default jitter cushion also increased from 60 to 80 ms per stage. The
+variable-stall test exposed a brief starvation event with the former cushion
+when a team stalled for the full 60 ms. The extra frame provides margin; an
+explicit `VOICE_JITTER_FRAMES` setting still overrides it. Larger pauses can
+still cause audible gaps and should not be mistaken for guaranteed recovery.
 
 The spectator gain remains 0.25, matching the old FFmpeg volume setting. Set
 `SPECTATOR_GAIN` in `.env.spectator` to tune it (0 through 2). Peak limiting
@@ -86,6 +109,13 @@ fragments delivered in separate events, and an 80 ms playback pause at minute
 26. It asserts the exact twelve-speaker sum after warmup, no underflows or
 unaccounted sample losses, and bounded queues. The backpressure regression
 test was verified to fail against the first Node replacement.
+
+The v3 regression also executes the actual production timer callbacks using
+virtual time for 35 minutes, with 12 continuous speakers, recurring 30-60 ms
+spectator stalls every seven seconds, and less frequent team-process stalls.
+It checks output rate, the twelve-speaker sum, byte accounting and overflow.
+A separate test covers bounded recovery after a five-second host freeze.
+These tests still do not exercise live Discord networking or native Opus.
 
 The host needs Node 22.12+ and a functioning native `@discordjs/opus` install.
 This relay no longer needs an FFmpeg process; FFmpeg dependencies remain for

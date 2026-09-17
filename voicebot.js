@@ -10,7 +10,7 @@ const {
   NoSubscriberBehavior, StreamType, EndBehaviorType,
 } = require("@discordjs/voice");
 const prism = require("prism-media");
-const { LiveMixer } = require("./lib/voicePcm");
+const { LiveMixer, DEFAULT_JITTER_FRAMES } = require("./lib/voicePcm");
 
 function numberSetting(name, fallback, min, max) {
   const value = Number(process.env[name] ?? fallback);
@@ -32,7 +32,7 @@ async function main() {
     throw new Error("PCM ports must be distinct integers");
   }
   const gain = numberSetting("SPECTATOR_GAIN", 0.25, 0, 2);
-  const jitterFrames = numberSetting("VOICE_JITTER_FRAMES", 3, 1, 8);
+  const jitterFrames = numberSetting("VOICE_JITTER_FRAMES", DEFAULT_JITTER_FRAMES, 1, 8);
   if (!Number.isInteger(jitterFrames)) throw new Error("VOICE_JITTER_FRAMES must be an integer");
   const log = (...args) => console.log(new Date().toISOString(), `[${role}]`, ...args);
   const client = new Client({ intents: [
@@ -191,11 +191,11 @@ async function main() {
       const loopDelay = monitorEventLoopDelay({ resolution: 20 });
       loopDelay.enable();
       cleanup.push(() => loopDelay.disable());
-      log(`Audio pipeline v2: jitterFrames=${jitterFrames} (20 ms each)`);
+      log(`Audio pipeline v3: jitterFrames=${jitterFrames} (20 ms each), bounded clock catch-up`);
       const health = setInterval(() => {
         const inputs = [...mixer.inputs.values()];
         const sum = key => inputs.reduce((n, input) => n + input[key], 0);
-        log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${sum("droppedBytes")} underflows=${sum("underflows")} receivedBytes=${sum("writtenBytes")} consumedBytes=${sum("consumedBytes")} backpressureTicks=${mixer.backpressureTicks} lateTicks=${mixer.lateTicks} outputFrames=${mixer.outputFrames} loopMaxMs=${(loopDelay.max / 1e6).toFixed(1)} voice=${connection.state.status}`);
+        log(`Health: inputs=${inputs.length} queuedBytes=${inputs.reduce((n, input) => n + input.buffer.length, 0)} droppedBytes=${sum("droppedBytes")} underflows=${sum("underflows")} receivedBytes=${sum("writtenBytes")} consumedBytes=${sum("consumedBytes")} backpressureTicks=${mixer.backpressureTicks} lateTicks=${mixer.lateTicks} clockSkippedFrames=${mixer.clockSkippedFrames} outputFrames=${mixer.outputFrames} loopMaxMs=${(loopDelay.max / 1e6).toFixed(1)} voice=${connection.state.status}`);
         loopDelay.reset();
       }, 60000);
       cleanup.push(() => clearInterval(health));
