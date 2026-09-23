@@ -6,6 +6,8 @@ const OWNER_IDS = new Set([
   "255834576742645761", // Ricky
   "468578577537826831", // Rufio
   "562854514860752897", // Slick
+  "151144734579097601", //Ed
+  "699893964974587995", //Kix
 ]);
 
 async function sendAuditLog(message, context, content) {
