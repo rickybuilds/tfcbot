@@ -108,6 +108,12 @@ function eligibleStreakPlayers(players, elo) {
 	  }
 
 	  // ✅ Only admins reach here
+	  // Check every startup guard before acquiring the lock. Acquiring voteLock
+	  // before this check lets a duplicate trigger reject itself and strand it.
+	  if (state.isVoteStarting) {
+		console.log("[!fv] ignored — vote is already starting");
+		return message.channel.send("⚠️ A vote is already being started, please wait...");
+	  }
 	  if (state.voteLock) {
 		console.log("[!fv] ignored — voteLock already true");
 		return message.channel.send("⚠️ A vote is already in progress or locked. Please wait for it to finish.");
@@ -116,10 +122,6 @@ function eligibleStreakPlayers(players, elo) {
 	  state.voteLock = true;
 	  console.log(`[!fv] voteLock set by ${message.author?.tag || message.author?.id}`);
 
-	  // 🛑 Prevent duplicate !fv triggers
-	  if (state.isVoteStarting) {
-		return message.channel.send("⚠️ A vote is already being started, please wait...");
-	  }
 	  state.isVoteStarting = true;
 	  const voteStartToken = Symbol("vote-start");
 	  state.voteStartToken = voteStartToken;
@@ -128,13 +130,20 @@ function eligibleStreakPlayers(players, elo) {
     const activeFlowCancel = async (reason = "Active match flow canceled", removedIds = []) => {
       cancelToken.cancelled = true;
       state.cancelledFlowPlayerIds = new Set((removedIds || []).map(String));
+      // Invalidate and release only this flow's startup state. Its finally
+      // block will see the changed token and must not touch a newer flow.
+      if (state.voteStartToken === voteStartToken) {
+        state.voteStartToken = null;
+        state.isVoteStarting = false;
+        state.voteLock = false;
+        console.log("[!fv] voteLock released by cancellation");
+      }
       try { cancelToken.cancel?.(); } catch (error) {
         console.error("[voteFlow] active flow cancellation failed:", error);
       }
       try { await state.vote?.cancelVote?.(reason); } catch (error) {
         console.error("[voteFlow] active vote cancellation failed:", error);
       }
-      state.voteStartToken = null;
     };
     state.activeFlowCancel = activeFlowCancel;
 
@@ -371,9 +380,9 @@ function eligibleStreakPlayers(players, elo) {
 	    if (state.voteStartToken === voteStartToken) {
 	      state.voteStartToken = null;
 	      state.isVoteStarting = false;
-      state.voteLock = false;
+	      state.voteLock = false;
+	      console.log("[!fv] voteLock released");
 	    }
-      console.log("[!fv] voteLock released");
     }
 
   }
