@@ -172,17 +172,89 @@ test("service maps official roster, persists the snapshot, and posts to recap", 
   h.db.close();
 });
 
-test("a ninth performance row is recorded as an equal-share fallback", async () => {
+test("an unrelated ninth performance row does not prevent NN allocation", async () => {
   const players = eightApiPlayers();
   players.push({ steam_id: "STEAM_0:1:999", display_name: "Sub", final_score: 999 });
   const h = serviceHarness(players);
   const snapshot = await h.service.runNow("API123");
 
-  assert.equal(snapshot.fallbackReason, "performance_rows_9");
-  assert.deepEqual(snapshot.teams.blue.map(p => p.shadowDelta), [20, 20, 20, 20]);
-  assert.deepEqual(snapshot.teams.red.map(p => p.shadowDelta), [-20, -20, -20, -20]);
-  assert.deepEqual(snapshot.scenarios.gentle.teams.blue.map(p => p.shadowDelta), [20, 20, 20, 20]);
-  assert.deepEqual(snapshot.scenarios.gentle.teams.red.map(p => p.shadowDelta), [-20, -20, -20, -20]);
-  assert.match(h.sent[0], /returned 9 performance rows/);
+  assert.equal(snapshot.fallbackReason, null);
+  assert.equal(snapshot.apiPlayerCount, 9);
+  assert.equal(snapshot.scenarios.gentle.teams.blue.reduce((sum, p) => sum + p.shadowDelta, 0), 80);
+  assert.equal(snapshot.scenarios.gentle.teams.red.reduce((sum, p) => sum + p.shadowDelta, 0), -80);
+  assert.notDeepEqual(snapshot.scenarios.gentle.teams.blue.map(p => p.shadowDelta), [20, 20, 20, 20]);
+  assert.doesNotMatch(h.sent[0], /equal-share fallback/);
   h.db.close();
+});
+
+function mappingFixture(apiPlayers) {
+  const ids = ["b1", "b2", "b3", "b4", "r1", "r2", "r3", "r4"];
+  const links = ids.map((id, index) => ({ discord_id: id, steam_id: `STEAM_${index}` }));
+  const service = Object.create(EloShadowService.prototype);
+  service.formulaVersion = "nn-mvp-v1";
+  service.db = { prepare: () => ({ all: () => links }) };
+  const makePlayer = (id, team) => ({ id, team, before: 2000, currentDelta: team === "BLUE" ? 20 : -20, score: null });
+  const roster = {
+    match: { match_id: "FUTURE1" },
+    officialIds: ids,
+    blue: ids.slice(0, 4).map(id => makePlayer(id, "BLUE")),
+    red: ids.slice(4).map(id => makePlayer(id, "RED")),
+  };
+  const payload = {
+    ok: true,
+    match: {
+      id: "FUTURE1",
+      status: "completed",
+      nn_mvp: { available: true, formula_version: "nn-mvp-v1", players: apiPlayers },
+    },
+  };
+  return { service, roster, payload };
+}
+
+test("extra NN rows do not force equal shares when all official players have valid scores", () => {
+  const official = Array.from({ length: 8 }, (_, index) => ({
+    steam_id: `STEAM_${index}`,
+    final_score: 160 - index * 20,
+  }));
+  const { service, roster, payload } = mappingFixture([
+    ...official,
+    { steam_id: "STEAM_extra", final_score: 999 },
+    { steam_id: "STEAM_extra_2", final_score: -999 },
+    { display_name: "Unmapped spectator", final_score: 50 },
+  ]);
+
+  const mapping = service._mapScores(roster, payload);
+  assert.equal(mapping.ready, true);
+  assert.equal(mapping.apiPlayerCount, 11);
+  assert.equal(mapping.fallbackReason, null);
+  const snapshot = calculateShadow({
+    matchId: "FUTURE1",
+    winner: "blue",
+    blue: roster.blue,
+    red: roster.red,
+    fallbackReason: mapping.fallbackReason,
+  });
+  assert.equal(snapshot.scenarios.gentle.teams.blue.reduce((sum, player) => sum + player.shadowDelta, 0), 80);
+  assert.equal(snapshot.scenarios.gentle.teams.red.reduce((sum, player) => sum + player.shadowDelta, 0), -80);
+  assert.notDeepEqual(snapshot.scenarios.gentle.teams.blue.map(player => player.shadowDelta), [20, 20, 20, 20]);
+});
+
+test("duplicate official NN identity still falls back", () => {
+  const official = Array.from({ length: 8 }, (_, index) => ({
+    steam_id: `STEAM_${index}`,
+    final_score: 160 - index * 20,
+  }));
+  const { service, roster, payload } = mappingFixture([...official, { steam_id: "STEAM_0", final_score: 10 }]);
+  const mapping = service._mapScores(roster, payload);
+  assert.equal(mapping.fallbackReason, "duplicate_or_missing_steam");
+});
+
+test("missing official NN score still falls back despite extra rows", () => {
+  const official = Array.from({ length: 8 }, (_, index) => ({
+    steam_id: `STEAM_${index}`,
+    final_score: index === 0 ? null : 160 - index * 20,
+  }));
+  const { service, roster, payload } = mappingFixture([...official, { steam_id: "STEAM_extra", final_score: 999 }]);
+  const mapping = service._mapScores(roster, payload);
+  assert.equal(mapping.fallbackReason, "missing_final_score");
 });

@@ -530,18 +530,21 @@ class EloShadowService {
 
     const official = new Set(roster.officialIds);
     const mapped = new Map();
-    let mappingProblem = null;
+    let mappingProblem = official.size === 8 ? null : "official_roster_not_unique";
     const seenSteam = new Set();
     for (const apiPlayer of apiPlayers) {
       const steam = String(apiPlayer.steam_id || apiPlayer.player_key || "").trim().toUpperCase();
+      const candidates = [...(discordBySteam.get(steam) || [])].filter(id => official.has(id));
+      // Performance can include substitutes or spectators. Only official
+      // roster identities determine whether the live allocation is valid.
+      if (!candidates.length) continue;
       if (!steam || seenSteam.has(steam)) {
         mappingProblem = mappingProblem || "duplicate_or_missing_steam";
         continue;
       }
       seenSteam.add(steam);
-      const candidates = [...(discordBySteam.get(steam) || [])].filter(id => official.has(id));
       if (candidates.length !== 1) {
-        if (candidates.length > 1) mappingProblem = mappingProblem || "ambiguous_discord_mapping";
+        mappingProblem = mappingProblem || "ambiguous_discord_mapping";
         continue;
       }
       const discordId = candidates[0];
@@ -550,7 +553,7 @@ class EloShadowService {
         continue;
       }
       const score = Number(apiPlayer.final_score);
-      if (!Number.isFinite(score)) {
+      if (apiPlayer.final_score == null || !Number.isFinite(score)) {
         mappingProblem = mappingProblem || "missing_final_score";
         continue;
       }
@@ -558,8 +561,7 @@ class EloShadowService {
     }
 
     let fallbackReason = null;
-    if (apiPlayers.length !== 8) fallbackReason = `performance_rows_${apiPlayers.length}`;
-    else if (mappingProblem) fallbackReason = mappingProblem;
+    if (mappingProblem) fallbackReason = mappingProblem;
     else if (mapped.size !== official.size) fallbackReason = `official_mappings_${mapped.size}_of_${official.size}`;
 
     for (const player of [...roster.blue, ...roster.red]) {
