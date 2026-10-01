@@ -69,6 +69,9 @@ async function sendRecapWithDemos(client, channelId, options = {}) {
   }
 
   const displayId = matchId || id || "N/A";
+  const noNameStatsLink = displayId !== "N/A"
+    ? `[View NoName Stats](https://nonamepickup.servehalflife.com/match.html?id=${encodeURIComponent(String(displayId))})`
+    : "NoName Stats unavailable";
 console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
 
   if (matchInfo.matchType === "1v1") {
@@ -83,7 +86,7 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
         { name: "Winner", value: String(winnerName), inline: true },
         { name: "Final Score", value: `**${p1.score ?? "?"}–${p2.score ?? "?"}**`, inline: true },
         { name: "Match", value: `Duration: **${matchInfo.duration ?? "?"}s**\nKill goal: **${matchInfo.killGoal ?? "?"}**\nRounds: **${matchInfo.roundsWon ?? "?"}/${matchInfo.roundsRequired ?? "?"}**`, inline: false },
-        { name: "Links", value: `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "TFCStats unavailable"} • ${hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "Hampalyzer unavailable"}`, inline: false }
+        { name: "Links", value: `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "TFCStats unavailable"} • ${hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "Hampalyzer unavailable"} • ${noNameStatsLink}`, inline: false }
       ).setTimestamp();
     await ch.send({ content: mentionRoles || null, embeds: [embed] });
     if (hampalyzer?.url && displayId !== "N/A") importHampalyzerStats(displayId, hampalyzer.url);
@@ -102,7 +105,7 @@ console.log(`[sendRecapWithDemos] ✅ Server detected: ${server}`);
   const replayLinks = buildPickupReplayLinks(displayId, replayRounds);
   const resultLinks = `${tfcstats?.url ? `[View TFCStats](${tfcstats.url})` : "View TFCStats"} • ${
     hampalyzer?.url ? `[View Hampalyzer](${hampalyzer.url})` : "View Hampalyzer"
-  }`;
+  } • ${noNameStatsLink}`;
   const scoreLine = `**Blue Team 🔵** — Score: **${scoreBlue ?? "?"}**  **Red Team 🔴** — Score: **${scoreRed ?? "?"}**`;
   const resultDetails = [
     scoreLine,
