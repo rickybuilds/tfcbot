@@ -9,6 +9,11 @@ const {
   isValidTeam1Starts,
   normalizeTeam1Starts,
 } = require("../lib/teamStart");
+const {
+  OFFENSE_MAX_PER_TEAM_SETTING,
+  DEFAULT_OFFENSE_MAX_PER_TEAM,
+  MAX_OFFENSE_PER_TEAM_LIMIT,
+} = require("../lib/offense");
 
 function isAdmin(message, config) {
   try {
@@ -63,6 +68,7 @@ function register(registry, deps) {
     "vote:map_duration":    60,
     "vote:spinner_duration": 4,
     [TEAM1_STARTS_SETTING]: DEFAULT_TEAM1_STARTS,
+    [OFFENSE_MAX_PER_TEAM_SETTING]: DEFAULT_OFFENSE_MAX_PER_TEAM,
   };
 
   const SETTINGS_CHANNEL = config.channels.settings || ""; // 👈 from .env
@@ -85,6 +91,7 @@ function register(registry, deps) {
         { name: "Map Vote Duration (sec)",    value: String(settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])), inline: true },
         { name: "Tiebreaker Spinner (sec)",   value: String(settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])), inline: true },
         { name: "Team 1 Starts", value: settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING]), inline: true },
+        { name: "Full-time Offense / Team", value: String(settings.getNumber(OFFENSE_MAX_PER_TEAM_SETTING, DEFAULTS[OFFENSE_MAX_PER_TEAM_SETTING])), inline: true },
         { name: "Settings Channel",      value: SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_", inline: false },
       )
       .setFooter({ text: "Use !set <key> <value> (admin only)" })
@@ -104,6 +111,7 @@ function register(registry, deps) {
         `• Map Vote Duration (sec): ${settings.getNumber("vote:map_duration", DEFAULTS["vote:map_duration"])}\n` +
         `• Tiebreaker Spinner (sec): ${settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])}\n` +
         `• Team 1 Starts: ${settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING])}\n` +
+        `• Full-time Offense / Team: ${settings.getNumber(OFFENSE_MAX_PER_TEAM_SETTING, DEFAULTS[OFFENSE_MAX_PER_TEAM_SETTING])}\n` +
         `• Settings Channel: ${SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_"}`);
     } else {
       const dm = await message.author.createDM();
@@ -133,6 +141,7 @@ function register(registry, deps) {
       "vote:map_duration",
       "vote:spinner_duration",
       TEAM1_STARTS_SETTING,
+      OFFENSE_MAX_PER_TEAM_SETTING,
     ]);
     if (!allowed.has(key)) return message.channel.send("Unknown key.");
 
@@ -214,6 +223,12 @@ function register(registry, deps) {
     } else if (key === "vote:server_duration" || key === "vote:map_duration") {
       n = Number(val);
       if (!Number.isFinite(n) || n < 5 || n > 120) return message.channel.send("Vote durations must be 5–120 seconds.");
+      settings.setNumber(key, n);
+    } else if (key === OFFENSE_MAX_PER_TEAM_SETTING) {
+      n = Number(val);
+      if (!Number.isInteger(n) || n < 0 || n > MAX_OFFENSE_PER_TEAM_LIMIT) {
+        return message.channel.send(`\`${OFFENSE_MAX_PER_TEAM_SETTING}\` must be 0–${MAX_OFFENSE_PER_TEAM_LIMIT} (0 disables full-time offense).`);
+      }
       settings.setNumber(key, n);
     } else if (key === "vote:spinner_duration") {
       n = Number(val);

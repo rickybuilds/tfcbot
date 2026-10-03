@@ -25,7 +25,9 @@ function register(reg, { config }) {
       value:
         "`!add` / `++` — Join the regular pickup queue\n" +
         "`!addadl` / `++adl` / `**` — Join the ADL (Attack & Defend) queue\n" +
+        "`!addoff` / `++off` — Join the next pickup as full-time offense (doesn’t fill the queue, no map vote, no Elo)\n" +
         "`!remove` / `--` — Leave the current queue\n" +
+        "`!removeoff` / `--off` — Leave full-time offense\n" +
         "`!status` — Show current queue status\n" +
         "`!notice` — Ping @TFCPlayer role when queue ≥ 5\n" +
         "`!admin` — Ping admin role for assistance\n" +

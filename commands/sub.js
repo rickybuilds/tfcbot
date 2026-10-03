@@ -223,6 +223,22 @@ async function run(message, args, deps) {
     UPDATE matches SET blue_ids=?, red_ids=? WHERE match_id=?
   `).run(dbMatch.blue_ids, dbMatch.red_ids, matchId);
 
+  // A full-time offense player subbed into a regular slot is now rated
+  // like any other roster player, so drop their offense entry.
+  if (dbMatch.offense_ids) {
+    try {
+      const offense = JSON.parse(dbMatch.offense_ids);
+      const strip = ids => (Array.isArray(ids) ? ids : []).filter(id => String(id) !== String(newId));
+      const next = { blue: strip(offense?.blue), red: strip(offense?.red) };
+      elo.db.prepare(`UPDATE matches SET offense_ids=? WHERE match_id=?`).run(
+        next.blue.length || next.red.length ? JSON.stringify(next) : null,
+        matchId
+      );
+    } catch (e) {
+      console.warn(`[sub] Could not update offense_ids for ${matchId}:`, e.message);
+    }
+  }
+
   let rebuiltBlue = buildTeamObjects(toArray(dbMatch.blue_ids), elo);
   let rebuiltRed = buildTeamObjects(toArray(dbMatch.red_ids), elo);
   const captainsMatch = isCaptainsMatch(dbMatch.mode || match.mode);
