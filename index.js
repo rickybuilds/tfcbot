@@ -80,6 +80,7 @@ const settings     = new SettingsDB("bot.db");
 const privacy      = new PrivacyDB(eloDbPath);
 const matchesStore = new MatchStore(eloDbPath);
 const queueStore   = new QueueStore("queue.json");
+const offenseStore = new QueueStore("offense_queue.json");
 const banStore     = new BanStore("bot.db");
 const steamLinks = new SteamLinks(eloDbPath);
 
@@ -107,6 +108,7 @@ loadAdlMappoolFile();
 // Persistent runtime state
 state.matches       = matchesStore.getRecent?.(50) ?? [];
 state.queue         = queueStore.load?.() ?? [];
+state.offenseQueue  = offenseStore.load?.() ?? [];
 state.bannedUsers   = new Set();
 state.tempBanTimers = new Map();
 state.MAX_PLAYERS   = Number(process.env.ADL_REQUIRED_PLAYERS || 8);
@@ -122,7 +124,12 @@ console.log("[INIT] Lock sets initialized:", {
 // ============================================================================
 
 const registry = new Map();
-function persistQueueSoon(onError) { try { queueStore.save(state.queue, onError); } catch (e) { onError?.(e); } }
+function persistQueueSoon(onError) {
+  try {
+    queueStore.save(state.queue, onError);
+    offenseStore.save(state.offenseQueue, onError);
+  } catch (e) { onError?.(e); }
+}
 global.persistQueueSoon = persistQueueSoon;
 
 const deps = { 
@@ -644,8 +651,10 @@ client.on("messageCreate", (message) => {
     const id = message.author.id;
     if (!id) return;
 
-    // Only touch if they're in the queue
-    const player = state.queue.find(q => String(q.id) === String(id));
+    // Only touch if they're in the queue (regular or full-time offense)
+    const player =
+      state.queue.find(q => String(q.id) === String(id)) ||
+      state.offenseQueue?.find(q => String(q.id) === String(id));
     if (player) {
       player.lastSeenAt = Date.now();
       client.persistQueueSoon?.();
@@ -660,6 +669,8 @@ const ALLOWED_PICKUP_MUTED_MESSAGES = new Set([
   "!addadl",
   "++",
   "**",
+  "!addoff",
+  "++off",
 ]);
 
 function isPickupMuted(discordId) {
@@ -738,7 +749,7 @@ client.on("messageCreate", async (message) => {
     const rawLower = raw.toLowerCase();
 
     // ✅ handle bare specials like ++, --, ++adl, --adl (case-insensitive)
-    const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**", "++cap", "**cap"]);
+    const BARE_SPECIAL = new Set(["++", "--", "++adl", "--adl", "**", "++cap", "**cap", "++off", "--off"]);
 
     if (BARE_SPECIAL.has(rawLower)) {
       const fn = registry.get(rawLower); // registry keys are lowercase

@@ -20,6 +20,7 @@ const {
 } = require("../lib/util");
 const { makeBalancedTeams } = require("../lib/balance");
 const { isCaptainMode, runCaptainDraft } = require("../lib/captains");
+const { assignOffensePlayers, offenseMaxPerTeam } = require("../lib/offense");
 const { postQueueBoard, notifyHldsVoteStarted } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 // HLDS auto-recap
@@ -722,12 +723,30 @@ async function finalizeMatch(
   bal.avgBlue = Math.round(bal.sumBlue / Math.max(1, bal.blue.length));
   bal.avgRed = Math.round(bal.sumRed / Math.max(1, bal.red.length));
 
-  const blueList = bal.blue.length
-    ? bal.blue.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)).join("\n")
-    : "_none_";
-  const redList = bal.red.length
-    ? bal.red.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)).join("\n")
-    : "_none_";
+  // Full-time offense players join after balancing/drafting so they never
+  // influence team ratings, and stay out of blue/red (and so out of Elo).
+  const offenseAssignment = assignOffensePlayers(state.offenseQueue, {
+    excludeIds: canonicalPlayers.map(p => p.id),
+    lockedPlayers: state.lockedPlayers,
+    maxPerTeam: offenseMaxPerTeam(settings),
+  });
+  const toOffensePlayer = p => ({ id: String(p.id), name: getStoredPlayerName(elo, p.id, p.name) });
+  const offense = {
+    blue: offenseAssignment.blue.map(toOffensePlayer),
+    red: offenseAssignment.red.map(toOffensePlayer),
+  };
+  const offenseLines = team => offense[team].map(p =>
+    `⚔️ ${formatPlayerName(state, elo, p.id, p.name, privacy, false) || mention(p.id)} *(full-time offense, no Elo)*`
+  );
+
+  const blueList = [
+    ...bal.blue.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)),
+    ...offenseLines("blue"),
+  ].join("\n") || "_none_";
+  const redList = [
+    ...bal.red.map(p => formatPlayerName(state, elo, p.id, p.name, privacy, true) || mention(p.id)),
+    ...offenseLines("red"),
+  ].join("\n") || "_none_";
 
   const matchId = forceMatchId || genMatchId();
   const requestedTeam1Starts = normalizeTeam1Starts(
@@ -818,7 +837,7 @@ async function finalizeMatch(
 
   // 🔒 Lock all players in this match
   if (state.lockedPlayers) {
-    const allPlayers = [...bal.blue, ...bal.red];
+    const allPlayers = [...bal.blue, ...bal.red, ...offense.blue, ...offense.red];
     for (const p of allPlayers) {
       state.lockedPlayers.set(String(p.id), matchId);
     }
@@ -847,6 +866,11 @@ async function finalizeMatch(
   teams: {
     blue: bal.blue.map(p => p.id), // Discord IDs
     red:  bal.red.map(p => p.id),
+    // Not part of the official roster; listed for reference only.
+    offense: {
+      blue: offense.blue.map(p => p.id),
+      red: offense.red.map(p => p.id),
+    },
   },
   team1Starts,
   team1StartsForced: teamStartResolution.forced,
@@ -908,13 +932,16 @@ async function finalizeMatch(
 	  if (!matchColumns.some(c => c.name === "team_scenarios")) {
 		elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
 	  }
+	  if (!matchColumns.some(c => c.name === "offense_ids")) {
+		elo.db.exec("ALTER TABLE matches ADD COLUMN offense_ids TEXT");
+	  }
 	  elo.db.prepare(`
 	  INSERT INTO matches (
 		match_id, created_at, map_name, server_name,
 		mode, avg_blue, avg_red, rng_multiplier, bonus_elo,
-		blue_ids, red_ids, team_scenarios, status
+		blue_ids, red_ids, team_scenarios, offense_ids, status
 	  )
-	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
+	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
 	  ON CONFLICT(match_id) DO UPDATE SET
 		map_name=excluded.map_name,
 		server_name=excluded.server_name,
@@ -926,6 +953,7 @@ async function finalizeMatch(
 		blue_ids=excluded.blue_ids,
 		red_ids=excluded.red_ids,
 		team_scenarios=excluded.team_scenarios,
+		offense_ids=excluded.offense_ids,
 		status='in_progress'
 	`).run(
 	  matchId,
@@ -941,7 +969,11 @@ async function finalizeMatch(
 	  // 👉 Save full objects instead of just IDs
 	  JSON.stringify(bal.blue.map(p => p.id)), // only IDs
 	  JSON.stringify(bal.red.map(p => p.id)),  // only IDs
-	  teamScenarioState
+	  teamScenarioState,
+	  // Full-time offense: recorded for history, never read by Elo.
+	  offense.blue.length || offense.red.length
+	    ? JSON.stringify({ blue: offense.blue.map(p => p.id), red: offense.red.map(p => p.id) })
+	    : null
 	);
 } catch (e) {
   console.error("[finalizeMatch] DB insert failed:", e);
@@ -955,6 +987,8 @@ const record = {
   map: mapObj?.name,
   blueTeam: bal.blue.map(p => ({ id: p.id, name: p.name })),
   redTeam : bal.red.map(p => ({ id: p.id, name: p.name })),
+  // Kept apart from blueTeam/redTeam so !report never rates them.
+  offense,
   team1Starts,
   team1StartsForced: teamStartResolution.forced,
   team1StartsReason: teamStartResolution.reason,
@@ -979,6 +1013,15 @@ const record = {
 	}
 
   state.queue = [];
+  // Unassigned offense players (over the cap or still locked) wait for the
+  // next pickup. Filter rather than overwrite: others may have added while
+  // this function awaited Discord.
+  const leavingOffense = new Set([
+    ...canonicalPlayers.map(p => String(p.id)),
+    ...offense.blue.map(p => p.id),
+    ...offense.red.map(p => p.id),
+  ]);
+  state.offenseQueue = (state.offenseQueue || []).filter(p => !leavingOffense.has(String(p.id)));
   registry.persistQueueSoon(e => console.error("[queue] failed to write queue.json:", e));
   state.queueSnapshot = null;
   state.serverWinner = null;

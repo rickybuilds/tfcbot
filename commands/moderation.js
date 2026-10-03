@@ -5,6 +5,7 @@ const { PermissionsBitField } = require("discord.js");
 const { postQueueBoard } = require("./queue");
 const { refreshBotName } = require("../lib/botName");
 const { sendAuditLog } = require("../lib/auditLog");
+const { removeFromOffense } = require("../lib/offense");
 
 	function isAdmin(message, config) {
 	  const m = message.member;
@@ -17,7 +18,8 @@ const { sendAuditLog } = require("../lib/auditLog");
 	async function removeFromQueueAndRefresh(userId, message, { state, elo, privacy }) {
 	  const before = state.queue.length;
 	  state.queue = state.queue.filter(p => String(p.id) !== String(userId));
-	  if (state.queue.length !== before) {
+	  const removedOffense = removeFromOffense(state, userId);
+	  if (state.queue.length !== before || removedOffense) {
 		try { await postQueueBoard(message.channel, state, elo, privacy); } catch {}
 		try { await refreshBotName(message.client, state); } catch {}
 	  }

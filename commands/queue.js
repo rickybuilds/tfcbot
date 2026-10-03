@@ -11,6 +11,13 @@ const {
 } = require("../lib/util");
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
+const {
+  offenseCapacity,
+  canAddAsOffense,
+  ensureOffenseQueue,
+  isOffensePlayer,
+  removeFromOffense,
+} = require("../lib/offense");
 const STATUS_COOLDOWN_MS = 90_000; // 90 seconds
 const lockedReplyCooldown = new Map();
 const LOCKED_REPLY_COOLDOWN_MS = 60 * 1000; // 1 minute
@@ -27,6 +34,8 @@ const HLDS_QUEUE_COMMANDS = new Map([
   ["--", { action: "remove", adl: false }],
 ]);
 const CAPTAIN_COMMANDS = new Set(["!addcap", "++cap", "**cap"]);
+const OFFENSE_ADD_COMMANDS = ["addoff", "addoffense", "++off"];
+const OFFENSE_REMOVE_COMMANDS = ["removeoff", "removeoffense", "--off"];
 
 /* ------------------ local helpers ------------------ */
 function isAdmin(message) {
@@ -159,6 +168,26 @@ function queueLines(state, elo, privacy) {
   }).join("\n");
 }
 
+function offenseLines(state, elo, privacy) {
+  return ensureOffenseQueue(state).map(p => {
+    try {
+      const registeredName = getStoredPlayerName(elo, p.id, p.name);
+      const base = formatPlayerName(
+        state,
+        elo,
+        p.id,
+        registeredName || `Player#${String(p.id).slice(-4)}`,
+        privacy,
+        false
+      );
+      return `${base}${supporterBadge(p.id)}`;
+    } catch (e) {
+      console.error("[offenseLines] failed formatting", p, e);
+      return mention(p.id);
+    }
+  }).join("\n");
+}
+
 function adlProgress(state) {
   const max = state.MAX_PLAYERS || Number(process.env.ADL_REQUIRED_PLAYERS || 8);
   const frozenIds = (state.queue || []).slice(0, max).map(p => p.id);
@@ -178,6 +207,14 @@ async function postQueueBoard(channel, state, elo, privacy) {
     emb.addFields({ name: "ADL", value: adlProgress(state), inline: false });
   }
 
+  if (ensureOffenseQueue(state).length) {
+    emb.addFields({
+      name: `Full-time Offense (${state.offenseQueue.length}) — no vote, no Elo`,
+      value: offenseLines(state, elo, privacy).slice(0, 1024),
+      inline: false,
+    });
+  }
+
   await channel.send({ embeds: [emb] });
 }
 
@@ -193,24 +230,17 @@ function register(reg, {
   steamLinks,
   runRconCommand,
 }) {
-  const add = async (message, isAdl = false, asCaptain = false) => {
-    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
-    const id = message.author.id;
-
-    if (state.isVotingInProgress || state.vote) {
-      console.log(`[queue] Ignored add from ${id} while vote is active`);
-      return;
+  // Prevent players currently in an active match from joining another queue
+  const rejectLocked = async (message, id) => {
+    if (!state.lockedPlayers || !state.lockedPlayers.has(String(id))) return false;
+    const matchId = state.lockedPlayers.get(String(id));
+    const now = Date.now();
+    for (const [userId, timestamp] of lockedReplyCooldown) {
+      if (now - timestamp > LOCKED_REPLY_COOLDOWN_MS) lockedReplyCooldown.delete(userId);
     }
-	// Prevent players currently in an active match from joining another queue
-	if (state.lockedPlayers && state.lockedPlayers.has(String(id))) {
-  const matchId = state.lockedPlayers.get(String(id));
-  const now = Date.now();
-  for (const [userId, timestamp] of lockedReplyCooldown) {
-    if (now - timestamp > LOCKED_REPLY_COOLDOWN_MS) lockedReplyCooldown.delete(userId);
-  }
-  const lastReply = lockedReplyCooldown.get(id) || 0;
+    const lastReply = lockedReplyCooldown.get(id) || 0;
     if (now - lastReply > LOCKED_REPLY_COOLDOWN_MS) {
-    lockedReplyCooldown.set(id, now);
+      lockedReplyCooldown.set(id, now);
       console.log(
         `[playerLock] ${id} tried to add but is locked in match ${matchId}`
       );
@@ -220,8 +250,53 @@ function register(reg, {
         );
       } catch {}
     }
-  return;
-  }
+    return true;
+  };
+
+  const rejectBanned = async (message, id) => {
+    // If player is already ghost-banned, notify them again and block add
+    if (state.ghostBans && state.ghostBans[id]) {
+      const gb = state.ghostBans[id];
+      console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
+
+      try {
+        await message.author.send(
+          `🚫 You are still ghost-banned and must sit out **${gb.gamesRemaining} more game${gb.gamesRemaining === 1 ? "" : "s"}**.\n` +
+          `📝 Reason: ${gb.reason || "unspecified"}`
+        );
+      } catch (err) {
+        console.warn(`[ghost-ban] Failed to DM ghosted user ${id}:`, err.message);
+      }
+      return true; // stop them from being added
+    }
+
+    // If player is banned, notify them and block add
+    const ban = banStore?.getBan(id);
+    if (ban) {
+      state.ghostBans = state.ghostBans || {};
+      state.ghostBans[id] = ban;
+
+      console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
+
+      try {
+        await message.author.send(
+          `⏳ You are still banned for **${ban.gamesRemaining} more game(s)**.\nReason: ${ban.reason || "unspecified"}`
+        );
+      } catch {}
+      return true; // still banned, don’t add them
+    }
+    return false;
+  };
+
+  const add = async (message, isAdl = false, asCaptain = false) => {
+    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
+    const id = message.author.id;
+
+    if (state.isVotingInProgress || state.vote) {
+      console.log(`[queue] Ignored add from ${id} while vote is active`);
+      return;
+    }
+    if (await rejectLocked(message, id)) return;
 
 	// Stop overfilling
 	if (state.queue.length >= (state.MAX_PLAYERS || 8)) {
@@ -229,37 +304,7 @@ function register(reg, {
 	  return;
 	}
 
-// If player is already ghost-banned, notify them again and block add
-if (state.ghostBans && state.ghostBans[id]) {
-  const gb = state.ghostBans[id];
-  console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
-
-  try {
-    await message.author.send(
-      `🚫 You are still ghost-banned and must sit out **${gb.gamesRemaining} more game${gb.gamesRemaining === 1 ? "" : "s"}**.\n` +
-      `📝 Reason: ${gb.reason || "unspecified"}`
-    );
-  } catch (err) {
-    console.warn(`[ghost-ban] Failed to DM ghosted user ${id}:`, err.message);
-  }
-  return; // stop them from being added
-}
-
-// If player is banned, notify them and block add
-const ban = banStore?.getBan(id);
-if (ban) {
-  state.ghostBans = state.ghostBans || {};
-  state.ghostBans[id] = ban;
-
-  console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
-
-  try {
-    await message.author.send(
-      `⏳ You are still banned for **${ban.gamesRemaining} more game(s)**.\nReason: ${ban.reason || "unspecified"}`
-    );
-  } catch {}
-  return; // still banned, don’t add them
-}
+    if (await rejectBanned(message, id)) return;
 
     let entry = state.queue.find(p => p.id === id);
     const captainCount = state.queue.filter(p => p.captain).length;
@@ -276,6 +321,8 @@ if (ban) {
       entry.lastSeenAt = Date.now();
       if (canPromote) entry.captain = true;
     }
+    // A regular add replaces any full-time offense spot.
+    removeFromOffense(state, id);
 
     // mark ADL voters + register vote
     if (isAdl) {
@@ -290,9 +337,90 @@ if (ban) {
     await maybeStartAutoFullVote(message, state);
   };
 
+  const flowActive = () => Boolean(
+    state.isVotingInProgress ||
+    state.vote ||
+    state.isVoteStarting ||
+    state.voteLock ||
+    state.activeFlowCancel
+  );
+
+  // Full-time offense: joins the next pickup as an extra attacker without
+  // filling the queue, voting, or affecting anyone's Elo.
+  const addOffense = async (message) => {
+    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
+    const id = message.author.id;
+
+    if (!canAddAsOffense(message.member, config)) {
+      try {
+        await message.reply("🚫 You don’t have the role required to add as full-time offense.");
+      } catch {}
+      return;
+    }
+
+    const capacity = offenseCapacity(settings);
+    if (capacity <= 0) {
+      try { await message.reply("⚠️ Full-time offense is currently disabled."); } catch {}
+      return;
+    }
+
+    if (await rejectLocked(message, id)) return;
+    if (await rejectBanned(message, id)) return;
+
+    const offense = ensureOffenseQueue(state);
+    let entry = offense.find(p => String(p.id) === String(id));
+
+    if (!entry && offense.length >= capacity) {
+      try {
+        await message.reply(`🚨 Full-time offense spots are full (${offense.length}/${capacity}).`);
+      } catch {}
+      return;
+    }
+
+    const regular = state.queue.find(p => String(p.id) === String(id));
+    if (regular) {
+      if (flowActive()) {
+        try {
+          await message.reply("⚠️ You’re part of the current vote. Wait for it to finish before switching to full-time offense.");
+        } catch {}
+        return;
+      }
+      try { adl.unvote(String(id)); } catch {}
+      state.queue = state.queue.filter(p => String(p.id) !== String(id));
+    }
+
+    const discordName = message.member?.displayName || message.author.username;
+    const nameSeed = entry?.name || regular?.name || discordName;
+    try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
+    const name = getStoredPlayerName(elo, id, nameSeed);
+    if (!entry) {
+      entry = { id, name, lastSeenAt: Date.now() };
+      offense.push(entry);
+    } else {
+      entry.name = name;
+      entry.lastSeenAt = Date.now();
+    }
+
+    await postQueueBoard(message.channel, state, elo, privacy);
+    try { await refreshBotName(message.client, state); } catch {}
+    try { reg.persistQueueSoon?.(); } catch {}
+  };
+
+  const removeOffense = async (message) => {
+    if (String(message.channel?.id) !== String(config.channels.pickup)) return;
+    if (!removeFromOffense(state, message.author.id)) return;
+
+    await postQueueBoard(message.channel, state, elo, privacy);
+    try { reg.persistQueueSoon?.(); } catch {}
+  };
+
     const remove = async (message) => {
   if (String(message.channel?.id) !== String(config.channels.pickup)) return;
   const id = message.author.id;
+
+  // Full-time offense players are never part of a vote, so leaving never
+  // cancels one.
+  if (isOffensePlayer(state, id)) return removeOffense(message);
 
   // block removes from people not actually in queue
   if (!state.queue.some(p => String(p.id) === String(id))) {
@@ -389,6 +517,7 @@ if (ban) {
     state.pendingTeam1Starts = null;
     state.isVotingInProgress = false;
     state.queue = [];
+    state.offenseQueue = [];
 
     try { adl.clearAll?.(); } catch {}
     await message.channel.send("🧹 Queue and any active vote cleared.");
@@ -445,6 +574,7 @@ if (ban) {
       existing.name = display;
       existing.lastSeenAt = now();
     }
+    removeFromOffense(state, target.id);
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}
@@ -459,7 +589,8 @@ if (ban) {
 
     const before = state.queue.length;
     state.queue = state.queue.filter(p => p.id !== target.id);
-    if (state.queue.length !== before) {
+    const removedOffense = removeFromOffense(state, target.id);
+    if (state.queue.length !== before || removedOffense) {
       await postQueueBoard(message.channel, state, elo, privacy);
       try { await refreshBotName(message.client, state); } catch {}
       try { reg.persistQueueSoon?.(); } catch {}
@@ -550,6 +681,8 @@ reg.set("--", remove);
 reg.set("addadl", (msg) => add(msg, true));
 reg.set("++adl", (msg) => add(msg, true));
 reg.set("**", (msg) => add(msg, true));
+for (const cmd of OFFENSE_ADD_COMMANDS) reg.set(cmd, addOffense);
+for (const cmd of OFFENSE_REMOVE_COMMANDS) reg.set(cmd, removeOffense);
 
   const sendHldsMessage = async (evt, text) => {
     if (!evt?.serverKey || typeof runRconCommand !== "function") {
@@ -654,6 +787,13 @@ reg.set("**", (msg) => add(msg, true));
     const existing = state.queue.find(p => String(p.id) === discordId);
 
     if (command.action === "remove") {
+      if (!existing && removeFromOffense(state, discordId)) {
+        try { reg.persistQueueSoon?.(); } catch {}
+        const channel = await pickupChannel().catch(() => null);
+        if (channel) await postQueueBoard(channel, state, elo, privacy);
+        await sendHldsMessage(evt, `${evt.player}: removed from full-time offense.`);
+        return true;
+      }
       if (!existing) {
         await sendHldsMessage(evt, `${evt.player}: you are not in the queue.`);
         return true;
@@ -706,6 +846,7 @@ reg.set("**", (msg) => add(msg, true));
     const name = getStoredPlayerName(elo, discordId, nameSeed);
     const entry = existing || { id: discordId, name, lastSeenAt: Date.now() };
     if (!existing) state.queue.push(entry);
+    removeFromOffense(state, discordId);
 
     entry.name = name;
     entry.lastSeenAt = Date.now();
@@ -757,12 +898,34 @@ setInterval(async () => {
   const idleMs = idleMin * 60 * 1000;
 
   // Add 60s buffer so fresh re-adds don’t get kicked
-  const expired = state.queue.filter(
-    p =>
-      p.lastSeenAt &&
-      (ts - p.lastSeenAt) >= (idleMs + 60_000) &&
-      (!p.lastAfkKick || (ts - p.lastAfkKick) > 300_000)
-  );
+  const isExpired = p =>
+    p.lastSeenAt &&
+    (ts - p.lastSeenAt) >= (idleMs + 60_000) &&
+    (!p.lastAfkKick || (ts - p.lastAfkKick) > 300_000);
+  const expired = state.queue.filter(isExpired);
+  const expiredOffense = ensureOffenseQueue(state).filter(isExpired);
+
+  if (expiredOffense.length > 0) {
+    const kickedOffense = new Set(expiredOffense.map(p => String(p.id)));
+    state.offenseQueue = state.offenseQueue.filter(p => !kickedOffense.has(String(p.id)));
+    // Regular expirations below post the board and persist; only do it here
+    // when no regular player expired alongside them.
+    if (!expired.length) {
+      try {
+        const realClient = client || reg.client;
+        const chan = realClient ? await realClient.channels.fetch(config.channels.pickup) : null;
+        if (chan?.isTextBased()) {
+          await chan.send(
+            `⏰ Removed ${expiredOffense.map(p => `<@${p.id}>`).join(", ")} from full-time offense — AFK too long (${idleMin} min).`
+          );
+          await postQueueBoard(chan, state, elo, privacy);
+        }
+      } catch (e) {
+        console.error("[queue cleanup] offense notice failed:", e);
+      }
+      try { (reg.persistQueueSoon || global.persistQueueSoon)?.(); } catch {}
+    }
+  }
 
   if (expired.length > 0) {
     const kickedIds = new Set(expired.map(p => String(p.id)));
@@ -795,7 +958,7 @@ setInterval(async () => {
 
       const chan = await realClient.channels.fetch(config.channels.pickup);
       if (chan?.isTextBased()) {
-        const kickedMentions = expired.map(p => `<@${p.id}>`).join(", ");
+        const kickedMentions = [...expired, ...expiredOffense].map(p => `<@${p.id}>`).join(", ");
         await chan.send(
           `⏰ Removed ${kickedMentions} — AFK too long (${idleMin} min). Please re-add if you want to play.`
         );
@@ -842,6 +1005,7 @@ async function addPlayerToQueue(message, { state, config, elo, banStore, setting
     entry.name = name;
     entry.lastSeenAt = Date.now();
   }
+  removeFromOffense(state, id);
 
   await postQueueBoard(message.channel, state, elo, privacy);
   try { await refreshBotName(message.client, state); } catch {}

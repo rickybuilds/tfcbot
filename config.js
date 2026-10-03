@@ -34,6 +34,8 @@ module.exports = {
     permaban: process.env.PERMABAN_ROLE_ID,
     tempban: process.env.TEMPBAN_ROLE_ID,
     jail: process.env.JAIL_ROLE_ID,
+    // Optional: restricts !addoff to this role (admins always allowed).
+    offense: process.env.OFFENSE_ROLE_ID,
   },
 
   // UI / Game

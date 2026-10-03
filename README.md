@@ -16,6 +16,24 @@ players with Discord buttons. Before the draft, the captains play blind Rock
 Paper Scissors; ties repeat and the winner picks first. The resulting rosters
 are the teams used for the match and its ELO result. With fewer than two
 captains, the normal ELO balance remains active.
+
+## Full-time offense
+
+Players can join the next pickup as a dedicated extra attacker with `!addoff`,
+`!addoffense`, or `++off` (leave with `!removeoff` / `--off`; `!remove` / `--`
+also works). Full-time offense players:
+
+- do not count toward filling the queue and never trigger the vote;
+- cannot vote on servers or maps, and may add while a vote is running;
+- are added after teams are balanced or drafted, alternating sides so each team
+  gets at most `offense:max_per_team` of them (default 1; `0` disables);
+- are stored in `matches.offense_ids`, never in `blue_ids`/`red_ids`, so they
+  gain or lose no Elo and do not affect team averages, odds, or streaks.
+
+Set `OFFENSE_ROLE_ID` to limit the command to members with that Discord role
+(admins are always allowed). Without it, anyone can add as full-time offense.
+Change the per-team cap with `!set offense:max_per_team <0-4>`.
+
 - Match reporting and history
 - Admin and moderation tools
 - RCON server integration
