@@ -10,6 +10,7 @@ class OneVOneServerController {
     const [p1, p2] = reservation.playerSteamIds;
     return [
       "amx_cvar 1v1_enabled 0",
+      "amx_pausecfg pause suinades2.amxx",
       `amx_cvar 1v1_player1 \"${p1}\"`,
       `amx_cvar 1v1_player2 \"${p2}\"`,
       `amx_cvar 1v1_server_key \"${reservation.serverKey}\"`,
@@ -26,6 +27,7 @@ class OneVOneServerController {
       'amx_cvar 1v1_player2 ""',
       'amx_cvar 1v1_server_key "unknown"',
     ];
+    commands.push("amx_pausecfg enable suinades2.amxx");
     commands.push("amx_map pushNN");
     return commands;
   }

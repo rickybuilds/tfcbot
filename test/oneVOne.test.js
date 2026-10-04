@@ -211,6 +211,7 @@ test("post-map setup applies plugin cvars through amx_cvar with enabled last", a
   assert.equal(result.ok, true);
   assert.deepEqual(sent, [
     ["east", "amx_cvar 1v1_enabled 0"],
+    ["east", "amx_pausecfg pause suinades2.amxx"],
     ["east", 'amx_cvar 1v1_player1 "STEAM_0:0:1"'],
     ["east", 'amx_cvar 1v1_player2 "STEAM_0:1:2"'],
     ["east", 'amx_cvar 1v1_server_key "east"'],
