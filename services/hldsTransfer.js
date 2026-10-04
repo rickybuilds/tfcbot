@@ -76,7 +76,8 @@ async function sftpConnect(serverKey = "east") {
 /* -------------------------------------------------------------------------- */
 /* 📥 Download Logs via SFTP                                                  */
 /* -------------------------------------------------------------------------- */
-async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server }) {
+async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server, maxLogs = 2 }) {
+  const logLimit = maxLogs === 1 ? 1 : 2;
   const serverKey = server || "east";
   const sftp = await sftpConnect(serverKey);
   const kept = [];
@@ -112,7 +113,7 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
       const mtime = f.modifyTime * 1000;
 
       if (mtime < cutoff) continue;
-      if (sizeKb < minKb) {
+      if (logLimit !== 1 && sizeKb < minKb) {
         skipped.push(`${f.name} (${sizeKb}KB < ${minKb}KB)`);
         continue;
       }
@@ -136,11 +137,11 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
         } catch {}
       }
 
-      if (eligible.length >= 2) break;
+      if (eligible.length >= logLimit) break;
     }
 
     // Expand search if not enough valid logs
-    if (eligible.length < 2) {
+    if (eligible.length < logLimit) {
       console.warn(`[SFTP:${serverKey}] Only ${eligible.length} valid logs — expanding search`);
       for (const f of remoteFiles) {
         if (eligible.find(e => e.fname === f.name)) continue;
@@ -156,7 +157,7 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server })
           detectedMap.toLowerCase() === String(map || "").toLowerCase()
         ) {
           eligible.push({ local, fname: f.name, sizeKb: Math.round(f.size / 1024), map: detectedMap });
-          if (eligible.length >= 2) break;
+          if (eligible.length >= logLimit) break;
         } else {
           try { fs.unlinkSync(local); } catch {}
         }
@@ -293,13 +294,14 @@ async function uploadToTFCStats({ paths, matchId, map }) {
 /* -------------------------------------------------------------------------- */
 /* 🔁 End-to-End Pipeline (Download → Uploads)                                */
 /* -------------------------------------------------------------------------- */
-async function downloadAndUploadLogs({ filenames, matchId, map, minKb, extra, server }) {
+async function downloadAndUploadLogs({ filenames, matchId, map, minKb, extra, server, maxLogs = 2 }) {
   const dl = await downloadLogs({
     filenames,
     matchId,
     map,
     minKb: typeof minKb === "number" ? minKb : MIN_KB,
     server,
+    maxLogs,
   });
   if (!dl.localPaths.length) return { stage: "download", ...dl };
 

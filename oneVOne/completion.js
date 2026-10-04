@@ -11,6 +11,7 @@ function createCompletionHandler({ client, matchesStore, logsChannelId, manager 
       filenames: reservation.logFiles || [],
       matchId,
       map: evt.map,
+      maxLogs: 1,
       server: reservation.serverKey || evt.server,
     });
     const hampalyzerUrl = result.upload?.url || null;
