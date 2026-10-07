@@ -50,6 +50,7 @@ const {
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
+const { startBootcampWatcher } = require("./services/bootcampWatcher");
 const { EloShadowService } = require("./services/eloShadow");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
@@ -209,6 +210,7 @@ require("./commands/moderation").register(registry, deps);
 require("./commands/tfcmap").register(registry, deps);
 require("./commands/settings").register(registry, deps);
 require("./commands/ranks").register(registry, deps);
+require("./commands/bootcamp").register(registry, { ...deps, pool: mysqlPool });
 require("./commands/mapcaps").register(registry, deps);
 require("./commands/idea").register(registry, deps);
 require("./commands/botch").register(registry);
@@ -433,6 +435,19 @@ startSpeedrunPlayerLinkSync({
   db: matchesStore.db,
   speedrunDb: mysqlPool,
 });
+
+try {
+    await startBootcampWatcher({
+        client,
+        pool: mysqlPool,
+        config,
+        settings,
+        steamLinks,
+        logger: console,
+    });
+} catch (e) {
+    console.error("[BOOTCAMP-WATCHER] failed:", e);
+}
 
   try { startJailWatcher(client, jailStore); } catch (e) { console.error("[JAIL-WATCHER] failed:", e); }
     // Auto-re-jail anyone who rejoins while still flagged
