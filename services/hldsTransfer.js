@@ -2,7 +2,7 @@
 "use strict";
 
 /* -------------------------------------------------------------------------- */
-/* 🚚 HLDS Log Transfer + Upload (SFTP → Hampalyzer + TFCStats)               */
+/* 🚚 HLDS Log Transfer + Upload (SFTP → Local Parser + TFCStats)               */
 /* -------------------------------------------------------------------------- */
 /**
  * Install dependencies:
@@ -176,9 +176,23 @@ async function downloadLogs({ filenames, matchId, map, minKb = MIN_KB, server, m
 }
 
 /* -------------------------------------------------------------------------- */
-/* ☁️ Upload to Hampalyzer                                                    */
+/* ☁️ Upload to Local Parser                                                    */
 /* -------------------------------------------------------------------------- */
-async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
+// Cover request headers and the full response body with one deadline.
+async function readPublicUpload(url, options, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    const raw = await res.text();
+    return { res, raw };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function uploadToHampalyzer({ paths, matchId, map, extra = {}, timeoutMs = 120000 }) {
   if (!paths.length) return { ok: false, status: 0, text: "no files" };
 
   // Hampalyzer's /parseGame API currently rejects single-log uploads even
@@ -189,7 +203,6 @@ async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
     console.warn(
       "[HAMPALYZER] Skipping single-log upload: /parseGame requires two log files"
     );
-    for (const p of paths) try { fs.unlinkSync(p); } catch {}
     return {
       ok: false,
       status: 422,
@@ -227,8 +240,7 @@ async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
   if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
 
   try {
-    const res = await fetch(UPLOAD_URL, { method: "POST", headers, body: form });
-    const raw = await res.text().catch(() => "");
+    const { res, raw } = await readPublicUpload(UPLOAD_URL, { method: "POST", headers, body: form }, timeoutMs);
     let trimmed = raw.trim().replace(/"/g, "");
     if (trimmed.includes("path:")) {
       const m = trimmed.match(/path:([^}]+)}/i);
@@ -241,7 +253,6 @@ async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
 
     console.log(`[HAMPALYZER] Response ${res.status}: ${url || "no url"}`);
 
-    for (const p of paths) try { fs.unlinkSync(p); } catch {}
 
     return { ok: res.ok, status: res.status, text: raw, url };
   } catch (err) {
@@ -253,7 +264,7 @@ async function uploadToHampalyzer({ paths, matchId, map, extra = {} }) {
 /* -------------------------------------------------------------------------- */
 /* ☁️ Upload to TFCStats                                                     */
 /* -------------------------------------------------------------------------- */
-async function uploadToTFCStats({ paths, matchId, map }) {
+async function uploadToTFCStats({ paths, matchId, map, timeoutMs = 120000 }) {
   if (!paths.length) return { ok: false, status: 0, text: "no files" };
 
   const form = new FormData();
@@ -277,8 +288,7 @@ async function uploadToTFCStats({ paths, matchId, map }) {
   }
 
   try {
-    const res = await fetch(TFCSTATS_UPLOAD_URL, { method: "POST", body: form, headers: form.getHeaders() });
-    const raw = await res.text().catch(() => "");
+    const { res, raw } = await readPublicUpload(TFCSTATS_UPLOAD_URL, { method: "POST", body: form, headers: form.getHeaders() }, timeoutMs);
     let json = null;
     try { json = JSON.parse(raw); } catch {}
     const url = json?.success?.path || null;
@@ -305,10 +315,20 @@ async function downloadAndUploadLogs({ filenames, matchId, map, minKb, extra, se
   });
   if (!dl.localPaths.length) return { stage: "download", ...dl };
 
-  const upStats = await uploadToTFCStats({ paths: dl.localPaths, matchId, map });
-  const upHamp = await uploadToHampalyzer({ paths: dl.localPaths, matchId, map, extra });
+  const uploads = await Promise.allSettled([
+    uploadToTFCStats({ paths: dl.localPaths, matchId, map }),
+    uploadToHampalyzer({ paths: dl.localPaths, matchId, map, extra }),
+    require("./noNameParser").uploadToNoNameParser({ paths: dl.localPaths, matchId, map, extra }),
+  ]);
+  const [upStats, upHamp, noname] = uploads.map(outcome => outcome.status === "fulfilled" ? outcome.value : { ok: false, status: 0, url: null, text: String(outcome.reason) });
 
-  return { stage: "upload", ...dl, upload: upHamp, tfcstats: upStats };
+  // Only the pipeline owns cleanup: every consumer must finish reading first.
+  // Failed own-parser uploads retain the private local originals for retry.
+  if (noname.ok && upStats.ok && (upHamp.ok || upHamp.reason === "single_log_unsupported")) {
+    for (const p of dl.localPaths) try { fs.unlinkSync(p); } catch {}
+  }
+
+  return { stage: "upload", ...dl, upload: upHamp, tfcstats: upStats, noname };
 }
 
 

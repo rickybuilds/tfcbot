@@ -1,0 +1,86 @@
+<div class="container">
+    <div class="row">
+        <div class="col-md-9">
+            <h2>Hampalyzer &mdash; TFC Statistics</h2>
+            <table class="table dy-5">
+                <tbody id="all-logs">
+                    <tr>
+                        <td>
+                            Logs loading ...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="row mb-5">
+        <div class="col-md-9">
+            <div class="btn-group" role="group" aria-label="Table navigation">
+                <a id="prevPage" class="btn btn-secondary">&laquo;</a>
+                <a id="curPage" class="btn btn-secondary">Page <span id="pageNum"></span></a>
+                <a id="nextPage" class="btn btn-secondary">&raquo;</a>
+                </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+
+<script>
+    const table = $('#all-logs');
+
+    $(document).ready(() => {
+        let urlParams = new URLSearchParams(window.location.search);
+        let page_num = urlParams.has('page') ? Number(urlParams.get('page')) : 1;
+
+        if (isNaN(page_num)) page_num = 1;
+
+        $.get(
+            "/api/logs/" + page_num,
+            function (data) {
+                if (data.error) {
+                    table.select('td').text("Database error, unable to retrieve logs");
+                    return;
+                }
+
+                table.html("<tr><th>Parsed log</th><th>Match date (server time)</th><th>Parsed date</th><th>Map</th><th>Server</th><th># Players</th></tr>");
+                for (const row of data) {
+                    table.append(`
+                    <tr>
+                        <td><a href="parsedlogs/${row.parsedlog}/">${row.parsedlog}</a></td>
+                        <td>${getFormattedDate(row.date_match)}</td>
+                        <td>${getFormattedDate(row.date_parsed)}</td>
+                        <td>${row.map}</td>
+                        <td>${row.server}</td>
+                        <td>${row.num_players}</td>
+                    </tr>`);
+                }
+
+                // update buttons
+                $("#prevPage").css('display', page_num === 1 ? 'none' : 'block');
+                $('#prevPage').attr('href', '/logs.html?page=' + ((page_num) - 1));
+
+                $('#pageNum').text(page_num);
+
+                $('#nextPage').css('display', data.length < 20 ? 'none' : 'block');
+                $('#nextPage').attr('href', '/logs.html?page=' + ((page_num) + 1));
+            }
+        );
+    });
+
+    function getFormattedDate(theDate) {
+        const givenDate = new Date(theDate);
+        const dayOfMonth = givenDate.getDate();
+        const month = Intl.DateTimeFormat('en-US', { month: 'short' }).format(givenDate);
+        const year = givenDate.getFullYear();
+        const date = [dayOfMonth, month, year].join(" ");
+
+        // time
+        const time = Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+            .format(givenDate);
+
+        return date + " " + time;
+    }
+</script>

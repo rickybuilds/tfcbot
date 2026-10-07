@@ -31,7 +31,10 @@
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "test:voice": "node --test test/voicePcm.test.js test/voiceManager.test.js",
-    "1v1:migrate:check": "node scripts/migrate-one-v-one.js"
+    "1v1:migrate:check": "node scripts/migrate-one-v-one.js",
+    "parser:setup": "npm ci --prefix parser && npm run build --prefix parser",
+    "parser:start": "node --env-file=parser/.env parser/dist/src/server.js",
+    "parser:test": "npm test --prefix parser"
   },
   "keywords": [],
   "author": "",

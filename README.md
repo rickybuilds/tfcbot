@@ -2,6 +2,15 @@
 
 A custom Discord bot and server automation platform for Team Fortress Classic pickups and league play.
 
+## Local match parsing
+
+Collected logs go to TFCStats and public Hampalyzer for their result links, and
+to our local copy of Hampalyzer for direct SQLite imports. The database retains
+the complete structured result plus SG uptime, lifetimes and player kills by
+level. The existing website remains the frontend; automatic HTML scraping is
+removed. See [parser setup and operation](parser/README.md) for the required
+service token, persistent log archive, deployment and reprocessing commands.
+
 ## Features
 - Queue and matchmaking system
 - Elo tracking and rankings

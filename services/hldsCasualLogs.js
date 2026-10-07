@@ -16,6 +16,7 @@ const MIN_KB = 100;
 const MAX_SCAN_PER_SERVER = 80;
 const LOGS_NEEDED = 2;
 
+
 const HAMP_BASE = process.env.HAMPALYZER_BASE || "https://app.hampalyzer.com";
 const HAMP_UPLOAD_URL =
   process.env.HAMPALYZER_UPLOAD_URL || `${HAMP_BASE}/api/parseGame`;
@@ -178,10 +179,26 @@ async function findMatchingLogsOnServer(serverKey, cfg, mapName) {
 // Uploads
 // -----------------------------------------------------------------------------
 
-async function uploadToHampalyzer({ paths, mapName, casualId }) {
+// Cover request headers and the full response body with one deadline.
+async function readPublicUpload(url, options, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    const raw = await res.text();
+    return { res, raw };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function uploadToHampalyzer({ paths, mapName, casualId, timeoutMs = 120000 }) {
   if (!paths.length) {
     return { ok: false, status: 0, url: null, text: "no files" };
   }
+
+  if (paths.length === 1) return { ok: false, status: 422, url: null, reason: "single_log_unsupported" };
 
   const form = new FormData();
   form.append("force", "on");
@@ -197,13 +214,11 @@ async function uploadToHampalyzer({ paths, mapName, casualId }) {
   const headers = { ...form.getHeaders() };
   if (API_KEY) headers.Authorization = `Bearer ${API_KEY}`;
 
-  const res = await fetch(HAMP_UPLOAD_URL, {
+  const { res, raw } = await readPublicUpload(HAMP_UPLOAD_URL, {
     method: "POST",
     headers,
     body: form,
-  });
-
-  const raw = await res.text().catch(() => "");
+  }, timeoutMs);
   console.log(
     `[casual logs] Hampalyzer status=${res.status} ok=${res.ok} raw=${raw.slice(0, 500)}`
   );
@@ -224,7 +239,7 @@ async function uploadToHampalyzer({ paths, mapName, casualId }) {
   return { ok: res.ok, status: res.status, url, text: raw };
 }
 
-async function uploadToTFCStats({ paths, mapName, casualId }) {
+async function uploadToTFCStats({ paths, mapName, casualId, timeoutMs = 120000 }) {
   if (!paths.length) {
     return { ok: false, status: 0, url: null, text: "no files" };
   }
@@ -239,13 +254,11 @@ async function uploadToTFCStats({ paths, mapName, casualId }) {
     form.append("logs[]", fs.createReadStream(p), renamed);
   });
 
-  const res = await fetch(TFCSTATS_UPLOAD_URL, {
+  const { res, raw } = await readPublicUpload(TFCSTATS_UPLOAD_URL, {
     method: "POST",
     headers: form.getHeaders(),
     body: form,
-  });
-
-  const raw = await res.text().catch(() => "");
+  }, timeoutMs);
   console.log(
     `[casual logs] TFCStats status=${res.status} ok=${res.ok} raw=${raw.slice(0, 500)}`
   );
@@ -278,7 +291,7 @@ async function uploadToTFCStats({ paths, mapName, casualId }) {
 // Main casual log workflow
 // -----------------------------------------------------------------------------
 
-async function uploadCasualLogsForMap(mapName) {
+async function uploadCasualLogsForMap(mapName, { timeoutMs = 120000 } = {}) {
   const map = String(mapName || "").trim();
 
   if (!map) {
@@ -301,7 +314,7 @@ async function uploadCasualLogsForMap(mapName) {
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .slice(0, LOGS_NEEDED);
 
-  if (selected.length < LOGS_NEEDED) {
+  if (selected.length < 1) {
     cleanup(allMatches.map(x => x.localPath));
 
     return {
@@ -317,32 +330,37 @@ async function uploadCasualLogsForMap(mapName) {
 
   cleanup(unusedPaths);
 
-  try {
-    const hampalyzer = await uploadToHampalyzer({
+  const settled = await Promise.allSettled([
+    uploadToHampalyzer({
       paths: selectedPaths,
       mapName: map,
       casualId,
-    });
+      timeoutMs,
+    }),
 
-    const tfcstats = await uploadToTFCStats({
+    uploadToTFCStats({
       paths: selectedPaths,
       mapName: map,
       casualId,
-    });
+      timeoutMs,
+    }),
+    require("./noNameParser").uploadToNoNameParser({ paths: selectedPaths, matchId: casualId, map, extra: { force: "on" } }),
+  ]);
+  const [hampalyzer, tfcstats, noname] = settled.map(outcome => outcome.status === "fulfilled" ? outcome.value : { ok: false, url: null });
+  if (noname.ok && tfcstats.ok && (hampalyzer.ok || hampalyzer.reason === "single_log_unsupported")) cleanup(selectedPaths);
 
-    return {
-      ok: true,
-      map,
-      casualId,
-      serverName: selected[0]?.serverName || selected[0]?.serverKey || "unknown",
-      hampalyzerUrl: hampalyzer.url,
-      tfcstatsUrl: tfcstats.url,
-      hampalyzerOk: hampalyzer.ok,
-      tfcstatsOk: tfcstats.ok,
-    };
-  } finally {
-    cleanup(selectedPaths);
-  }
+  return {
+    ok: true,
+    map,
+    casualId,
+    serverName: selected[0]?.serverName || selected[0]?.serverKey || "unknown",
+    hampalyzerUrl: hampalyzer.url,
+    tfcstatsUrl: tfcstats.url,
+    hampalyzerOk: hampalyzer.ok,
+    tfcstatsOk: tfcstats.ok,
+    nonameUrl: noname.url,
+    nonameOk: noname.ok,
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -378,6 +396,11 @@ async function runCasualLogs({ mapName, message, config }) {
           value: result.hampalyzerUrl
             ? `[Open Hampalyzer](${result.hampalyzerUrl})`
             : "Upload failed",
+          inline: false,
+        },
+        {
+          name: "NoName Stats",
+          value: result.nonameUrl ? `[Open NoName Stats](${result.nonameUrl})` : "Local parsing failed; logs retained for retry",
           inline: false,
         },
         {

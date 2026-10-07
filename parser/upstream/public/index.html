@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+
+    <title>Hampalyzer - TFC Stats</title>
+
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/all.css" integrity="sha384-UHRtZLI+pbxtHCWp1t77Bi1L4ZtiqrqD80Kn4Z8NTSRyMA2Fd33n5dQ8lWUE00s/" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+
+    <!-- hamp stylin' -->
+    <link rel="stylesheet" href="/hamp2.css" />
+</head>
+
+<body>
+    <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
+        <a class="navbar-brand col-sm-3 mr-0" href="/">Hampalyzer &mdash; TFC Statistics <sup class="text-warning">BETA</sup></a>
+        <ul class="navbar-nav px-3">
+            <li class="nav-item text-nowrap">
+                <a class="nav-link" href="/logs.html">Other Logs</a>
+            </li>
+        </ul>
+    </nav>
+
+    <div class="container-fluid" role="main">
+        <div class="container">
+    <div class="row">
+        <div class="col-md-9">
+            <h2>Hampalyzer &mdash; TFC Statistics</h2>
+            <p class="lead">
+                The Hampalyzer is a Half-Life GoldSrc server log parser, specifically targeting the Team Fortress Classic mod.
+            </p>
+            <p><strong>
+                To parse a game, upload one or two log files.
+            </strong></p>
+            <p>
+                If you upload two log files at a time, Hampalyzer will try to combine statistics and consider the two log files as part of a two-round match.
+            </p>
+            <form id="logUpload" method="POST" action="/api/parseGame" enctype="multipart/form-data">
+                <div class="form-group">
+                    <div class="custom-file">
+                        <input type="hidden" name="date" id="date" value="0">
+                        <input type="file" name="logs[]" class="custom-file-input" id="logFiles" multiple required>
+                        <label class="custom-file-label" for="logFiles">Choose one or two .log files (CTRL+click to select multiple files)</label>
+                        <div class="invalid-feedback">You must select one or two .log files.</div>
+                    </div>
+                </div>
+                <div class="form-group form-check">
+                    <input type="checkbox" class="form-check-input" name="force" id="force">
+                    <label class="form-check-label" for="force"><abbr title="will skip validation that map and player pools are nearly the same between rounds, and that round lengths are within 5 minutes">Skip match validation (two logs)</abbr></label>
+                </div>
+                <div class="form-group">
+                    <input class="btn btn-primary" type="submit" value="Submit">
+                    <i class="fas fa-lg fa-spinner d-none ml-2" title="working..."></i>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-9">
+            <div id="formResponse" class="alert alert-primary invisible" role="alert">
+            </div>
+        </div>
+    </div>
+    <div class="row mt-5">
+        <div class="col-md-9">
+            <p>
+                Find an issue? <a href="https://github.com/bananahampster/hampalyzer/issues" target="_blank" class="link">File it on GitHub</a>, or message @Hampster on Discord.
+            </p>
+            <p>Here's a link of features that are upcoming, rougly ordered by priority (ease of implementation vs. utility):</p>
+            <ol>
+                <li>Merge with master and remove beta branch (requires updating deploy scripts)</li>
+                <li>
+                    Administrivia update:
+                    <ul>
+                        <li>Update backup scripts (DB + files)</li>
+                        <li>Add match force-reparse reparse link (visible to admin-only)</li>
+                        <li>Add match invalidation link (visible to admin-only); disqualify log from counting against stats (also add some UI to note this on match page)</li>
+                    </ul>
+                </li>
+                <li>
+                    Statistics update (full reparse after each):
+                    <ul>
+                        <li>Add engineering stats to player page (built guns, gun uptime, dets, etc.)</li>
+                        <li>Add 'time conced' stat to defense summary per-player (?)</li>
+                        <li>Fix bug that prevents flag returns due to timeout not showing</li>
+                        <li>Fix bug for parsing Copper (<a href="https://github.com/bananahampster/hampalyzer/issues/59" target="_blank" class="link">#59</a>)</li>
+                        <li>Fix bug for parsing Baconbowl (<a href="https://github.com/bananahampster/hampalyzer/issues/48" target="_blank" class="link">#48</a>)</li><li>Add chat logs (<a href="https://github.com/bananahampster/hampalyzer/issues/4" target="_blank" class="link">#4</a>)</li>
+                        <li>Show flag carrier kills on summary view (<a href="https://github.com/bananahampster/hampalyzer/issues/30" target="_blank" class="link">#30</a>)</li>
+                    </ul>
+                </li>
+                <li>Update to Bootstrap v5 (currently v4; will enable easier theming)</li>
+                <li>
+                    Global statistics (maps played, matches played per-user, best teammates, etc.)
+                    <ul>
+                        <li>Start with global statistics, with a 'dashboard' overall view</li>
+                        <li>Move onto player-specific queries (for top 100 players?)</li>
+                        <li>Likely use PostgresSQL <code>MATERIALIZED VIEW</code> to minimize db load, re-run cron job to update nightly</li>
+                    </ul>
+                </li>
+                <li>Stat categories that predict wins/losses, especially combinations: e.g., starting offense first, damage vs. flag movement, sg kills, even calculated per-map</li>
+                <li>
+                    Enable programmatic access to match information
+                    <ul>
+                        <li>Requires API access key/mechanism</li>
+                        <li>Requires some sort of "cost" to limit DOS; implement backoff</li>
+                        <li>Consider 'admin' UI interface for DB monitoring/key managment</li>
+                    </ul>
+                </li>
+                <li>
+                    Support for flag location naming (e.g., "flag dropped top-ramp")
+                    <ul>
+                        <li>Requires per-map work to captured named 3D boxes (already done for schtop; took 30 minutes)</li>
+                        <li>Requires <code>psql</code> version 14 to support 3D queries; should populate flag locations into flag drop events into match summary.</li>
+                    </ul>
+                </li>
+                <li>
+                    Support for demo uploads alongside matches
+                    <ul>
+                        <li>Consider using <a href="https://github.com/x8BitRain/webhl/" class="link">WebHL</a>, which itself is a fork of <a href="https://github.com/skyrim/hlviewer.js" class="link">hlviewer.js</a>.  Seems to not support HLTV replay, unfortunately.  If it works, then could click on <emph>any event</emph> in a match summary to jump to that location in the HLTV and show it in the browser.</li>
+                    </ul>
+                </li>
+            </ol>
+            <p>
+                <strong>Database statistics:</strong> currently tracking
+                <span id="db-stats">(loading...)</span>
+            </p>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+
+<script>
+    $(document).ready(function() {
+        const dbStatsRequest = $.get(
+            'api/getDBStats',
+            function(data) {
+                const getNumber = function(stat) {
+                    const num = +(data.find(d => d.table === stat).estimate);
+                    return num.toLocaleString();
+                }
+
+                $("#db-stats").html(`
+                    ${getNumber('player')} players over
+                    ${getNumber('logs')} games, which contain
+                    ${getNumber('event')} total events (log lines).
+                `);
+            }
+        );
+    });
+    
+    const form = document.querySelector('form');
+
+    $('#logFiles').on('change', function(e) {
+        let fileNum = e.target.files.length || 0;
+        let label = "";
+        switch (fileNum) {
+            case 0:
+                label = "No files selected.  Please select a .log file to parse.";
+                $(this).addClass('is-invalid');
+                $(this).next('.invalid-feedback').text("You must select one or two .log files.");
+                break;
+            case 1:
+                label = "Selected log file: " + e.target.files[0].name;
+                $(this).removeClass('is-invalid');
+                break;
+            case 2:
+                label = "Selected log files: " + e.target.files[0].name + " and " + e.target.files[1].name;
+                $(this).removeClass('is-invalid');
+                break;
+            default:
+                label = "Too many files selected.  Try only picking one or two log files.";
+                $(this).addClass('is-invalid');
+                $(this).next('.invalid-feedback').text("Too many files selected.");
+                break;
+        }
+
+        $(this).next('.custom-file-label').text(label);
+    });
+
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+
+        const formValid = form.checkValidity();
+        form.classList.add('was-validated');
+
+        if (formValid === false)
+            return;
+
+        // add date as poor way to bundle logs together; maybe use session cookie/login later?
+        $("#date").val(+Date.now());
+
+        let formData = new FormData($('#logUpload').get(0));
+        let url;
+
+        switch (formData.getAll('logs[]').length) {
+            case 1:
+                url = '/api/parseLog';
+                break;
+            case 2:
+                url = '/api/parseGame';
+                break;
+            default:
+                // do some form validation
+                return;
+        }
+
+        // post
+        let request = $.ajax({
+            url: url,
+            type: "POST",
+            data: formData,
+            contentType: false,
+            processData: false,
+            cache: false,
+        });
+
+        const spinner = $('.fa-spinner')
+        spinner.removeClass('d-none');
+
+        let handler = function(response) {
+            spinner.addClass('d-none');
+            if (response != null) {
+                if (response.success) {
+                    $('#formResponse').attr('class', 'alert alert-primary')
+                        .html(`Your game has been parsed and is available at <a href="${ response.success.path }">${ response.success.path }</a>!`);
+                } 
+                else if (response.failure) {
+                    $('#formResponse').attr('class', 'alert alert-danger')
+                        .html(`There was an error parsing the logs: <strong>${response.failure.error_reason}</strong>.<br />${response.failure.message}`);
+                } 
+            }
+            else {
+                $('#formResponse').attr('class', 'alert alert-danger')
+                    .html(`An unknown error occured: either the server did not respond or it talked funny to us.`);
+            }
+        }
+
+        request.done(handler).fail((data) => handler(data.responseJSON));
+    });
+</script>
+    </div>
+</body>
+</html>

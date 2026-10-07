@@ -1,0 +1,151 @@
+<div class="row">
+    <nav class="col-md-2 d-none d-md-block bg-dark sidebar">
+        {{> page/sidebar }}
+    </nav>
+
+    <main id="player-details" class="col-sm-9 ml-sm-auto col-lg-10 px-4">
+        <p class="h2 player-name">{{name}}</p>
+        <div class="player-stats player-stats-num{{round.length}}">
+
+            <!-- round titles -->
+            <div class="emoji">📰</div>
+            {{#each round}}
+            <div class="round-title">{{#if round_number}}Round {{round_number}}{{else}}Round {{math @index "+" 1}}{{/if}}</div>
+            {{/each}}
+
+            <!-- player classes -->
+            <div class="emoji">🧑</div>
+            {{#each round}}
+            <div class="d-flex flex-row classes">
+                {{#each classes}}
+                <div class="d-flex flex-column">
+                    <!-- TODO: get right team selector here-->
+                    <img src="/assets/img/classes/blue/{{classAsString}}.gif" alt="{{classAsString}}" />
+                    <div>{{formatSecondsForDisplay timeInSeconds}}</div>
+                </div>
+                {{/each}}
+            </div>
+            {{/each}}
+
+            <!-- kills -->
+            <div class="emoji pt-3">💀</div>
+            {{#each round}}
+            <div class="d-flex flex-column">
+                {{#eachOrderKeys kills "kill,kill_while_conced,teamkill"}}
+                <div class="stats-faceted">
+                    <div class="stat-title pt-3 pb-1"><h4>{{description}}: {{value}}</h4></div>
+                    <div class="stats-facets py-3">
+                        <div class="facet-summary pb-2 mb-3">
+                            {{#each weapon_summary}}
+                            <div class="facet-weapon px-2">
+                                <span class="weapon-icon weapon-{{@key}}"></span>
+                                {{this}}
+                            </div>
+                            {{/each}}
+                        </div>
+                        {{#each details}}
+                        <div class="facet-name">{{@key}}</div>
+                        <div class="facet-value">{{this.length}}</div>
+                        <div class="facet-details">
+                            {{#each this}}
+                            <span class="weapon-icon weapon-{{weapon}} {{cssClassToAdd}}" title="{{description}}"></span>
+                            {{/each}}
+                        </div>
+                        {{/each}}
+                    </div>
+                </div>
+                {{/eachOrderKeys}}
+            </div>
+            {{/each}}
+
+            <!-- deaths -->
+            <div class="emoji pt-3">☠</div>
+            {{#each round}}
+            <div class="d-flex flex-column">
+                {{#eachOrderKeys deaths "death,by_team"}}
+                <div class="stats-faceted">
+                    <div class="stat-title pt-3 pb-1"><h4>{{description}}: {{value}}</h4></div>
+                    <div class="stats-facets">
+                        <div class="facet-summary pb-2 mb-3">
+                            {{#each weapon_summary}}
+                            <div class="facet-weapon px-2">
+                                <span class="weapon-icon weapon-{{@key}}"></span>
+                                {{this}}
+                            </div>
+                            {{/each}}
+                        </div>
+                        {{#each details}}
+                        <div class="facet-name">{{@key}}</div>
+                        <div class="facet-value">{{this.length}}</div>
+                        <div class="facet-details">
+                            {{#each this}}
+                            <span class="weapon-icon weapon-{{weapon}} {{cssClassToAdd}}" title="{{description}}"></span>
+                            {{/each}}
+                        </div>
+                        {{/each}}
+                    </div>
+                </div>
+                {{/eachOrderKeys}}
+            </div>
+            {{/each}}
+
+            <!-- damage -->
+            <div class="emoji">🤕</div>
+            {{#each round}}
+            <div class="d-flex flex-column">
+                {{#eachOrderKeys damage "to_enemies,to_team,from_enemies,from_team,to_self"}}
+                <div class="stats-faceted">
+                    <div class="stat-title pt-3 pb-1"><h4>{{description}}: {{value}}</h4></div>
+                    <div class="stats-facets">
+                        {{#each details}}
+                        <div class="facet-name">{{@key}}</div>
+                        <div class="facet-value"></div>
+                        <div class="facet-details">
+                            {{#each this}}
+                            <span title="{{description}}">{{this.value}}</span>
+                            {{/each}}
+                        </div>
+                        {{/each}}
+                    </div>
+                </div>
+                {{/eachOrderKeys}}
+            </div>
+            {{/each}}
+
+            <!-- weapons -->
+            <div class="emoji">🔫</div>
+            {{#each round}}
+            <div class="d-flex flex-column">
+                {{#eachOrderKeys weaponStats "airshot,concs,airshoted"}}
+                <div class="stats-faceted">
+                    <div class="stat-title pt-3 pb-1"><h4>{{description}}: {{value}}</h4></div>
+                    <div class="stats-facets">
+                        {{#each details}}
+                        <div class="facet-name">{{@key}}</div>
+                        <div class="facet-value">{{this.length}}</div>
+                        <div class="facet-details">
+                            {{#each this}}
+                            <span class="weapon-icon weapon-{{weapon}} {{cssClassToAdd}}" title="{{description}}"></span>
+                            {{/each}}
+                        </div>
+                        {{/each}}
+                    </div>
+                </div>
+                {{/eachOrderKeys}}
+            </div>
+            {{/each}}
+
+            <!-- buildables -->
+            <div class="emoji">🏗</div>
+            {{#each round}}
+            <div class="d-flex flex-column">
+                {{#each buildables}}
+                <div>
+                    <span title="{{description}}">{{title}}</span>: {{value}}
+                </div>
+                {{/each}}
+            </div>
+            {{/each}}
+        </div>
+    </main>
+</div>

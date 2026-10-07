@@ -146,3 +146,17 @@ test_api.js
 !/scripts/
 !/scripts/testPickupReplay.js
 ChatGPT Image Sep 29, 2026, 02_21_30 AM.png
+
+# No Name parser source, reproducible dependencies and public upstream fixtures
+/parser/dist/
+/parser/data/
+!/parser/package.json
+!/parser/package-lock.json
+!/parser/tsconfig.json
+!/parser/upstream/package.json
+!/parser/upstream/package-lock.json
+!/parser/upstream/tsconfig.json
+!/parser/upstream/test/*.log
+!/test/noNameParser.test.js
+!/test/noNameStatsImport.test.js
+!/test/parseNoNameLogs.test.js

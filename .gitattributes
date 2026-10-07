@@ -1,0 +1,3 @@
+# Preserve the pinned upstream fixtures and their intentional whitespace.
+parser/upstream/** -whitespace
+parser/upstream/test/*.log -text
