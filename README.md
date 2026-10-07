@@ -42,6 +42,42 @@ Change the per-team cap with `!set offense:max_per_team <0-4>`.
 The spectator voice relay merges Blue and Red team comms with bounded PCM
 buffers and no FFmpeg mixing process. See [voice relay details and rollout](docs/voice-relay.md).
 
+## Noname TFC Bootcamp
+
+TFCBot reads the Bootcamp plugin's feed (`bootcamp_events` in the speedrun
+MariaDB) and:
+
+- computes each player's TFC license (`lib/bootcampLicense.js`) from their
+  route and drill tiers, stores it in `bootcamp_licenses`, and posts new
+  licenses, records and gold/platinum tier-ups to the Bootcamp channel;
+- syncs license roles for every Discord member linked to that Steam ID. A
+  member with several linked Steam IDs gets the best license among them;
+- gates the pickup queue on a role when `BOOTCAMP_QUEUE_ROLE_ID` is set.
+
+Commands: `!license [@player]`, `!pb <route>`, `!challenge` (admins:
+`!challenge set <route|drill> <slug> <map> <days> <title>`), and
+`!cosign @player` for mentors.
+
+```env
+BOOTCAMP_CHANNEL_ID=            # where records, tier-ups and licenses post
+BOOTCAMP_PERMIT_ROLE_ID=        # learner's permit
+BOOTCAMP_LICENSED_ROLE_ID=      # TFC license (also kept by platinum)
+BOOTCAMP_PLATINUM_ROLE_ID=      # platinum license; also counts as mentor
+BOOTCAMP_MENTOR_ROLE_ID=        # optional: who may !cosign (admins always can)
+BOOTCAMP_ENGINEER_ROLE_ID=      # class badges: BOOTCAMP_<CLASS>_ROLE_ID
+# The offense endorsement grants the existing OFFENSE_ROLE_ID, so !addoff
+# gating works unchanged.
+
+# Queue gate: the role needed to add to this bot's queue. Use the Licensed
+# role on the main pickup bot; run a second bot instance for learning pugs
+# with the Permit role here.
+BOOTCAMP_QUEUE_ROLE_ID=
+
+# Optional overrides of the license rules, e.g. {"licenseMaps":2}
+BOOTCAMP_LICENSE_RULES=
+BOOTCAMP_WATCHER_POLL_MS=20000
+```
+
 ## Elo V2 shadow mode
 
 Set `ELO_V2_MODE=shadow` to calculate and persist proposed Elo V2 results

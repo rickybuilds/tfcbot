@@ -1,6 +1,7 @@
 // commands/queue.js
 "use strict";
 
+const { canJoinQueue, queueGateMessage } = require("../lib/queueGate");
 const { EmbedBuilder } = require("discord.js");
 const { refreshBotName } = require("../lib/botName");
 const {
@@ -305,6 +306,10 @@ function register(reg, {
 	}
 
     if (await rejectBanned(message, id)) return;
+    if (!canJoinQueue(message.member, config)) {
+      try { await message.reply(queueGateMessage()); } catch {}
+      return;
+    }
 
     let entry = state.queue.find(p => p.id === id);
     const captainCount = state.queue.filter(p => p.captain).length;
@@ -992,6 +997,12 @@ async function addPlayerToQueue(message, { state, config, elo, banStore, setting
   // 🚫 Enforce bans
   const ban = banStore?.getBan(id);
   if (ban) return null;
+
+  // Bootcamp license gate (optional)
+  if (!canJoinQueue(message.member, config)) {
+    try { await message.reply(queueGateMessage()); } catch {}
+    return null;
+  }
 
   let entry = state.queue.find(p => p.id === id);
   const discordName = message.member?.displayName || message.author.username;

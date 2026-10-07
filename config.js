@@ -35,7 +35,12 @@ module.exports = {
     tempban: process.env.TEMPBAN_ROLE_ID,
     jail: process.env.JAIL_ROLE_ID,
     // Optional: restricts !addoff to this role (admins always allowed).
+    // The Bootcamp offense endorsement grants this role.
     offense: process.env.OFFENSE_ROLE_ID,
+    // Optional: the role needed to join this bot's pickup queue (admins always
+    // allowed). Set it to the Bootcamp "Licensed" role on the main pickup bot,
+    // and to the "Learner's permit" role on a learning-pug bot.
+    queueRequired: process.env.BOOTCAMP_QUEUE_ROLE_ID,
   },
 
   // UI / Game
