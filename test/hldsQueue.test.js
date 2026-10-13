@@ -17,6 +17,12 @@ const {
   isTrackingOnlyServerKey,
   shouldWarnBlockedPickupSource,
 } = require("../services/hldsLogs");
+const {
+  register: registerMatches,
+  getLastMatchesLimit,
+  getPlayerGameState,
+  getPlayerGameButtonSpec,
+} = require("../commands/matches");
 
 test("recognizes regular in-game queue commands", () => {
   assert.deepEqual(parseHldsQueueCommand("!add"), { action: "add", adl: false });
@@ -87,6 +93,126 @@ test("RCON queue notices cannot inject quotes or new commands", () => {
     safeRconText('Player"\nquit\r now'),
     "Player quit now"
   );
+});
+
+test("registers lastmatches aliases", () => {
+  const registry = new Map();
+
+  registerMatches(registry);
+
+  assert.equal(registry.has("lastmatches"), true);
+  assert.equal(registry.get("lastgames"), registry.get("lastmatches"));
+  assert.notEqual(registry.get("last"), registry.get("lastmatches"));
+});
+
+test("lastmatches defaults to seven games and preserves the optional cap", () => {
+  assert.equal(getLastMatchesLimit([]), 7);
+  assert.equal(getLastMatchesLimit(["3"]), 3);
+  assert.equal(getLastMatchesLimit(["99"]), 10);
+  assert.equal(getLastMatchesLimit(["not-a-number"]), 7);
+});
+
+test("lastgames queries and displays seven games by default", async () => {
+  let requestedLimit;
+  const sent = [];
+  const rows = Array.from({ length: 7 }, (_, index) => ({
+    match_id: `match-${index + 1}`,
+    winner: "blue",
+    created_at: 1,
+    map_name: "2fort",
+    status: "completed",
+  }));
+  const database = {
+    prepare(sql) {
+      assert.match(sql, /ORDER BY created_at DESC LIMIT \?/);
+      return { all: limit => (requestedLimit = limit, rows) };
+    },
+  };
+  const registry = new Map();
+  registerMatches(registry, {
+    config: { channels: { pickup: "pickup" } },
+    elo: { db: database },
+  });
+
+  await registry.get("lastgames")({
+    channel: {
+      id: "pickup",
+      send: async message => sent.push(message),
+    },
+  }, []);
+
+  assert.equal(requestedLimit, 7);
+  assert.equal(sent[0].split("\n").length, 8);
+});
+
+test("player game states combine result and MVP status", () => {
+  const cases = [
+    ["blue", "BLUE", false, "win"],
+    ["blue", "BLUE", true, "win_mvp"],
+    ["blue", "TIE", false, "tie"],
+    ["blue", "TIE", true, "tie_mvp"],
+    ["blue", "RED", false, "loss"],
+    ["blue", "RED", true, "loss_mvp"],
+  ];
+
+  for (const [team, winner, isMvp, expected] of cases) {
+    assert.equal(
+      getPlayerGameState({ blue_ids: team === "blue" ? '["42"]' : "[]", red_ids: "[]", winner }, "42", isMvp),
+      expected
+    );
+  }
+});
+
+test("player game indicators use the six requested visual states", () => {
+  const specs = [
+    ["win", "🟢"],
+    ["win_mvp", "🟣"],
+    ["tie", "🟡"],
+    ["tie_mvp", "😐"],
+    ["loss", "🔴"],
+    ["loss_mvp", "😢"],
+  ];
+
+  for (const [state, emoji] of specs) {
+    assert.equal(getPlayerGameButtonSpec(state).emoji, emoji);
+  }
+});
+
+test("!last @user renders the player's latest ten games on one line with a record", async () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    match_id: `match-${index + 1}`,
+    winner: index % 2 ? "red" : "blue",
+    created_at: 10 - index,
+    map_name: "2fort",
+    status: "completed",
+    blue_ids: '["42"]',
+    red_ids: "[]",
+  }));
+  const sent = [];
+  const database = {
+    prepare(sql) {
+      if (sql.includes("FROM matches")) return { all: () => rows };
+      if (sql.includes("FROM player_steam_ids")) return { all: () => [{ steam_id: "STEAM_0:1:42" }] };
+      if (sql.includes("FROM match_round_mvps")) return { all: () => [{ match_id: "match-1", mvp_player_key: "STEAM_0:1:42" }] };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+  const registry = new Map();
+  registerMatches(registry, {
+    config: { channels: { pickup: "pickup" } },
+    elo: { db: database },
+  });
+
+  await registry.get("last")({
+    mentions: { users: { first: () => ({ id: "42" }) } },
+    channel: {
+      id: "pickup",
+      send: async message => sent.push(message),
+    },
+  }, []);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], "Last 10: 🟣 🔴 🟢 🔴 🟢 🔴 🟢 🔴 🟢 🔴 W-L-T(5-5-0)");
 });
 
 test("score pairing never combines pickup and SKILLS endpoints sharing an IP", () => {
