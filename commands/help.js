@@ -42,6 +42,14 @@ function register(reg, { config }) {
         "`!elocsv` — Export your Elo history as CSV\n" +
         "`!tfcmap <mapname>` — Check if a map exists on mrclan/tfcmaps.net",
     });
+    emb.addFields({
+      name: "🎓 Bootcamp",
+      value:
+        "`!license [@player]` — TFC license card\n" +
+        "`!pb <route>` — Your best Bootcamp time on a route\n" +
+        "`!challenge` — This week's Bootcamp challenge\n" +
+        "`!cosign @player` — Mentors: co-sign a player's license",
+    });
 
 
     // ---------------- Admin Commands ----------------
