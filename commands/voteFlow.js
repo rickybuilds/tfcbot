@@ -844,7 +844,7 @@ async function finalizeMatch(
     console.log(`[playerLock] Locked ${allPlayers.length} players for match ${matchId}`);
   }
 
-  // 🔄 Arm one-time in-game !rs restart for this match
+  // Arm in-game !rs; subsequent map loads open a three-minute retry window.
   state.restartRequest = {
     matchId,
     serverIp: serverObj.ip,

@@ -8,7 +8,7 @@ const {
   recordMapEvent,
 } = require("../lib/restartRequestPolicy");
 
-test("loading the requested map disarms !rs", () => {
+test("loading the requested map opens !rs", () => {
   const state = {
     restartRequest: {
       serverIp: "108.61.128.120:27015",
@@ -24,7 +24,7 @@ test("loading the requested map disarms !rs", () => {
   });
 
   assert.equal(result.reason, "map_already_loaded");
-  assert.equal(state.restartRequest.used, true);
+  assert.equal(state.restartRequest.used, false);
   assert.equal(state.restartRequest.disarmedReason, "map_already_loaded");
   assert.equal(currentMapFor(state, "108.61.128.120:27015"), "castra_b6");
 });

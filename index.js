@@ -23,7 +23,7 @@ const { scheduleBackups } = require("./lib/backup");
 const { startSpeedrunPlayerLinkSync } = require("./services/speedrunPlayerLinkSync");
 const { determineServerKey } = require("./services/autoRecap");
 const {
-  disarmIfAlreadyOnRequestedMap,
+  reserveRestartRequest,
   normalizeIp,
   recordMapEvent,
 } = require("./lib/restartRequestPolicy");
@@ -531,13 +531,12 @@ startSpeedrunPlayerLinkSync({
       if (handled) return;
     }
 
-    // Track each server's current map. Any map load burns the pending restart:
-    // once the selected map is live, !rs must not restart it again.
+    // Each selected-map load opens a fresh three-minute restart window.
     if (evt.type === "map") {
       const disarmed = recordMapEvent(state, evt);
       if (disarmed) {
         console.log(
-          `[!rs] disarmed reason=${disarmed.reason} armed=${disarmed.armedMap || "unknown"} ` +
+          `[!rs] map_load reason=${disarmed.reason} armed=${disarmed.armedMap || "unknown"} ` +
           `current=${disarmed.currentMap} from=${evt.from}`
         );
       }
@@ -551,25 +550,12 @@ startSpeedrunPlayerLinkSync({
         return;
       }
 
-      if (rs.used) {
-        console.log(`[!rs] denied reason=already_used detail=${rs.disarmedReason || "used"}`, evt);
-        return;
-      }
-
       const wrongServer = rs.serverKey && evt.serverKey
         ? rs.serverKey !== evt.serverKey
         : normalizeIp(rs.serverIp) !== normalizeIp(evt.from);
 
       if (wrongServer) {
         console.log(`[!rs] denied reason=wrong_server armed=${rs.serverIp} from=${evt.from}`);
-        return;
-      }
-
-      const currentMap = disarmIfAlreadyOnRequestedMap(state, rs);
-      if (currentMap) {
-        console.log(
-          `[!rs] denied reason=map_already_loaded map=${currentMap} from=${evt.from}`
-        );
         return;
       }
 
@@ -588,7 +574,7 @@ startSpeedrunPlayerLinkSync({
 
       const discordId = String(link.discord_id);
 
-      if (!state.lockedPlayers?.has(discordId)) {
+      if (state.lockedPlayers?.get(discordId) !== rs.matchId) {
         console.log(
           `[!rs] denied reason=not_in_current_pickup player=${evt.player || "unknown"} ` +
           `steamid=${evt.steamid} discord_id=${discordId}`
@@ -596,11 +582,21 @@ startSpeedrunPlayerLinkSync({
         return;
       }
 
-      // Reserve the one-time request before posting to Discord or issuing RCON,
-      // so simultaneous chat packets cannot both trigger a restart.
-      rs.used = true;
-
       const serverKey = rs.serverKey || determineServerKey(rs.serverIp);
+      // The lookup above awaits: ensure this is still the active pickup.
+      if (state.restartRequest !== rs) return;
+      const denied = reserveRestartRequest(state, rs);
+      if (denied) {
+        console.log(`[!rs] denied reason=${denied}`, evt);
+        if (denied === "window_expired") {
+          try {
+            await runRconCommand(serverKey, 'say "An admin has to restart the map."');
+          } catch (err) {
+            console.error("[!rs] failed to send admin restart message:", err);
+          }
+        }
+        return;
+      }
 
       console.log(`[!rs] request player=${evt.player || "unknown"} steamid=${evt.steamid} team=${evt.team || "?"} from=${evt.from}`);
       const restartMsg =
