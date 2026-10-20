@@ -6,6 +6,7 @@ const {
   currentMapFor,
   disarmIfAlreadyOnRequestedMap,
   recordMapEvent,
+  reserveRestartRequest,
 } = require("../lib/restartRequestPolicy");
 
 test("loading the requested map opens !rs", () => {
@@ -84,6 +85,50 @@ test("!rs remains available when the server is on a different map", () => {
   };
 
   assert.equal(disarmIfAlreadyOnRequestedMap(state, rs), null);
+  assert.equal(rs.used, false);
+});
+
+test("!rs remains available after three minutes when the current map differs from the selected map", () => {
+  const now = 10 * 60 * 1000;
+  const state = {
+    hldsCurrentMaps: new Map([[
+      "108.61.128.120",
+      "pushnn",
+    ]]),
+    hldsMapLoadedAt: new Map([[
+      "108.61.128.120",
+      now - 4 * 60 * 1000,
+    ]]),
+  };
+  const rs = {
+    serverIp: "108.61.128.120:27015",
+    map: "openfire_lowgrens",
+    used: false,
+  };
+
+  assert.equal(reserveRestartRequest(state, rs, now), null);
+  assert.equal(rs.used, true);
+});
+
+test("!rs expires after three minutes when the current map is the selected map", () => {
+  const now = 10 * 60 * 1000;
+  const state = {
+    hldsCurrentMaps: new Map([[
+      "108.61.128.120",
+      "openfire_lowgrens",
+    ]]),
+    hldsMapLoadedAt: new Map([[
+      "108.61.128.120",
+      now - 4 * 60 * 1000,
+    ]]),
+  };
+  const rs = {
+    serverIp: "108.61.128.120:27015",
+    map: "openfire_lowgrens",
+    used: false,
+  };
+
+  assert.equal(reserveRestartRequest(state, rs, now), "window_expired");
   assert.equal(rs.used, false);
 });
 
