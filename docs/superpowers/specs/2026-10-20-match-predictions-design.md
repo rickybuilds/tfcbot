@@ -66,13 +66,13 @@ States: `open`, `countdown`, `closed`, `settled`, `void`, `review_required`. Onl
 
 ### Required discovery before enabling the feature
 
-The bundled real log fixtures contain `World triggered "Match_Begins_Now"` in all four files under `parser/upstream/test/`. The upstream parser recognizes it as `PrematchEnd`; `services/hldsLogs.js` currently ignores it. `L0522000.log` starts its map at 00:02:42 and emits the event at 00:04:07; `L0522001.log` starts its map at 00:19:15 and emits the event at 00:19:58. Both contain warmup kills before that event. Map load/replay-start and first kill therefore do not establish competitive start in those recorded matches.
+The bundled real log fixtures contain `World triggered "Match_Begins_Now"` in all four files under `parser/upstream/test/`. The upstream parser recognizes it as `PrematchEnd`; the original `services/hldsLogs.js` ignored it; this implementation now recognizes it. `L0522000.log` starts its map at 00:02:42 and emits the event at 00:04:07; `L0522001.log` starts its map at 00:19:15 and emits the event at 00:19:58. Both contain warmup kills before that event. Map load/replay-start and first kill therefore do not establish competitive start in those recorded matches.
 
 Before rollout, verify the existing event on every supported current server/mode, its delivery to the bot, its relation to actual playable state, and how to reconstruct match phase after reconnect. There are no configured RCON/SSH credentials in this review checkout, so present installation coverage and recovery behavior remain unverified. Do not add a plugin unless this discovery demonstrates a gap and the extension is separately reviewed. Never infer prematch duration or live phase solely from map elapsed time.
 
 The live receiver uses UDP and stamps events with receipt time. Preserve source log timestamps plus receipt time, server/log instance and ordering context where available; tolerate duplicate, delayed and reordered events. A global packet timestamp is not per-server monitoring health. Durable log evidence or an authoritative phase query must support recovery; otherwise roster-change classification is unknown and cannot authorize reopening. None of these phase signals shorten the full betting countdown.
 
-`services/rconClient.js` currently formats `status` into a map string. Presence requires a separate raw roster query, preserving existing callers' behavior.
+`services/rconClient.js` preserves the formatted `status` response for existing callers and adds a separate raw roster interface for presence.
 
 ## Roster changes and substitutions
 

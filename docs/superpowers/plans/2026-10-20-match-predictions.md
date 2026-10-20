@@ -39,12 +39,14 @@ Create:
 - `predictions/store.js`: account, bet, ledger, settlement and recovery queries using the injected DB handle.
 - `predictions/payouts.js`: pure integer payout allocation.
 - `predictions/presence.js`: raw server roster parsing, identity matching, and ordered reconciliation.
+- `predictions/phase.js`: read-only phase verification across complete logs from the persisted match anchor.
+- `predictions/integration.js`: synchronous match-write boundary and retryable card publication.
 - `predictions/service.js`: lifecycle orchestration, durable deadlines, recovery, result and roster hooks.
 - `predictions/interactions.js`: persistent button/modal routing, private responses, and private owner confirmations.
 - `predictions/messages.js`: shared match-card action row and prediction status formatting.
 - `predictions/admin.js`: owner command parsing, previews, auditing, pause/resume.
 - `predictions/index.js`: subsystem factory and public facade.
-- `test/predictionSchema.test.js`, `test/predictionPayouts.test.js`, `test/predictionStore.test.js`, `test/predictionPresence.test.js`, `test/predictionService.test.js`, `test/predictionInteractions.test.js`, `test/predictionAdmin.test.js`, `test/predictionIntegration.test.js`.
+- `test/predictionRecovery.test.js`, `test/predictionPayouts.test.js`, `test/predictionStore.test.js`, `test/predictionPresence.test.js`, `test/predictionService.test.js`, `test/predictionInteractions.test.js`, `test/predictionAdmin.test.js`, `test/predictionIntegration.test.js`.
 - `docs/match-predictions.md`: rules, setup, owner recovery and operational checks.
 
 Modify:
@@ -105,7 +107,7 @@ Factory: `createPredictions({ db, client, config, resolveSteamIds, queryServerRo
 - [ ] Write failing schema/store tests for idempotent migrations, exactly-once grants, participant exclusion across revisions, safe-integer validation, cap/edit/refund behavior, concurrent cross-match spending, duplicate operation replay and account/ledger agreement. Use temporary databases and two handles for contention tests.
 - [ ] Write payout tests for decisive/tie outcomes, 1,000/400 example, unequal stakes, one-point remainder ties, no bets, all correct, no correct bettors, and conservation across generated stake combinations. A correct bettor's returned stake is distinct from profit.
 - [ ] Add settlement/correction tests proving duplicate settlements from different command IDs are no-ops; positive-difference top-ups retain prior credits; original stakes are not debited twice; spent and unspent credits are protected; successive corrected results cannot repeat credits; all house issuance is audited; injected failures roll back completely. Cover corrections to/from no-correct-bettor refunds and zero-value operations.
-- [ ] Run `node --test test/predictionSchema.test.js test/predictionPayouts.test.js test/predictionStore.test.js`; expect new tests to fail first.
+- [ ] Run `node --test test/predictionRecovery.test.js test/predictionPayouts.test.js test/predictionStore.test.js`; expect new tests to fail first.
 - [ ] Implement additive migrations, minimal indexes, append-only ledger and pure largest-remainder math. All financial methods share the injected synchronous SQLite transaction; use guarded writes, unique operation/entry keys and settlement-version uniqueness. Keep original locked inputs and complete prior allocations in append-only version metadata, including zero-value operations. A no-correct-bettor refund is a correctable settlement, distinct from a terminal void.
 - [ ] Run the same test files; require pass and assert the escrow/account/grant invariant after each scenario.
 - [ ] Commit this task.
@@ -186,3 +188,5 @@ Approved by the user after clarification of player eligibility, refund/reset pol
 ## Implementation verification
 
 Implementation uses the approved full window and house-funded corrections. Accounts, escrow, immutable allocations, lifecycle recovery, private UI, match mutation integration, report hooks, owner controls and WAL restore are implemented and exercised by the tracked prediction tests. Current-server discovery and multi-user staging remain unchecked rollout gates; no deployment is included.
+
+Final verification: 205/205 full-suite tests pass, including 45 prediction tests. Independent whole-branch review findings were reproduced and fixed in one test-first pass, with follow-up checks for log-anchor continuity, publication recovery and async match-flow guards. See [implementation decisions and review record](../../match-predictions-implementation.md). Production/server staging remains pending; feature disabled by default.

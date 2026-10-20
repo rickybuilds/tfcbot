@@ -44,8 +44,9 @@ async function handleAdminCommand(service,message,args=[]) {
     }
     if(action==="audit"){
       const m=service.store.latest(target);
-      const rows=m?service.db.prepare("SELECT * FROM prediction_transactions WHERE market_id=? ORDER BY id").all(m.id):service.db.prepare("SELECT * FROM prediction_transactions WHERE account_id=? ORDER BY id").all(String(target));
-      await sendPrivate(message,{content:"Private prediction audit.",files:[{attachment:Buffer.from(JSON.stringify({market:m,transactions:rows},null,2)),name:"prediction-audit.txt"}]});return;
+      const markets=m?service.store.markets().filter(x=>x.match_id===m.match_id):[];
+      const rows=m?service.db.prepare("SELECT * FROM prediction_transactions WHERE market_id IN (SELECT id FROM prediction_markets WHERE match_id=?) ORDER BY id").all(m.match_id):service.db.prepare("SELECT * FROM prediction_transactions WHERE account_id=? ORDER BY id").all(String(target));
+      await sendPrivate(message,{content:"Private prediction audit.",files:[{attachment:Buffer.from(JSON.stringify({markets,transactions:rows},null,2)),name:"prediction-audit.txt"}]});return;
     }
     const payload=parse(service,args),ctx={operationKey:`preview:${message.id||randomUUID()}`,actorId:String(message.author.id),now:service.clock(),reason:payload.reason};
     const preview=service.store.operation(ctx,"owner-preview",()=>{

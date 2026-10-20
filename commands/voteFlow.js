@@ -240,7 +240,7 @@ function eligibleStreakPlayers(players, elo) {
 	  spinnerDuration,
 	  kind: "server",
 	  options: serverOptions,
-	  showVoters: true, 
+	  showVoters: true,
 	  elo,
 	  privacy,
 	  onVote: async ({ eligible, voted, voteHandle }) => {
@@ -658,7 +658,7 @@ return startVote(state, message, {
 async function finalizeMatch(
   channel, registry, settings, state,
   serverObj, mapObj, elo, privacy, matchesStore, config,
-  MODE, streaks, 
+  MODE, streaks,
   forceMatchId = null,   // 👈 new arg
   options = {}
 ) {
@@ -1038,7 +1038,7 @@ const record = {
   state.pendingTeam1Starts = null;
 
   // 👇 Reset ADL votes so they don't carry over
-  try { 
+  try {
     const adl = require("../lib/adl");
     adl.clearAll();
   } catch (e) {

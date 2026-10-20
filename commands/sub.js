@@ -176,6 +176,8 @@ async function run(message, args, deps) {
 
   const originalRow = { ...dbMatch };
   await state.predictions?.prepareTermsChange(matchId);
+  const verifiedLock = state.lockedPlayers?.get(String(newId));
+  if (verifiedLock && String(verifiedLock) !== String(matchId)) throw new Error("Incoming player became locked to another match; retry substitution");
 
   /* ------------------------------------------------------------ */
   /* IN-PROGRESS MATCH LOGIC                                      */
@@ -309,9 +311,9 @@ async function run(message, args, deps) {
   const fullIp = serverEntry
     ? `${serverEntry.host}:${serverEntry.port}`
     : "Unknown";
-	
+
   const joinUrl = serverEntry?.url || `steam://connect/${fullIp}/pickup`;
-	
+
   const oddsEmbed = buildTeamScenariosEmbed({
     matchId,
     serverName: dbMatch.server_name,

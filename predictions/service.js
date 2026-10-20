@@ -8,7 +8,7 @@ function termsKey(s) {
 class PredictionsService {
   constructor({db,client,config={},clock=Date.now,logger=console,queryServerRoster,queryServerPhase}) {
     this.store=new PredictionStore(db);this.db=db;this.client=client;this.config=config;this.clock=clock;this.logger=logger;
-    this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.timer=null;
+    this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.cardJobs=new Set();this.timer=null;
     this.queryServerRoster=queryServerRoster|| (async serverKey=>parseStatus(await require("../services/rconClient").runRawRconCommand(serverKey,"status")));
     this.queryServerPhase=queryServerPhase||require("./phase").queryServerPhase;
   }
@@ -42,24 +42,30 @@ class PredictionsService {
       }
       this.store.voidMarket({marketId:m.id,context});
       if(m.phase==="live")return this.store.market(m.id);
-      return this.store.createMarket(nextSnapshot,context);
+      const next=this.store.createMarket(nextSnapshot,context);
+      if(m.snapshot.serverKey===nextSnapshot.serverKey&&m.snapshot.mapName===nextSnapshot.mapName)this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(m.phase_evidence,next.id);
+      return this.store.market(next.id);
     });
   }
   async prepareTermsChange(matchId) {
     const m=this.store.latest(matchId);if(!m||m.phase==="live"||m.state==="void"||m.settlement_version)return;
     try{
-      const evidence=await this.queryServerPhase(m.snapshot.serverKey,m.snapshot.mapName);
+      const previousEvidence=JSON.parse(m.phase_evidence||"{}");
+      const evidence=await this.queryServerPhase(m.snapshot.serverKey,m.snapshot.mapName,{anchorLogInstance:previousEvidence.anchorLogInstance,openedAt:m.opened_at});
       // A live event received while the query was in flight always wins.
-      const latest=this.store.market(m.id);if(latest.phase==="live")return;
+      const latest=this.store.latest(matchId);if(!latest||latest.phase==="live")return;
+      if(latest.snapshot.serverKey!==m.snapshot.serverKey||latest.snapshot.mapName!==m.snapshot.mapName){this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(latest.id);return;}
       const phase=["pregame","live"].includes(evidence.phase)?evidence.phase:"unknown";
-      this.db.prepare("UPDATE prediction_markets SET phase=?,phase_evidence=?,live_at=CASE WHEN ?='live' THEN COALESCE(live_at,?) ELSE live_at END WHERE id=?").run(phase,JSON.stringify({...evidence,observedAt:this.clock()}),phase,this.clock(),m.id);
+      this.db.prepare("UPDATE prediction_markets SET phase=?,phase_evidence=?,live_at=CASE WHEN ?='live' THEN COALESCE(live_at,?) ELSE live_at END WHERE id=?").run(phase,JSON.stringify({...previousEvidence,...evidence,observedAt:this.clock()}),phase,this.clock(),latest.id);
     }catch{this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=? AND phase!='live'").run(m.id);}
   }
-  maybeStart(serverKey) {
+  maybeStart(serverKey,authoritative=false) {
     if(!this.knownServers.has(serverKey))return;
     for(const m of this.store.markets().filter(m=>m.state==="open"&&m.snapshot.serverKey===serverKey)){
-      if(this.presence.state(serverKey).mapName!==m.snapshot.mapName)continue;
-      if(rosterPresence([...m.snapshot.blueIds,...m.snapshot.redIds],m.snapshot.steamIdsByDiscordId,this.presence.get(serverKey)).allPresent){this.store.startCountdown(m.id,this.clock());this.refreshCard(m.id);}
+      if(rosterPresence([...m.snapshot.blueIds,...m.snapshot.redIds],m.snapshot.steamIdsByDiscordId,this.presence.get(serverKey)).allPresent){
+        if(!authoritative)return this.reconcileServer(serverKey);
+        this.store.startCountdown(m.id,this.clock());this.refreshCard(m.id);
+      }
     }
   }
   async reconcileServer(serverKey) {
@@ -71,8 +77,12 @@ class PredictionsService {
         if(!roster.complete)throw new Error("Incomplete roster");
         if(this.presence.reconcile(serverKey,token,roster)){
           this.knownServers.add(serverKey);
-          for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state)))if(roster.mapName!==m.snapshot.mapName){this.store.markReview(m.id,"unexpected server map");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
-          this.maybeStart(serverKey);
+          for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state))){
+            const evidence=JSON.parse(m.phase_evidence||"{}");
+            if(roster.mapName===m.snapshot.mapName)this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true}),m.id);
+            else if(evidence.mapObserved||m.phase==="live"){this.store.markReview(m.id,"unexpected server map");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
+          }
+          this.maybeStart(serverKey,true);
         }
       }catch(error){
         this.knownServers.delete(serverKey);
@@ -86,12 +96,17 @@ class PredictionsService {
     if(!evt.serverKey)return;
     this.presence.event(evt);
     for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===evt.serverKey&&!["settled","void"].includes(m.state))){
-      if(evt.type==="map"&&evt.name!==m.snapshot.mapName)this.store.markReview(m.id,"unexpected server map");
-      if(evt.type==="prediction_live_start"&&(!this.presence.state(evt.serverKey).mapName||this.presence.state(evt.serverKey).mapName===m.snapshot.mapName)){
-        this.db.prepare("UPDATE prediction_markets SET phase='live',live_at=COALESCE(live_at,?),phase_evidence=? WHERE id=?").run(evt.receivedAt||evt.ts||this.clock(),JSON.stringify({sourceTime:evt.sourceTime,logInstance:evt.logInstance,sourceKey:evt.sourceKey}),m.id);
+      const previousEvidence=JSON.parse(m.phase_evidence||"{}");
+      if(evt.type==="map"&&evt.name!==m.snapshot.mapName&&(previousEvidence.mapObserved||m.phase==="live"))this.store.markReview(m.id,"unexpected server map");
+      if(evt.type==="map"&&evt.name===m.snapshot.mapName&&m.phase!=="live"){
+        const evidence=JSON.parse(m.phase_evidence||"{}");
+        this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true,...(!evidence.anchorLogInstance&&evt.logInstance?{anchorLogInstance:evt.logInstance,anchorObservedAt:this.clock()}:{})}),m.id);
+      }
+      if(evt.type==="prediction_live_start"&&this.presence.state(evt.serverKey).mapName===m.snapshot.mapName){
+        this.db.prepare("UPDATE prediction_markets SET phase='live',live_at=COALESCE(live_at,?),phase_evidence=? WHERE id=?").run(evt.receivedAt||evt.ts||this.clock(),JSON.stringify({...previousEvidence,sourceTime:evt.sourceTime,logInstance:evt.logInstance,sourceKey:evt.sourceKey}),m.id);
       }
     }
-    this.maybeStart(evt.serverKey);
+    return this.maybeStart(evt.serverKey);
   }
   tick() {
     for(const m of this.store.markets())if(["open","countdown"].includes(m.state)&&m.closes_at!=null&&this.clock()>=m.closes_at){this.store.closeMarket(m.id,this.context("deadline"));this.refreshCard(m.id);}
@@ -99,6 +114,7 @@ class PredictionsService {
   observeOfficialResult({matchId,outcome,context=this.context("result")}) {
     const m=this.store.latest(matchId);if(!m||m.state==="void")return;
     outcome=String(outcome).toLowerCase();if(!["blue","red","tie"].includes(outcome))throw new Error("Invalid official outcome");
+    if(!m.settlement_version&&(m.closes_at==null||context.now<m.closes_at))this.store.markReview(m.id,"official result received before betting deadline");
     if((m.observed_result&&m.observed_result!==outcome)||(m.result&&m.result!==outcome))this.store.markReview(m.id,"official result changed; owner correction required");
     this.db.prepare("UPDATE prediction_markets SET observed_result=? WHERE id=?").run(outcome,m.id);
   }
@@ -118,7 +134,8 @@ class PredictionsService {
     for(const m of this.store.markets())if(["open","countdown"].includes(m.state)){this.store.markReview(m.id,"restart: connection/terms history requires owner review");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);}
     if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").get())for(const m of this.store.markets())if(m.state==="closed")this.onMatchReported({matchId:m.match_id});
     this.store.assertAccounting();
-    if(!this.timer){let cycle=0;this.timer=setInterval(()=>{this.tick();if(++cycle%15===0){const keys=new Set(this.store.markets().filter(m=>["open","countdown"].includes(m.state)).map(m=>m.snapshot.serverKey));for(const key of keys)this.reconcileServer(key);}},1000);this.timer.unref?.();}
+    await this.retryPendingCards();
+    if(!this.timer){let cycle=0;this.timer=setInterval(()=>{this.tick();if(++cycle%15===0){const keys=new Set(this.store.markets().filter(m=>["open","countdown"].includes(m.state)).map(m=>m.snapshot.serverKey));for(const key of keys)this.reconcileServer(key);this.retryPendingCards();}},1000);this.timer.unref?.();}
   }
   assertCanDeleteMatch(matchId) {
     const all=this.store.markets().filter(m=>m.match_id===String(matchId));
@@ -128,6 +145,19 @@ class PredictionsService {
     return this.store.atomic(()=>{this.assertCanDeleteMatch(matchId);for(const m of this.store.markets().filter(m=>m.match_id===String(matchId)&&m.state!=="void"&&!m.settlement_version))this.store.voidMarket({marketId:m.id,context:{...context,operationKey:`${context.operationKey}:${m.id}`}});return applyMatchWrites();});
   }
   bindMessage(id,message) {this.db.prepare("UPDATE prediction_markets SET channel_id=?,message_id=? WHERE id=?").run(String(message.channelId||message.channel?.id),String(message.id),id);}
+  queueCardPublication(id,channelId) {if(channelId)this.db.prepare("UPDATE prediction_markets SET channel_id=? WHERE id=?").run(String(channelId),id);}
+  async retryPendingCards() {
+    if(!this.client)return;
+    for(const m of this.store.markets().filter(m=>m.channel_id&&!m.message_id&&m.state!=="void"&&this.store.latest(m.match_id)?.id===m.id)){
+      if(this.cardJobs.has(m.id))continue;this.cardJobs.add(m.id);
+      try{
+        const channel=await this.client.channels.fetch(m.channel_id);
+        const update=require("./messages").cardUpdate(this.store.market(m.id),this.clock());
+        const teams=`Match ${m.match_id}\nBlue / Team 1: ${m.snapshot.blueIds.map(id=>`<@${id}>`).join(", ")}\nRed / Team 2: ${m.snapshot.redIds.map(id=>`<@${id}>`).join(", ")}\n`;
+        const message=await channel.send({...update,content:teams+update.content,allowedMentions:{parse:[]}});this.bindMessage(m.id,message);
+      }catch{this.logger.warn?.(`[predictions] pending card still unavailable for ${m.id}`);}finally{this.cardJobs.delete(m.id);}
+    }
+  }
   async refreshCard(id) {
     const m=this.store.market(id);if(!this.client||!m?.channel_id||!m.message_id)return;
     try{const channel=await this.client.channels.fetch(m.channel_id);const msg=await channel.messages.fetch(m.message_id);await msg.edit(require("./messages").cardUpdate(m,this.clock()));}catch{this.logger.warn?.(`[predictions] card update failed for market ${id}`);}

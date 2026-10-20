@@ -13,8 +13,14 @@ function commitMatchTerms({db,predictions,row,next,write,context}) {
   return db.inTransaction?apply():db.transaction(apply).immediate();
 }
 async function postMatchCard(predictions,market,channel,payload) {
+  if(market)predictions.queueCardPublication(market.id,channel.id);
   const message=await channel.send(market?{...payload,...require("./messages").cardUpdate(market,predictions.clock())}:payload);
-  if(market&&message?.id){predictions.bindMessage(market.id,message);await predictions.reconcileServer(market.snapshot.serverKey);}
+  if(market&&message?.id){
+    predictions.bindMessage(market.id,message);
+    // The normal match flow must arm its recorder/voice state without waiting
+    // for an RCON timeout. Presence confirmation continues independently.
+    predictions.reconcileServer(market.snapshot.serverKey).catch(()=>predictions.logger.warn?.("[predictions] background roster query failed"));
+  }
   return message;
 }
 module.exports={commitMatchTerms,postMatchCard};

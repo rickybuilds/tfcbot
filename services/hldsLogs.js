@@ -283,6 +283,7 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
         trackingOnly: isTrackingOnlyServerKey(serverKey),
         ts: Date.now(),
         receivedAt: Date.now(),
+        sourceTime: parsed.sourceTime || record.match(/^L (\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}):/)?.[1] || null,
         logInstance: currentLogFile,
       };
       const steamId = normalizeSteamId(evt.steamid);

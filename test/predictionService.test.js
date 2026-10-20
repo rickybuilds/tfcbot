@@ -21,6 +21,7 @@ test("pregame rebalance refunds atomically; live changes never reopen",async t=>
  assert.equal(s.store.account("spectator").balance,900);assert.equal(s.store.market(m.id).state,"open");
  s.applyRosterChange({matchId:"MATCH1",nextSnapshot:next,applyMatchWrites:()=>{}});
  assert.equal(s.store.account("spectator").balance,1000);assert.equal(s.store.latest("MATCH1").revision,2);
+ await s.onHldsEvent({serverKey:"east",type:"map",name:"shutdown2"});
  await s.onHldsEvent({serverKey:"east",type:"prediction_live_start"});
  s.applyRosterChange({matchId:"MATCH1",nextSnapshot:snapshot,applyMatchWrites:()=>{}});
  assert.equal(s.store.latest("MATCH1").state,"void");assert.equal(s.store.assertAccounting(),true);
@@ -42,6 +43,7 @@ test("changed official results freeze settlement before follow-up failures; dupl
 });
 test("wrong-map reconciliation freezes bets and unavailable phase evidence never authorizes reopening",async t=>{
  const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot);
+ s.onHldsEvent({serverKey:"east",type:"map",name:"shutdown2"});
  s.queryServerRoster=async()=>({complete:true,mapName:"other",steamIds:[]});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"review_required");
  s.queryServerPhase=async()=>({phase:"unknown"});await s.prepareTermsChange(snapshot.matchId);
  s.applyRosterChange({matchId:snapshot.matchId,nextSnapshot:{...snapshot,mapName:"other"},applyMatchWrites:()=>{}});assert.equal(s.store.latest(snapshot.matchId).revision,1);assert.equal(s.store.market(m.id).phase,"unknown");

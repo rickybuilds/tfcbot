@@ -59,3 +59,9 @@ test("finalization persists match and market before publishing buttons and stops
  db.exec("CREATE TRIGGER fail_finalize BEFORE INSERT ON matches BEGIN SELECT RAISE(ABORT,'persistence failure'); END");
  await assert.rejects(finalize(),/persistence failure/);assert.equal(published,1);
 });
+test("a substitute locked elsewhere during phase verification cannot alter roster or escrow",async t=>{
+ process.env.ADMIN_ROLE_ID="admin";const {s,db,ids,state,message,deps}=setup(t);
+ s.queryServerPhase=async()=>{state.lockedPlayers.set("999999999999999","OTHER1");return {phase:"pregame"};};
+ await assert.rejects(require("../commands/sub").run(message,[ids[0],"999999999999999","MATCH1"],deps),/locked/);
+ assert.deepEqual(JSON.parse(db.prepare("SELECT blue_ids FROM matches").get().blue_ids),ids.slice(0,4));assert.equal(s.store.account("spectator").balance,900);
+});
