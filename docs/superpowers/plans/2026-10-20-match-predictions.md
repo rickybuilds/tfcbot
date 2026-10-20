@@ -1,6 +1,6 @@
 # Match Predictions Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is a draft for user review; do not execute before approval.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Approved for isolated execution; deployment requires separate approval.
 
 **Goal:** Add private pickup predictions with auditable points, durable betting deadlines, and safe refunds and settlement inside the existing ELO SQLite database.
 

@@ -1,4 +1,4 @@
-# Match predictions — draft for review
+# Match predictions — approved design
 
 Status: approved for isolated implementation on October 20, 2026. Deployment and production data changes are not authorized.
 
@@ -6,7 +6,7 @@ Status: approved for isolated implementation on October 20, 2026. Deployment and
 
 Add low-friction, private predictions to pickup matches. Spectators earn points through predictions and players share part of losing stakes. Points are separate from ELO. Use new tables in the existing configured `elo.db`, not a new database file. Database consolidation, compression, and historical stats cleanup are separate future projects.
 
-This document includes recommended defaults for unresolved rules. They are proposals for review, not decisions the user has already approved. The accompanying implementation plan is also a draft.
+This document records the approved rules and implementation decisions. Deployment and production data changes require separate approval.
 
 ## Established requirements
 
@@ -57,7 +57,7 @@ States: `open`, `countdown`, `closed`, `settled`, `void`, `review_required`. Onl
 
 1. Persist a valid match before creating its market and attaching buttons. Capture original team IDs, offense IDs, linked Steam IDs, map, canonical server key, `team1Starts`, and payout rule version. Persist enough prediction context to recover without AutoRecap's in-memory armed state.
 2. Track distinct linked roster players currently present on the exact assigned server. Never use aliases or total server population. Support multiple Steam IDs belonging to the same Discord player without counting them twice. Require eight distinct roster identities; one Steam ID linked to two roster accounts cannot count for both. Missing or ambiguous mappings prevent automatic countdown activation and produce owner diagnostics. Presence means authenticated connection, including a roster player spectating; it does not require joining the correct physical color.
-3. Seed presence using an authoritative raw RCON `status` roster query, then maintain it with trusted HLDS connect/disconnect events and periodic reconciliation (proposed: every 15 seconds for open/countdown markets). Serialize reconciliation with events so an older response cannot overwrite newer evidence. Distinguish connection sessions and server/log instances, reject incomplete status replies, and reconcile pending authentication. A stale disconnect from an earlier session must not remove a newer connection.
+3. Seed presence using an authoritative raw RCON `status` roster query, then maintain it with trusted HLDS connect/disconnect events and periodic reconciliation (every 15 seconds for open/countdown markets). Serialize reconciliation with events so an older response cannot overwrite newer evidence. Distinguish connection sessions and server/log instances, reject incomplete status replies, and reconcile pending authentication. A stale disconnect from an earlier session must not remove a newer connection.
 4. As soon as all eight are confirmed present, persist `closes_at = now + 120000` once. If all eight are already present at market creation, start immediately. Disconnects, duplicate packets, map reloads, or duplicate callbacks do not extend the deadline.
 5. On expiry, atomically close. Every bet/edit/cancel checks the stored deadline even if the timer callback is delayed.
 6. Record authoritative competitive-start evidence for roster-change classification only. Never close early because of that event, a kill, a score, map load, or replay recording. Keep the first competitive start for the match across halftime/map reloads; it must not revert to pregame or reopen betting.
@@ -130,7 +130,7 @@ Manual and automatic results converge through `commands/admin.js`'s report path.
 - Defer individual owner refunds in V1. Users can cancel their own bets before closure; exceptional owner refunds operate on the whole market. After settlement, corrections operate on the whole settlement.
 - Cancelling/deleting an unresolved match refunds its stakes. Deleting a settled match requires owner resolution first; retain audit history. Bulk purge must refuse while prediction history would be orphaned or financial resolution is pending; it must never erase prediction history.
 
-Proposed command namespace (all financial/admin actions require configured owner ID, not the admin role):
+Owner command namespace (all financial/admin actions require configured owner ID, not the admin role):
 
 | Command | Behavior |
 |---|---|
@@ -146,11 +146,11 @@ Prefix commands cannot send ephemeral channel replies. Deliver detailed owner ou
 
 ## Operations and rollout
 
-- Proposed settings: `PREDICTIONS_ENABLED=0` by default and `PREDICTIONS_OWNER_ID`. Defer the optional private audit channel; use private owner interactions/DMs and the ledger. Starting grant, stake cap, countdown, and payout percentages are versioned constants for V1; changing them later requires an explicit migration/rule decision.
+- Settings: `PREDICTIONS_ENABLED=0` by default and `PREDICTIONS_OWNER_ID`. Defer the optional private audit channel; use private owner interactions/DMs and the ledger. Starting grant, stake cap, countdown, and payout percentages are versioned constants for V1; changing them later requires an explicit migration/rule decision.
 - No retroactive markets or awards for historical matches. Disabling creation does not abandon outstanding stakes: recovery, My Bet, refunds, deadlines, and settlement remain operational.
 - Reuse SQLite-aware compressed backups, which already include committed WAL changes. Pass the resolved `DB_PATH` / `ELO_DB` path to `scheduleBackups`; its current invocation uses the literal default `elo.db`. Verify restoring a backup preserves balances, locked stakes, and settlement versions.
 - Log market state transitions, operation IDs, and errors without ordinary users' picks/stakes in public logs. Private audit records may contain financial details.
-- Roll out disabled, test with a staging copy and controlled matches, then enable for new pickups. No production deployment is part of drafting this plan.
+- Roll out disabled, test with a staging copy and controlled matches, then enable for new pickups. Production deployment is outside the approved implementation scope.
 
 ## Acceptance criteria
 
