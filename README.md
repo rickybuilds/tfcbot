@@ -15,6 +15,8 @@ service token, persistent log archive, deployment and reprocessing commands.
 - Queue and matchmaking system
 - Elo tracking and rankings
 
+Private 4v4 match predictions are available behind `PREDICTIONS_ENABLED=0` by default. Points are separate from ELO; betting closes a full two minutes after all eight roster players are confirmed on the assigned server. See [prediction rules, owner controls and rollout checks](docs/match-predictions.md).
+
 ## Captain drafts
 
 Players can volunteer as captains while joining a pickup with `!addcap`, `++cap`,

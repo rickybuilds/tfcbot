@@ -22,7 +22,7 @@ This document includes recommended defaults for unresolved rules. They are propo
 - Tie: return correct stakes, then distribute the remainder 90% to correct bettors by stake and 10% evenly to players.
 - Owner-only financial administration, with recorded refunds and corrections.
 
-## Recommended V1 choices to review
+## Approved V1 choices
 
 1. Support existing finalized 4v4 pickups, including captain drafts and ADL when they use that roster shape. Exclude 1v1 and other roster sizes.
 2. Defer ELO-based payout odds, monthly activity bonuses, public leaderboards, website UI, and reward multipliers. Existing displayed ELO odds can remain informational. Record settled bets so bonuses can be designed later.
@@ -30,7 +30,7 @@ This document includes recommended defaults for unresolved rules. They are propo
 4. Grant the initial balance lazily on first interaction or first player reward, rather than creating accounts for all Discord members at launch. Never regrant on leaving/rejoining.
 5. Exclude full-time offense participants from betting, but give player payout shares only to the eight official roster players. Offense participants do not count toward the eight-player countdown.
 6. Any person who has appeared as a participant in any roster revision of a match remains ineligible to bet on it, even after being substituted out.
-7. A successful pregame shuffle or any effective roster/team/assigned-server/map/starting-order change follows the same refund-and-reset policy as a pregame sub. A repeated finalization with identical terms is a no-op. These additional reset triggers remain proposed policy.
+7. A successful pregame shuffle or any effective roster/team/assigned-server/map/starting-order change follows the same refund-and-reset policy as a pregame sub. A repeated finalization with identical terms is a no-op. These reset triggers are approved.
 8. After competitive play starts, a roster change voids predictions and refunds original stakes; betting never reopens during live play. A normal second-half side swap is not a roster change.
 9. No correct bettors: refund all stakes and pay no player shares. No bets: no points move. If every stake is correct, return stakes; there is no remaining pot to share.
 10. No automatic time-based fallback closing window before all eight arrive. Owner can void a stalled market. Competitive-start evidence records match phase but does not close betting, including if it arrives before all eight are confirmed. An owner cannot manually shorten the normal two-minute window; an exceptional financial void refunds the market instead.
@@ -100,14 +100,14 @@ Player recipients come from the eligible market's frozen official roster. No ELO
 
 ## Persistence in elo.db
 
-Use `elo.db`'s existing `better-sqlite3` handle for operations that must share a transaction with match changes. Add four tables; do not create a second points database.
+Use `elo.db`'s existing `better-sqlite3` handle for operations that must share a transaction with match changes. Add four financial tables plus `prediction_meta` for schema/pause metadata; do not create a second points database.
 
 | Table | Main fields and responsibilities |
 |---|---|
-| `prediction_accounts` | `discord_id` primary key, signed integer `balance`, created/updated timestamps. Cached balance must reconcile to transaction history. |
+| `prediction_accounts` | `discord_id` primary key, nonnegative integer `balance`, created/updated timestamps. Cached balance must reconcile to transaction history. |
 | `prediction_markets` | Integer market ID, match ID, revision, state, team/offense/Steam identity snapshots, server key, map, starting order, opened/countdown/closed/live timestamps, monitoring/instance evidence, close reason, rule version, latest settlement version, persisted allocation/result JSON, Discord channel/message IDs, review reason. Unique `(match_id, revision)` and at most one nonterminal market per match. |
 | `prediction_bets` | Integer bet ID, market ID, Discord ID, pick (`blue`, `red`, `tie`), integer stake, status (`active`, `cancelled`, `refunded`, `settled`), timestamps. Unique `(market_id, discord_id)`; edits update this row and ledger records preserve change history. |
-| `prediction_transactions` | Integer ID, account ID, signed amount, kind, market/bet IDs where relevant, unique operation key plus entry key, actor ID, mandatory reason for owner actions, settlement version, reversal reference, timestamp, private operation-result metadata for replay. Append-only. |
+| `prediction_transactions` | Integer ID, account ID, signed amount, kind, market/bet IDs where relevant, unique operation key plus entry key, actor ID, mandatory reason for owner actions, settlement version, timestamp, private operation-result metadata for replay. Append-only. |
 
 Point mutations are synchronous short SQLite transactions: validate current state, update account/stake/market, append ledger entries, commit. Perform Discord and RCON I/O outside transactions. Prevent concurrent overspending through guarded database writes, not just JS locks.
 
@@ -125,7 +125,7 @@ Manual and automatic results converge through `commands/admin.js`'s report path.
 
 - First valid result settles a closed eligible market once. If a result arrives before its stored betting deadline or while waiting for all eight, freeze it for review; never silently shorten the approved window or automatically settle inconsistent lifecycle evidence. Eligibility means betting respected the original deadline and accepted terms, not that all bets preceded gameplay.
 - Repeated identical reports do nothing financially.
-- A changed report/fixreport marks the market review-required; ordinary ELO admins cannot automatically authorize a financial reversal.
+- A changed report/fixreport marks the market review-required; ordinary ELO admins cannot automatically authorize a house-funded correction.
 - Owner correction recalculates entitlements from the original locked bets and credits each recipient only max(0, corrected entitlement minus cumulative settlement credits already issued). Prior credits remain theirs, spent or unspent. Record each additional credit and the matching house issuance atomically, with actor/reason/result version and an immutable allocation snapshot. A no-correct-bettor refund is a correctable settlement, distinct from a terminal void.
 - Defer individual owner refunds in V1. Users can cancel their own bets before closure; exceptional owner refunds operate on the whole market. After settlement, corrections operate on the whole settlement.
 - Cancelling/deleting an unresolved match refunds its stakes. Deleting a settled match requires owner resolution first; retain audit history. Bulk purge must refuse while prediction history would be orphaned or financial resolution is pending; it must never erase prediction history.
@@ -135,10 +135,11 @@ Proposed command namespace (all financial/admin actions require configured owner
 | Command | Behavior |
 |---|---|
 | `!pred status <matchId>` | Private owner diagnostic: state, deadline, revisions, totals, result/review status. |
-| `!pred void <matchId> <reason>` | Void an unresolved market and refund stakes. Settled markets use correction/reversal handling. |
+| `!pred void <matchId> <reason>` | Void an unresolved market and refund stakes. Settled markets use house-funded correction handling. |
 | `!pred correct <matchId> <blue|red|tie> <reason>` | Correct prediction settlement against the official recorded result; refuse a mismatch and direct owner to correct the match report first. |
 | `!pred adjust <user> <signedAmount> <reason>` | Explicit recorded grant/deduction; signed safe integer, preview before confirmation. |
 | `!pred audit <matchId|user>` | Private ledger and settlement details for the owner. |
+| `!pred retain <matchId> <reason>` | Authorize deleting a settled match while retaining its financial history. |
 | `!pred pause <reason>` / `!pred resume` | Persistently pause new/edited bets globally. Cancellation before lock, refunds, deadlines, and settlement continue; resume never extends deadlines. |
 
 Prefix commands cannot send ephemeral channel replies. Deliver detailed owner output and confirmation through DM, or an owner-only ephemeral interaction; if private delivery fails, do not post private data publicly. Mutations use a preview and owner-bound confirmation button; already-expired deadlines are still enforced at confirmation. Confirmations expire after 60 seconds and revalidate current versions. A missing owner ID disables financial administration.

@@ -154,7 +154,7 @@ Factory: `createPredictions({ db, client, config, resolveSteamIds, queryServerRo
 
 **Files:** `predictions/admin.js`, owner-confirmation routing, `commands/admin.js`, `commands/purgematches.js`, relevant deletion entry points, admin/integration tests.
 
-**Consumes:** persisted official results, store reversal methods, lifecycle facade. **Produces:** common report settlement hook, private owner command suite, safe deletion/purge behavior.
+**Consumes:** persisted official results, store house-funded correction methods, lifecycle facade. **Produces:** common report settlement hook, private owner command suite, safe deletion/purge behavior.
 
 - [ ] Write failing tests covering manual/automatic identical results, changed ordinary report as well as fixreport requiring review, Gentle ELO delay without prediction delay, and startup settlement retry after a saved result. A report before the two-minute deadline must freeze for review rather than silently shortening the window. Inject failures after official result persistence, during ELO scheduling and before Discord acknowledgement; result observation/review invalidation must already be durable. Different report interaction IDs cannot cause duplicate payouts.
 - [ ] Add owner tests: admin role alone refused; missing owner configuration refused; owner-bound preview expires after 60 seconds; replayed confirmation is idempotent; changed versions invalidate preview; required reason; private delivery failure does not post publicly. Cover status/void/correct/adjust/audit/pause/resume and reject correction outcomes inconsistent with the official match. Defer individual owner refunds and manual early-close controls; whole-market void handles exceptional refunds.
@@ -182,3 +182,7 @@ Factory: `createPredictions({ db, client, config, resolveSteamIds, queryServerRo
 ## Review and execution handoff
 
 Approved by the user after clarification of player eligibility, refund/reset policy, no-correct-bettor refunds and house-funded corrections. Execute inline using executing-plans and TDD on codex/match-predictions. Keep the feature disabled by default. Deployment, merge, production data mutation and enablement remain outside authorization. Current-server verification and staging are rollout gates; unavailable credentials do not prevent isolated implementation.
+
+## Implementation verification
+
+Implementation uses the approved full window and house-funded corrections. Accounts, escrow, immutable allocations, lifecycle recovery, private UI, match mutation integration, report hooks, owner controls and WAL restore are implemented and exercised by the tracked prediction tests. Current-server discovery and multi-user staging remain unchecked rollout gates; no deployment is included.

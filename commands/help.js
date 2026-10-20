@@ -44,6 +44,11 @@ function register(reg, { config }) {
     });
 
 
+    if (config.predictionsEnabled) emb.addFields({
+      name: "Private Match Predictions",
+      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. My Bet privately shows your pick and points, with editing/cancellation before closure. The full two-minute window begins when all eight roster players are confirmed on the assigned server. Participants cannot bet.",
+    });
+
     // ---------------- Admin Commands ----------------
     if (admin) {
       emb.addFields(

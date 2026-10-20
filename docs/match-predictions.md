@@ -1,0 +1,63 @@
+# Private match predictions
+
+Predictions use points completely separate from ELO. The feature is disabled by default. This branch does not authorize deployment or changes to production data.
+
+## Player rules
+
+- Every Discord account receives 1,000 points once, on its first private balance interaction or player reward.
+- Use Blue / Team 1, Red / Team 2, or Tie on the match card. One active pick, with a whole-number stake from 1 to 250 points. Editing replaces the previous stake. Funds are reserved immediately.
+- My Bet privately shows the pick, stake, available balance and market state. Change or cancel before closure; cancellation refunds the stake.
+- The official eight, full-time offense participants and anyone substituted out of this match cannot bet. Only the official eight receive player rewards.
+- Predictions open after teams are finalized. The bot confirms roster Steam IDs on the exact assigned server, including players already connected. Full-time offense and other spectators do not count toward eight; an official player spectating still counts as connected.
+- All eight confirmed present starts one full two-minute window. Gameplay does not shorten it. Disconnects, duplicate events and restarts do not extend the deadline.
+- Successful pregame substitutions, shuffles, map changes and starting-order changes refund the old market and create updated controls. Substitutions use the final balanced teams; captain substitutions preserve the outgoing player's team. Changes during live play refund without reopening.
+- Original Blue / Team 1 and Red / Team 2 identities remain fixed across halftime colors.
+
+## Payouts and corrections
+
+Correct bettors first receive their stakes back. The remaining pot is allocated 70% proportionally to correct stakes, 25% equally to the winning four and 5% equally to the losing four. A tie uses 90% for correct bettors and 10% equally among the eight players. Integer rounding uses largest remainders with stable tie breaking, conserving the full pot. If nobody picked correctly, all stakes are refunded and there are no player rewards. No bets means no rewards.
+
+If an owner corrects a result, previously credited points stay with their recipients, spent or unspent. Each person receives only any positive difference between their corrected entitlement and their cumulative settlement credits. Additional points are explicitly funded by the house and recorded in the ledger. Returning to a previously used result cannot repeat already-issued credits. There are no forced clawbacks or negative balances.
+
+## Configuration and rollout gates
+
+```env
+PREDICTIONS_ENABLED=0
+PREDICTIONS_OWNER_ID=your_discord_user_id
+```
+
+Predictions use the existing resolved `DB_PATH` / `ELO_DB` / `elo.db` handle. Five additive tables hold accounts, markets, bets, append-only transactions, and small schema/pause metadata. No database consolidation is involved. Existing SQLite-aware backups now receive the configured ELO path.
+
+Before separately authorized enablement:
+
+1. Confirm raw RCON `status` output on every supported pickup server, including its complete roster footer. Missing/ambiguous Steam links must not trigger eight.
+2. Verify `World triggered "Match_Begins_Now"` on the current servers and modes. The four bundled real logs demonstrate that this differs from map load and warmup kills. This event tracks match phase; it never closes betting early.
+3. Configure a unique remote log directory for each competitive server using `HL_REMOTE_LOG_DIR_<SERVERKEY>` (or the existing shared setting only when it uniquely identifies that endpoint). The existing `HL_SSH_*` credentials must allow read-only access. Before material match changes, the bot reads the latest complete log to check phase, complementing lossy UDP delivery. An absent, shared, oversized, incomplete or wrong-map log yields unknown phase and cannot authorize reopening.
+4. Exercise normal/tied matches, standard and captain substitutions, shuffles, map/order changes, both halftime color policies, report corrections, duplicate confirmations, bot restarts, monitoring loss and blocked DMs on staging. Use separate Discord users to verify privacy.
+5. Restore an SQLite backup and reconcile accounts, stakes, original deadlines and settlement versions.
+
+Current-server credentials were unavailable during development. Unit/fixture tests do not substitute for those operational checks. No plugin installation or server configuration mutation is included.
+
+## Owner commands
+
+Only `PREDICTIONS_OWNER_ID` can use these controls; the Discord admin role alone does not qualify. Missing owner configuration disables financial administration. Commands work in DM as well as the normal command router. Financial output and confirmation are delivered privately; blocked DMs never cause a public fallback. Use raw Discord IDs or mentions for account targets.
+
+| Command | Action |
+|---|---|
+| `!pred status <matchId>` | Inspect current state, revision, phase, deadline and review reason. |
+| `!pred audit <matchId\|userId>` | Download private transaction history and market details. |
+| `!pred void <matchId> <reason>` | Refund and void an unsettled or reviewed market. |
+| `!pred correct <matchId> <blue\|red\|tie> <reason>` | Apply a house-funded correction matching the completed official report. Fix the report first. |
+| `!pred adjust <userId> <signedPoints> <reason>` | Audited grant/deduction. Deductions cannot create a negative balance. |
+| `!pred pause <reason>` / `!pred resume <reason>` | Persistently stop/resume new and edited bets. Deadlines, pre-lock cancellation, refunds and settlement continue. |
+| `!pred retain <matchId> <reason>` | Explicitly allow deleting a settled match while preserving all financial snapshots and history. |
+
+Mutations require an owner-bound confirmation expiring after 60 seconds. Changed relevant state invalidates the preview. Repeating the same confirmation returns its stored result. There is no manual early-close command or selective owner refund in V1.
+
+## Recovery and rollback
+
+The database is authoritative even when Discord delivery fails. On restart, expired deadlines close immediately. Unfinished open/countdown markets with uncertain connection history freeze for review; their original deadline is retained. Do not infer the first all-eight time from a reconnect poll or grant a fresh window. The owner can void/refund a reviewed unsettled market. Completed official results retry settlement independently of delayed ELO writes. Changed reports freeze financial settlement for owner correction.
+
+Unexpected maps, incomplete presence monitoring and unknown phase prevent automatic reopening. Original locked bet inputs, allocations, grants, corrections and house funding remain auditable. Match deletion/purge cannot erase unresolved financial dependencies, and deleting an allowed match retains prediction history. Identity merge tools refuse existing prediction accounts pending a dedicated merge policy.
+
+For rollout rollback, disable creation with `PREDICTIONS_ENABLED=0` while leaving this subsystem installed: My Bet, deadlines, owner voids and outstanding settlement must remain available. Resolve outstanding stakes before removing code. No historical matches receive retroactive markets or rewards.
