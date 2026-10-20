@@ -144,11 +144,12 @@ function getPlayerGameRecord(games) {
   return `${record.win}-${record.loss}-${record.tie}`;
 }
 
-function formatPlayerLastGames(games) {
+function formatPlayerLastGames(games, playerId) {
   const indicators = games
     .map(game => getPlayerGameButtonSpec(game.state).emoji)
     .join(" ");
-  return `Last ${games.length}: ${indicators} W-L-T(${getPlayerGameRecord(games)})`;
+  const profileUrl = `https://nonamepickup.servehalflife.com/player.html?id=${encodeURIComponent(playerId)}`;
+  return `Last ${games.length}: ${indicators} [W-L-T(${getPlayerGameRecord(games)})](<${profileUrl}>)`;
 }
 
 function getPlayerLastGames(database, playerId) {
@@ -249,7 +250,7 @@ function register(reg, deps = {}) {
         return message.channel.send(`No completed games found for <@${target.id}>.`);
       }
 
-      await message.channel.send(formatPlayerLastGames(games));
+      await message.channel.send(formatPlayerLastGames(games, target.id));
     } catch (e) {
       console.error("[lastplayer]", e);
       await message.channel.send("Error fetching player games.");

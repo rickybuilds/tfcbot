@@ -163,3 +163,6 @@ ChatGPT Image Sep 29, 2026, 02_21_30 AM.png
 !/test/noNameStatsImport.test.js
 !/test/parseNoNameLogs.test.js
 docs/elo-monthly-bonus-audit-2026-10-20.md
+
+# Local tests
+/test/
