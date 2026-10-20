@@ -76,6 +76,37 @@ validated before the retry limit, it safely applies the equal 25% split. A
 rating guard refuses to apply a delayed result if another rating change has
 already moved a player's rating.
 
+## Streak and ADL winner bonus
+
+Set the shared streak and ADL winner bonus in the bot's `.env`:
+
+```env
+ELO_BONUS_PERCENT=50
+```
+
+Use `25` to return to a 25% bonus, or `0` for no extra winnings. Restart the
+bot after changing it. Accepted values are 0–100; missing, blank, invalid,
+negative, or above-100 values default to 50.
+
+Streak-triggered matches and ADL matches award winners the configured percentage
+of extra normal Elo (50% = 1.5×), rounded to whole points before performance allocation. The normal
+rating cap is applied before the bonus. Losing deductions are unchanged;
+draws receive no winner bonus. ADL and streak bonuses do not stack.
+
+The bot stores the configured multiplier (`1.5` for 50%) for new bonus matches. Old recorded
+multiplier values remain in the database, but re-reporting an old bonus match
+uses the current configured policy. Already-prepared live results retain their saved
+pools; finish pending results before rollout if a clean policy boundary is needed.
+
+`ADL_ELO_MULTIPLIER`, `ADL_ELO_MAX_DELTA`, `HOTSTREAK_MAX_DELTA`,
+`HOTSTREAK_STACKING_POLICY`, and `HOTSTREAK_WINNERS_ONLY` are obsolete and can
+be removed from the runtime environment after deploying this version.
+
+Keep `ELO_K` and the Gentle performance settings at their desired values;
+this change does not configure either. With K=40 and equally rated teams,
+the winning pool with a 50% bonus is +120 and the losing pool is -80, creating +40 net Elo
+instead of the old +60 for a capped +140 winning pool.
+
 ## Tech Stack
 - Node.js
 - discord.js

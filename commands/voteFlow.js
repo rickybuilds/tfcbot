@@ -63,6 +63,7 @@ const { rankFromRating } = require("../lib/elo");
 
 /* --------------------------- streak bonus check --------------------------- */
 const { WinStreakStore } = require("../lib/winstreak");
+const { WINNER_BONUS_MULTIPLIER, WINNER_BONUS_PERCENT } = require("../lib/modeElo");
 
 function eligibleStreakPlayers(players, elo) {
   const STREAK_TRIGGER_WINS = Number(process.env.STREAK_TRIGGER_WINS || 5);
@@ -765,9 +766,8 @@ async function finalizeMatch(
 	try {
 	  const elig = eligibleStreakPlayers([...bal.blue, ...bal.red], elo);
 	  if (elig.length > 0) {
-		const mult = Math.floor(Math.random() * 4) + 2; // 2..5x
 		bonus = {
-		  multiplier: mult,
+		  multiplier: WINNER_BONUS_MULTIPLIER,
 		  type: "WINNER_ONLY",
 		  triggeredBy: elig.map(e => `${e.name} (${e.streak} wins)`),
 		};
@@ -776,9 +776,9 @@ async function finalizeMatch(
 	  console.error("[Streak bonus check failed]", err);
 	}
 
-  // 👉 Force ADL = 3× Elo
+  // ADL uses the same configured winner bonus; bonuses do not stack.
 	if (MODE === "ADL") {
-	  bonus = { multiplier: 3, type: "WINNER_ONLY", triggeredBy: ["ADL Mode"] };
+	  bonus = { multiplier: WINNER_BONUS_MULTIPLIER, type: "WINNER_ONLY", triggeredBy: ["ADL Mode"] };
 	}
 
 	// Build "Match Ready" embed
@@ -824,7 +824,7 @@ async function finalizeMatch(
     await channel.send({
 	  content:
 		`🔥 **BONUS ELO ENABLED** (triggered by ${reason})\n` +
-		`👀 Bonus Elo is active. Winner gains are capped at **+35 Elo**.`
+		`👀 Winners receive **${WINNER_BONUS_PERCENT}% extra Elo** before performance allocation. Losers take regular Elo losses.`
 	});
   }
 
