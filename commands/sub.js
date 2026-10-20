@@ -146,6 +146,11 @@ async function run(message, args, deps) {
 
   const isCompleted = dbMatch.status === "completed";
 
+  if (oldId === newId) return message.channel.send("No roster change was made.");
+  if ([...blueIds, ...redIds].includes(newId)) return message.channel.send("Incoming player is already on the official roster.");
+  const incomingLock = state.lockedPlayers?.get(String(newId));
+  if (incomingLock && String(incomingLock) !== String(matchId)) return message.channel.send("Incoming player is locked to another match.");
+
   /* ------------------------------------------------------------ */
   /* COMPLETED MATCH LOGIC                                        */
   /* ------------------------------------------------------------ */
@@ -157,22 +162,20 @@ async function run(message, args, deps) {
   }
 
   if (isCompleted && force) {
-    // Replace in DB
-    elo.db.prepare(`
-      UPDATE matches
-      SET blue_ids = ?,
-          red_ids  = ?
-      WHERE match_id=?
-    `).run(
-      JSON.stringify(blueIds.map(id => (id === oldId ? newId : id))),
-      JSON.stringify(redIds.map(id => (id === oldId ? newId : id))),
-      matchId
-    );
+    const nextRow = { ...dbMatch,
+      blue_ids: JSON.stringify(blueIds.map(id => id === oldId ? newId : id)),
+      red_ids: JSON.stringify(redIds.map(id => id === oldId ? newId : id)),
+    };
+    require("../predictions/integration").commitMatchTerms({db:elo.db,predictions:state.predictions,row:dbMatch,next:nextRow,
+      write:()=>elo.db.prepare("UPDATE matches SET blue_ids=?,red_ids=? WHERE match_id=?").run(nextRow.blue_ids,nextRow.red_ids,matchId)});
 
     return message.channel.send(
       `✅ Forced substitution in completed match \`${matchId}\`: <@${oldId}> → <@${newId}>`
     );
   }
+
+  const originalRow = { ...dbMatch };
+  await state.predictions?.prepareTermsChange(matchId);
 
   /* ------------------------------------------------------------ */
   /* IN-PROGRESS MATCH LOGIC                                      */
@@ -181,30 +184,6 @@ async function run(message, args, deps) {
 	// ------------------------------------------------------------
 	// 🔒 Player lock maintenance for !sub (SAFE)
 	// ------------------------------------------------------------
-	if (state?.lockedPlayers) {
-	  const oldPid = String(oldId);
-	  const newPid = String(newId);
-	  const mid    = String(matchId);
-
-	  // unlock OUT player (only if locked to this match)
-	  const oldCurrent = state.lockedPlayers.get(oldPid);
-	  if (String(oldCurrent) === mid) {
-		state.lockedPlayers.delete(oldPid);
-		console.log(`[playerLock] ✅ !sub unlocked OUT player ${oldPid} from match ${mid}`);
-	  } else {
-		console.log(`[playerLock] !sub did not unlock ${oldPid} (locked to ${oldCurrent}, not ${mid})`);
-	  }
-
-	  // lock IN player, but don't override if they're locked elsewhere
-	  const newCurrent = state.lockedPlayers.get(newPid);
-	  if (newCurrent && String(newCurrent) !== mid) {
-		console.log(`[playerLock] ❌ Not locking IN player ${newPid}: already locked to match ${newCurrent}`);
-	  } else {
-		state.lockedPlayers.set(newPid, mid);
-		console.log(`[playerLock] 🔒 !sub locked IN player ${newPid} to match ${mid}`);
-	  }
-	}
-
   // Swap
   if (inBlue) {
     dbMatch.blue_ids = JSON.stringify(
@@ -218,10 +197,8 @@ async function run(message, args, deps) {
     );
   }
 
-  // Save updated teams
-  elo.db.prepare(`
-    UPDATE matches SET blue_ids=?, red_ids=? WHERE match_id=?
-  `).run(dbMatch.blue_ids, dbMatch.red_ids, matchId);
+  // Prepare all changes before committing roster and prediction state together.
+  let nextOffenseIds = dbMatch.offense_ids || null;
 
   // A full-time offense player subbed into a regular slot is now rated
   // like any other roster player, so drop their offense entry.
@@ -230,10 +207,7 @@ async function run(message, args, deps) {
       const offense = JSON.parse(dbMatch.offense_ids);
       const strip = ids => (Array.isArray(ids) ? ids : []).filter(id => String(id) !== String(newId));
       const next = { blue: strip(offense?.blue), red: strip(offense?.red) };
-      elo.db.prepare(`UPDATE matches SET offense_ids=? WHERE match_id=?`).run(
-        next.blue.length || next.red.length ? JSON.stringify(next) : null,
-        matchId
-      );
+      nextOffenseIds = next.blue.length || next.red.length ? JSON.stringify(next) : null;
     } catch (e) {
       console.warn(`[sub] Could not update offense_ids for ${matchId}:`, e.message);
     }
@@ -278,16 +252,36 @@ async function run(message, args, deps) {
 	if (!matchColumns.some(c => c.name === "team_scenarios")) {
 	  elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
 	}
-	elo.db.prepare(`
-	  UPDATE matches
-	  SET blue_ids = ?, red_ids = ?, team_scenarios = ?
-	  WHERE match_id = ?
-	`).run(
-	  JSON.stringify(newBlueIds),
-	  JSON.stringify(newRedIds),
-	  teamScenarioState,
-	  matchId
-	);
+  const nextRow = { ...originalRow, blue_ids: JSON.stringify(newBlueIds), red_ids: JSON.stringify(newRedIds), offense_ids: nextOffenseIds };
+  const market = require("../predictions/integration").commitMatchTerms({
+    db: elo.db, predictions: state.predictions, row: originalRow, next: nextRow,
+    write: () => elo.db.prepare("UPDATE matches SET blue_ids=?,red_ids=?,team_scenarios=?,offense_ids=? WHERE match_id=?").run(nextRow.blue_ids,nextRow.red_ids,teamScenarioState,nextOffenseIds,matchId),
+  });
+	if (state?.lockedPlayers) {
+	  const oldPid = String(oldId);
+	  const newPid = String(newId);
+	  const mid    = String(matchId);
+
+	  // unlock OUT player (only if locked to this match)
+	  const oldCurrent = state.lockedPlayers.get(oldPid);
+	  if (String(oldCurrent) === mid) {
+		state.lockedPlayers.delete(oldPid);
+		console.log(`[playerLock] ✅ !sub unlocked OUT player ${oldPid} from match ${mid}`);
+	  } else {
+		console.log(`[playerLock] !sub did not unlock ${oldPid} (locked to ${oldCurrent}, not ${mid})`);
+	  }
+
+	  // lock IN player, but don't override if they're locked elsewhere
+	  const newCurrent = state.lockedPlayers.get(newPid);
+	  if (newCurrent && String(newCurrent) !== mid) {
+		console.log(`[playerLock] ❌ Not locking IN player ${newPid}: already locked to match ${newCurrent}`);
+	  } else {
+		state.lockedPlayers.set(newPid, mid);
+		console.log(`[playerLock] 🔒 !sub locked IN player ${newPid} to match ${mid}`);
+	  }
+	}
+
+
 
 	// Update in-memory DB match object
 	dbMatch.blue_ids = JSON.stringify(newBlueIds);
@@ -332,68 +326,7 @@ async function run(message, args, deps) {
     },
   });
 
-  // Confirmation in pickup channel
-  await message.channel.send(
-    `🔄 Substitution applied in match \`${matchId}\`:\n<@${oldId}> → <@${newId}>\n` +
-    (captainsMatch
-      ? `👑 Captain-drafted teams preserved; the substitute stays on **${inBlue ? "Team 1 🔵" : "Team 2 🔴"}**.\n`
-      : "") +
-    `♻️ Odds recalculated.`
-  );
-
-  // Full odds embed → odds channel
-  const oddsChannel = message.guild.channels.cache.get(process.env.ODDS_CHANNEL_ID);
-  if (oddsChannel) {
-    await oddsChannel.send({ embeds: [oddsEmbed] });
-  }
-
-  /* ------------------------------------------------------------ */
-  /* Regenerate **Match Ready** using voteFlow.finalizeMatch()    */
-  /* ------------------------------------------------------------ */
-
-  const pickupChannel = message.guild.channels.cache.get(process.env.PICKUP_CHANNEL_ID);
-
-	if (pickupChannel) {
-	  const mapConfig = [...(state.maps || []), ...(state.adlMaps || [])]
-	    .find(m => String(m.name).toLowerCase() === String(dbMatch.map_name).toLowerCase()) ||
-	    { name: dbMatch.map_name };
-	  const team1Starts = resolveTeam1Starts(
-	    readTeam1Starts(settings),
-	    mapConfig,
-	    dbMatch.mode
-	  ).team1Starts;
-	  const teamStartPlan = getTeamStartPlan(team1Starts);
-	  const embed = {
-		color: 0x57f287,
-		title: `Match Updated — ${dbMatch.server_name} — ${dbMatch.map_name}`,
-		description:
-		  `**Match ID:** ${matchId}\n` +
-		  `Server: **${dbMatch.server_name}**\n` +
-		  `IP: **${fullIp}**\n` +
-		  `Password: pickup\n` +
-		  `Join: ${joinUrl}\n` +
-		  `Map: **${dbMatch.map_name}**\n` +
-		  `Mode: **${dbMatch.mode || "STANDARD"}**\n\n` +
-		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`,
-		fields: [
-		  {
-			name: `Team 1 🔵 — Join BLUE (${team1Starts})`,
-			value: rebuiltBlue.map(p => p.name).join("\n") || "_empty_",
-			inline: true,
-		  },
-		  {
-			name: `Team 2 🔴 — Join RED (${teamStartPlan.team2Starts})`,
-			value: rebuiltRed.map(p => p.name).join("\n") || "_empty_",
-			inline: true,
-		  },
-		],
-		timestamp: new Date(),
-	  };
-
-	  await pickupChannel.send({ embeds: [embed] });
-	}
-
- // ------------------------------------------------------------
+// ------------------------------------------------------------
 // Update memory state
 // ------------------------------------------------------------
 
@@ -426,7 +359,70 @@ if (captainsMatch) {
   match.captains = replaceCaptainId(match.captains, oldId, newId);
 }
 
-console.log(`[sub] Updated ${matchId}: ${oldId} → ${newId}`);
+
+  if (market) await state.predictions.refreshCard(market.id);
+  // Confirmation in pickup channel
+  await message.channel.send(
+    `🔄 Substitution applied in match \`${matchId}\`:\n<@${oldId}> → <@${newId}>\n` +
+    (captainsMatch
+      ? `👑 Captain-drafted teams preserved; the substitute stays on **${inBlue ? "Team 1 🔵" : "Team 2 🔴"}**.\n`
+      : "") +
+    `♻️ Odds recalculated.`
+  );
+
+  // Full odds embed → odds channel
+  const oddsChannel = message.guild.channels.cache.get(process.env.ODDS_CHANNEL_ID);
+  if (oddsChannel) {
+    await oddsChannel.send({ embeds: [oddsEmbed] });
+  }
+
+  /* ------------------------------------------------------------ */
+  /* Regenerate **Match Ready** using voteFlow.finalizeMatch()    */
+  /* ------------------------------------------------------------ */
+
+  const pickupChannel = message.guild.channels.cache.get(process.env.PICKUP_CHANNEL_ID);
+
+	if (pickupChannel) {
+	  const mapConfig = [...(state.maps || []), ...(state.adlMaps || [])]
+	    .find(m => String(m.name).toLowerCase() === String(dbMatch.map_name).toLowerCase()) ||
+	    { name: dbMatch.map_name };
+	  const team1Starts = state.predictions?.store.latest(matchId)?.snapshot.team1Starts || resolveTeam1Starts(
+	    readTeam1Starts(settings),
+	    mapConfig,
+	    dbMatch.mode
+	  ).team1Starts;
+	  const teamStartPlan = getTeamStartPlan(team1Starts);
+	  const embed = {
+		color: 0x57f287,
+		title: `Match Updated — ${dbMatch.server_name} — ${dbMatch.map_name}`,
+		description:
+		  `**Match ID:** ${matchId}\n` +
+		  `Server: **${dbMatch.server_name}**\n` +
+		  `IP: **${fullIp}**\n` +
+		  `Password: pickup\n` +
+		  `Join: ${joinUrl}\n` +
+		  `Map: **${dbMatch.map_name}**\n` +
+		  `Mode: **${dbMatch.mode || "STANDARD"}**\n\n` +
+		  `🌐 [NoNamePickup Website](https://nonamepickup.servehalflife.com/)\n`,
+		fields: [
+		  {
+			name: `Team 1 🔵 — Join BLUE (${team1Starts})`,
+			value: rebuiltBlue.map(p => p.name).join("\n") || "_empty_",
+			inline: true,
+		  },
+		  {
+			name: `Team 2 🔴 — Join RED (${teamStartPlan.team2Starts})`,
+			value: rebuiltRed.map(p => p.name).join("\n") || "_empty_",
+			inline: true,
+		  },
+		],
+		timestamp: new Date(),
+	  };
+
+	  await require("../predictions/integration").postMatchCard(state.predictions, market, pickupChannel, { embeds: [embed] });
+	}
+
+ console.log(`[sub] Updated ${matchId}: ${oldId} → ${newId}`);
 }
 module.exports = {
   run,

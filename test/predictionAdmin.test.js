@@ -1,0 +1,25 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),Database=require("better-sqlite3");
+const {createPredictions}=require("../predictions");
+function setup(t){let now=1000;const db=new Database(":memory:");t.after(()=>db.close());const s=createPredictions({db,config:{predictionsEnabled:true,predictionsOwnerId:"owner"},clock:()=>now});const m=s.onMatchFinalized({matchId:"MATCH1",blueIds:["b1","b2","b3","b4"],redIds:["r1","r2","r3","r4"],offenseIds:[],steamIdsByDiscordId:{},serverKey:"east",mapName:"shutdown2",team1Starts:"offense"});const privateMessages=[],publicMessages=[];const message={id:"command",author:{id:"owner",send:async p=>privateMessages.push(p)},channel:{send:async p=>publicMessages.push(p)}};return {s,db,m,message,privateMessages,publicMessages,time:n=>now=n};}
+function confirmation(payload,id="confirm",user="owner") {const customId=payload.components[0].components[0].data.custom_id;return {id,customId,user:{id:user},reply:async function(p){this.response=p;}};}
+test("financial controls require the configured owner; admin permission is insufficient",async t=>{
+ const {s,message,privateMessages,publicMessages}=setup(t);message.author.id="admin";await s.handleAdminCommand(message,["adjust","u","100","test"]);assert.equal(s.store.account("u"),undefined);assert.equal(publicMessages.length,0);assert.match(privateMessages[0].content,/owner/i);
+});
+test("private confirmed adjustment is idempotent and confirmation is owner-bound",async t=>{
+ const {s,message,privateMessages,publicMessages}=setup(t);await s.handleAdminCommand(message,["adjust","u","100","test"]);assert.equal(s.store.account("u"),undefined);
+ const wrong=confirmation(privateMessages[0],"wrong","admin");await s.handleInteraction(wrong);assert.equal(s.store.account("u"),undefined);
+ const i=confirmation(privateMessages[0]);await s.handleInteraction(i);assert.equal(s.store.account("u").balance,1100);
+ await s.handleInteraction(confirmation(privateMessages[0]));assert.equal(s.store.account("u").balance,1100);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
+});
+test("expired and stale previews cannot mutate finances, and DM failure never leaks publicly",async t=>{
+ const {s,message,privateMessages,publicMessages,time}=setup(t);await s.handleAdminCommand(message,["void","MATCH1","test"]);
+ time(61000);const i=confirmation(privateMessages[0]);await s.handleInteraction(i);assert.match(i.response.content,/expired/i);assert.equal(s.store.latest("MATCH1").state,"open");
+ message.id="other";message.author.send=async()=>{throw new Error("DM blocked");};await s.handleAdminCommand(message,["audit","MATCH1"]);assert.equal(publicMessages.length,0);
+});
+test("result correction requires official outcome and funds all extra credits through house issuance",async t=>{
+ const {s,db,m,message,privateMessages}=setup(t);db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT)");db.prepare("INSERT INTO matches VALUES ('MATCH1','RED','completed')").run();
+ s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:200,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:200,context:s.context("bet","v")});s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
+ await s.handleAdminCommand(message,["correct","MATCH1","blue","wrong"]);assert.match(privateMessages[0].content,/official/i);
+ message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1140);assert.equal(s.store.account("v").balance,1140);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
+});

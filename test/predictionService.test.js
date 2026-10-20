@@ -40,3 +40,9 @@ test("changed official results freeze settlement before follow-up failures; dupl
  const balance=s.store.account("u").balance;s.onMatchReported({matchId:snapshot.matchId});assert.equal(s.store.account("u").balance,balance);
  s.observeOfficialResult({matchId:snapshot.matchId,outcome:"red"});assert.equal(s.store.market(m.id).state,"review_required");
 });
+test("wrong-map reconciliation freezes bets and unavailable phase evidence never authorizes reopening",async t=>{
+ const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot);
+ s.queryServerRoster=async()=>({complete:true,mapName:"other",steamIds:[]});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"review_required");
+ s.queryServerPhase=async()=>({phase:"unknown"});await s.prepareTermsChange(snapshot.matchId);
+ s.applyRosterChange({matchId:snapshot.matchId,nextSnapshot:{...snapshot,mapName:"other"},applyMatchWrites:()=>{}});assert.equal(s.store.latest(snapshot.matchId).revision,1);assert.equal(s.store.market(m.id).phase,"unknown");
+});

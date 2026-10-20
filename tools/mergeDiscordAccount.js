@@ -619,6 +619,10 @@ function runMerge(options, paths = {}) {
   const db = new Database(eloPath);
   let transactionOpen = false;
   try {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE name='prediction_accounts'").get()) {
+      const involved = db.prepare("SELECT 1 FROM prediction_accounts WHERE discord_id IN (?,?) LIMIT 1").get(String(options.oldId), String(options.newId));
+      if (involved) throw new Error("Prediction accounts require an explicit financial merge policy; no records were changed");
+    }
     db.prepare("ATTACH DATABASE ? AS bot").run(botPath);
     const accounts = loadAccounts(db, options.oldId, options.newId);
     validate(options, accounts);

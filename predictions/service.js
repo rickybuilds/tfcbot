@@ -6,10 +6,11 @@ function termsKey(s) {
   return JSON.stringify([s.blueIds.slice().sort(),s.redIds.slice().sort(),(s.offenseIds||[]).slice().sort(),s.serverKey,s.mapName,s.team1Starts]);
 }
 class PredictionsService {
-  constructor({db,client,config={},clock=Date.now,logger=console,queryServerRoster}) {
+  constructor({db,client,config={},clock=Date.now,logger=console,queryServerRoster,queryServerPhase}) {
     this.store=new PredictionStore(db);this.db=db;this.client=client;this.config=config;this.clock=clock;this.logger=logger;
     this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.timer=null;
     this.queryServerRoster=queryServerRoster|| (async serverKey=>parseStatus(await require("../services/rconClient").runRawRconCommand(serverKey,"status")));
+    this.queryServerPhase=queryServerPhase||require("./phase").queryServerPhase;
   }
   context(prefix="system",actorId="system",reason) {return {operationKey:`${prefix}:${randomUUID()}`,actorId,reason,now:this.clock()};}
   snapshotFromRow(row,overrides={}) {
@@ -22,6 +23,7 @@ class PredictionsService {
   onMatchFinalized(snapshot,context=this.context("finalize")) {
     if(!this.config.predictionsEnabled)return null;
     validSnapshot(snapshot);
+    if(this.store.latest(snapshot.matchId)?.state==="void")throw new Error("Historical match ID cannot be reused after a void");
     const active=this.store.markets().find(m=>m.snapshot.serverKey===snapshot.serverKey&&m.match_id!==String(snapshot.matchId)&&!["void","settled"].includes(m.state));
     if(active)throw new Error("Assigned server already has an unresolved prediction market");
     return this.store.createMarket(snapshot,context);
@@ -43,6 +45,16 @@ class PredictionsService {
       return this.store.createMarket(nextSnapshot,context);
     });
   }
+  async prepareTermsChange(matchId) {
+    const m=this.store.latest(matchId);if(!m||m.phase==="live"||m.state==="void"||m.settlement_version)return;
+    try{
+      const evidence=await this.queryServerPhase(m.snapshot.serverKey,m.snapshot.mapName);
+      // A live event received while the query was in flight always wins.
+      const latest=this.store.market(m.id);if(latest.phase==="live")return;
+      const phase=["pregame","live"].includes(evidence.phase)?evidence.phase:"unknown";
+      this.db.prepare("UPDATE prediction_markets SET phase=?,phase_evidence=?,live_at=CASE WHEN ?='live' THEN COALESCE(live_at,?) ELSE live_at END WHERE id=?").run(phase,JSON.stringify({...evidence,observedAt:this.clock()}),phase,this.clock(),m.id);
+    }catch{this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=? AND phase!='live'").run(m.id);}
+  }
   maybeStart(serverKey) {
     if(!this.knownServers.has(serverKey))return;
     for(const m of this.store.markets().filter(m=>m.state==="open"&&m.snapshot.serverKey===serverKey)){
@@ -57,7 +69,11 @@ class PredictionsService {
       try{
         const roster=await this.queryServerRoster(serverKey);
         if(!roster.complete)throw new Error("Incomplete roster");
-        if(this.presence.reconcile(serverKey,token,roster)){this.knownServers.add(serverKey);this.maybeStart(serverKey);}
+        if(this.presence.reconcile(serverKey,token,roster)){
+          this.knownServers.add(serverKey);
+          for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state)))if(roster.mapName!==m.snapshot.mapName){this.store.markReview(m.id,"unexpected server map");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
+          this.maybeStart(serverKey);
+        }
       }catch(error){
         this.knownServers.delete(serverKey);
         for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state))){this.store.markReview(m.id,"server monitoring unavailable");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}

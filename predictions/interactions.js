@@ -41,7 +41,7 @@ async function handleInteraction(service,i) {
     }else throw new Error("Unknown prediction control");
   }catch(error){
     // Do not expose SQL, payloads or financial history through exception strings.
-    const safe=/^(Stale|Invalid|Predictions|Match participant|Insufficient funds|Stake|Operation conflict)/.test(error.message)?error.message:"Prediction action could not be completed. Check My Bet before retrying.";
+    const safe=/^(Stale|Invalid|Predictions|Match participant|Insufficient funds|Stake|Operation conflict|Confirmation expired|State changed|Only the configured|Correction no longer)/.test(error.message)?error.message:"Prediction action could not be completed. Check My Bet before retrying.";
     try{await privateReply(i,safe);}catch{service.logger.warn?.("[predictions] private response unavailable");}
   }
   return true;

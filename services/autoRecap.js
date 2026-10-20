@@ -386,6 +386,21 @@ function attachAutoRecap(ctx, options = {}) {
         continue;
       }
 
+      const market = state.predictions?.store.latest(a.matchId);
+      if (market) {
+        if (market.snapshot.team1Starts !== team1Starts) await state.predictions.prepareTermsChange(a.matchId);
+        const revisedMarket = state.predictions.applyRosterChange({
+          matchId: a.matchId,
+          nextSnapshot: { ...market.snapshot, team1Starts },
+          applyMatchWrites: () => {},
+          context: state.predictions.context("starting-order", "system", "armed match starting order changed"),
+        });
+        await state.predictions.refreshCard(market.id);
+        if (revisedMarket && revisedMarket.id !== market.id) {
+          const channel = await client.channels.fetch(reportChannel);
+          await require("../predictions/integration").postMatchCard(state.predictions, revisedMarket, channel, {});
+        }
+      }
       a.team1Starts = team1Starts;
       for (const match of state.matches || []) {
         if (String(match.id || match.matchId) === String(a.matchId)) {

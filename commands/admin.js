@@ -113,6 +113,7 @@ function register(reg, deps) {
         elo.applyTeamResult(eloArgs);
       }
 
+      elo.db.transaction(() => {
               elo.db.prepare(`
           UPDATE matches
           SET
@@ -129,6 +130,9 @@ function register(reg, deps) {
           match.tfcstats_url || match.tfcstatsUrl || match.tfcstats || "",
           String(matchId)
         );
+        deps.predictions?.observeOfficialResult({ matchId, outcome: result });
+      })();
+      deps.predictions?.onMatchReported({ matchId });
 
       try {
         if (liveGentle) {
@@ -347,9 +351,14 @@ reg.set("fixscores", async (message, args = []) => {
     if (!matchId) return message.channel.send("Usage: `!delmatch <matchId>`");
 
     try {
+      deps.predictions?.assertCanDeleteMatch(matchId);
+      const deleteWrites = () => {
       try { elo.unreportMatch(matchId); } catch {}
       elo.db.prepare("DELETE FROM matches WHERE match_id=?").run(String(matchId));
       elo.db.prepare("DELETE FROM rating_changes WHERE match_id=?").run(String(matchId));
+      };
+      if (deps.predictions) deps.predictions.applyMatchDeletion({ matchId, applyMatchWrites: deleteWrites });
+      else elo.db.transaction(deleteWrites)();
 
       // 🧩 Disarm autoRecap if still tracking
       if (reg?.autoRecap) reg.autoRecap.disarmByMatchId(matchId);

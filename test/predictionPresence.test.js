@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { parseLine } = require("../services/hldsLogs");
 const { parseStatus, rosterPresence, PresenceTracker } = require("../predictions/presence");
+const { phaseFromLog } = require("../predictions/phase");
 
 const steam = n => `STEAM_0:1:${n}`;
 const status = ids => `hostname: test\nmap : shutdown2 at: 0 x, 0 y, 0 z\nplayers : ${ids.length} active (16 max)\n# name userid uniqueid frag time ping loss adr\n${ids.map((s,i) => `# ${i+1} "Player ${i}" ${i+10} ${s} 0 00:10 20 0`).join("\n")}\n${ids.length} users\n`;
@@ -43,4 +44,13 @@ test("presence reconciliation cannot overwrite newer events or apply an old disc
   assert.equal(p.get("west").size, 0);
   p.event({serverKey:"east",type:"disconnect",steamid:steam(1),userid:"11"});
   assert.equal(p.get("east").size, 0);
+});
+test("durable log phase distinguishes prematch from live and rejects incomplete or wrong-map evidence",()=>{
+  const text=fs.readFileSync(path.join(__dirname,"../parser/upstream/test/L0522000.log"),"utf8");
+  const start=text.indexOf('World triggered "Match_Begins_Now"');
+  const cut=text.lastIndexOf("\n",start);
+  assert.equal(phaseFromLog(text.slice(0,cut+1),"stowaway2_lg2"),"pregame");
+  assert.equal(phaseFromLog(text,"stowaway2_lg2"),"live");
+  assert.equal(phaseFromLog(text,"othermap"),"unknown");
+  assert.equal(phaseFromLog(text.slice(start),"stowaway2_lg2"),"unknown");
 });
