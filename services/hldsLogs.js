@@ -71,6 +71,14 @@ function shouldWarnBlockedPickupSource(serverKey) {
 function parseLine(raw, currentLogFile = null, trackingKey = null) {
   let s = String(raw).trim();
   s = s.replace(/^[^\x20-\x7E]*/g, "");
+  if (/World triggered "Match_Begins_Now"\s*$/i.test(s)) {
+    return {
+      type: "prediction_live_start",
+      sourceTime: s.match(/^L (\d{2}\/\d{2}\/\d{4} - \d{2}:\d{2}:\d{2}):/)?.[1] || null,
+      logInstance: currentLogFile,
+      raw: s,
+    };
+  }
   const oneVOneEvent = parseOneVOneLogLine(s);
   if (oneVOneEvent) return oneVOneEvent;
   const mFile = s.match(/Log file started \(file "([^"]+)"\)/i);
@@ -274,6 +282,8 @@ function startHldsLogReceiver(client, opts = {}, onEvent) {
         sourceKey,
         trackingOnly: isTrackingOnlyServerKey(serverKey),
         ts: Date.now(),
+        receivedAt: Date.now(),
+        logInstance: currentLogFile,
       };
       const steamId = normalizeSteamId(evt.steamid);
       if (identityStore && steamId && evt.type === "connect") {

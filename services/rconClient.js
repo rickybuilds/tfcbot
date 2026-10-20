@@ -9,7 +9,7 @@ const rconCfgs = require("../config/rcon");
  * @param {number} [retries=2] - Number of retry attempts
  * @returns {Promise<string>} - the server's response
  */
-async function runRconCommand(serverKey, command, retries = 2) {
+async function runRconCommand(serverKey, command, retries = 2, { raw = false } = {}) {
   const cfg = rconCfgs[serverKey];
   if (!cfg) {
     throw new Error(`Unknown server key: ${serverKey}`);
@@ -89,7 +89,7 @@ async function runRconCommand(serverKey, command, retries = 2) {
       let fullResponse = responses.join("\n") || "No response from server";
 
       // Apply formatter
-      if (formatters[command]) {
+      if (!raw && formatters[command]) {
         try {
           if (formatters[command].constructor.name === "AsyncFunction") {
             fullResponse = await formatters[command](cfg, options);
@@ -153,4 +153,5 @@ async function runRconCommand(serverKey, command, retries = 2) {
   return attempt(1);
 }
 
-module.exports = { runRconCommand };
+const runRawRconCommand = (serverKey, command, retries = 2) => runRconCommand(serverKey, command, retries, { raw: true });
+module.exports = { runRconCommand, runRawRconCommand };
