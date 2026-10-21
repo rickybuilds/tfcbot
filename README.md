@@ -15,6 +15,10 @@ service token, persistent log archive, deployment and reprocessing commands.
 - Queue and matchmaking system
 - Elo tracking and rankings
 
+The runtime SQLite database is intentionally not committed. See the
+[Elo database schema and fork notes](docs/elo-db.md) for table conventions,
+migrations, and backup guidance.
+
 ## Captain drafts
 
 Players can volunteer as captains while joining a pickup with `!addcap`, `++cap`,
