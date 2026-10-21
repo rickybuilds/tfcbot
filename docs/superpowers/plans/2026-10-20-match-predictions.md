@@ -13,7 +13,7 @@
 ## Global constraints
 
 - All prediction tables live in the existing configured `elo.db`; ELO and points remain separate.
-- One-time starting grant: 1,000. Stake: whole number 1–250. One active pick per person per market revision.
+- One-time starting grant: 1,000. October 21 approved update: new games allow a positive whole-number stake up to `100 + 10 × distinct settled games bet on`, without a fixed upper cap, subject to available points and safe-integer representation. One active pick per person per game revision. Existing rule-version-1 games retain their 250-point maximum through replacements.
 - Countdown: 120,000 milliseconds after all eight official linked roster players are present on the assigned server. No fixed ten-minute window.
 - Competitive play during that window is permitted. A competitive-start event never shortens the two-minute deadline, and disconnects/restarts never extend an existing deadline.
 - October 21 approved clarification: authorized `!rs` requests defer roster queries 15 seconds; schedule the next check at restart +2 minutes and then every minute while waiting, with connection-driven confirmation allowed after the settling delay. The full 120-second betting countdown still begins only after all eight are confirmed. Add bounded three-attempt roster retries (two-second gaps), invalidate pre-restart replies and preserve all existing deadlines. Replace player-facing "market" wording with "game".
@@ -183,6 +183,8 @@ Factory: `createPredictions({ db, client, config, resolveSteamIds, queryServerRo
 - [ ] Commit documentation/verification changes and report results for final review.
 
 ## Review and execution handoff
+
+October 21 follow-up scope: add owner-only private `!pred unresolved`, derive personal limits from retained settled bets without a mutable counter, upgrade the prediction bet constraint transactionally while preserving history and ELO, enforce limits in storage and private controls, and prepare a website implementation prompt. Website building/deployment and publication of private standings/balances remain outside this change. Validate progression against edits, voids, revisions, duplicate/corrected reports, legacy games, large stakes, upgrade rollback and blocked DMs; then run the full suite and push to the existing PR.
 
 Approved by the user after clarification of player eligibility, refund/reset policy, no-correct-bettor refunds and house-funded corrections. Execute inline using executing-plans and TDD on codex/match-predictions. Keep the feature disabled by default. Deployment, merge, production data mutation and enablement remain outside authorization. Current-server verification and staging are rollout gates; unavailable credentials do not prevent isolated implementation.
 

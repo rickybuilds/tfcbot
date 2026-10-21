@@ -16,7 +16,7 @@ function signature(service,p) {
 function officialIfAvailable(service,id) {return service.db.prepare("SELECT 1 FROM sqlite_master WHERE name='matches'").get()?official(service,id):null;}
 function parse(service,args) {
   const [action,target,third,...rest]=args;
-  if(!["void","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred status/audit/void/correct/adjust/pause/resume/retain");
+  if(!["void","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred unresolved/status/audit/void/correct/adjust/pause/resume/retain");
   const p={action,target};
   if(action==="adjust"){
     p.target=String(target||"").replace(/^<@!?(\d+)>$/,"$1");
@@ -38,6 +38,16 @@ async function handleAdminCommand(service,message,args=[]) {
   try{
     assertOwner(service,message.author.id);
     const [action,target]=args;
+    if(action==="unresolved"){
+      const games=service.store.markets().filter(m=>!["settled","void"].includes(m.state));
+      if(!games.length){await sendPrivate(message,{content:"No unresolved prediction games."});return;}
+      const lines=games.map(m=>{
+        const locked=service.store.bets(m.id).filter(b=>b.status==="active").reduce((total,b)=>total+BigInt(b.stake),0n);
+        return `${m.match_id} — ${m.state}; ${m.snapshot.serverKey}; revision ${m.revision}; ${locked.toLocaleString("en-US")} points locked; deadline ${m.closes_at==null?"not started":`<t:${Math.floor(m.closes_at/1000)}:F>`}; ${m.reason||"no review reason"}.`;
+      });
+      const heading=`Unresolved prediction games (${games.length})`,content=[heading,...lines].join("\n");
+      await sendPrivate(message,content.length<=1900?{content,allowedMentions:{parse:[]}}:{content:heading,files:[{attachment:Buffer.from(content),name:"unresolved-predictions.txt"}],allowedMentions:{parse:[]}});return;
+    }
     if(action==="status"){
       const m=service.store.latest(target);if(!m)throw new Error("Unknown prediction match");
       await sendPrivate(message,{content:`${m.match_id} market ${m.id}, revision ${m.revision}: ${m.state}; phase ${m.phase}; deadline ${m.closes_at||"not started"}; settlement ${m.settlement_version}; ${m.reason||"no review reason"}.`});return;

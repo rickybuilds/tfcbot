@@ -11,7 +11,7 @@ This document records the approved rules and implementation decisions. Deploymen
 ## Established requirements
 
 - Every person starts with 1,000 free prediction points, granted once.
-- Red, Blue, and Tie buttons on the match message; maximum total stake of 250 points per person per match.
+- Red, Blue, and Tie buttons on the match message. October 21 approved rule: new games start each person's maximum at 100 points, increasing by 10 per distinct settled game bet on, without a fixed upper cap. Existing rule-version-1 games keep their 250-point maximum through any replacement revisions.
 - One active pick per person per current roster revision. Picks and amounts remain private.
 - My Bet privately displays the pick, stake, available balance, and lock status; users can change or cancel while open.
 - Participants cannot bet on their match.
@@ -26,7 +26,7 @@ This document records the approved rules and implementation decisions. Deploymen
 
 1. Support existing finalized 4v4 pickups, including captain drafts and ADL when they use that roster shape. Exclude 1v1 and other roster sizes.
 2. Defer ELO-based payout odds, monthly activity bonuses, public leaderboards, website UI, and reward multipliers. Existing displayed ELO odds can remain informational. Record settled bets so bonuses can be designed later.
-3. Stake must be a whole number from 1 through 250, no greater than available funds. Editing replaces the existing stake; it does not add another 250 allowance.
+3. For rule-version-2 games, stake must be a positive whole number no greater than `100 + 10 × distinct settled games bet on` and available funds. All settled outcomes count, including no-correct-bettor refunds. Cancellations, voids, pregame refunds, edits, duplicate reports, player rewards and correction versions do not earn additional progression. Keep previously earned progress through result review. Existing rule-version-1 games retain a fixed maximum of 250. Editing replaces the stake rather than adding an allowance. Numerical safe-integer safeguards remain in force.
 4. Grant the initial balance lazily on first interaction or first player reward, rather than creating accounts for all Discord members at launch. Never regrant on leaving/rejoining.
 5. Exclude full-time offense participants from betting, but give player payout shares only to the eight official roster players. Offense participants do not count toward the eight-player countdown.
 6. Any person who has appeared as a participant in any roster revision of a match remains ineligible to bet on it, even after being substituted out.
@@ -135,6 +135,7 @@ Owner command namespace (all financial/admin actions require configured owner ID
 
 | Command | Behavior |
 |---|---|
+| `!pred unresolved` | Privately list all unfinished prediction games, locked stakes, deadline and review reason. Owner-only and read-only; available while disabled. |
 | `!pred status <matchId>` | Private owner diagnostic: state, deadline, revisions, totals, result/review status. |
 | `!pred void <matchId> <reason>` | Void an unresolved market and refund stakes. Settled markets use house-funded correction handling. |
 | `!pred correct <matchId> <blue|red|tie> <reason>` | Correct prediction settlement against the official recorded result; refuse a mismatch and direct owner to correct the match report first. |
@@ -147,7 +148,7 @@ Prefix commands cannot send ephemeral channel replies. Deliver detailed owner ou
 
 ## Operations and rollout
 
-- Settings: `PREDICTIONS_ENABLED=0` by default and `PREDICTIONS_OWNER_ID`. Defer the optional private audit channel; use private owner interactions/DMs and the ledger. Starting grant, stake cap, countdown, and payout percentages are versioned constants for V1; changing them later requires an explicit migration/rule decision.
+- Settings: `PREDICTIONS_ENABLED=0` by default and `PREDICTIONS_OWNER_ID`. Defer the optional private audit channel; use private owner interactions/DMs and the ledger. Starting grant, stake policy, countdown and payout percentages are versioned rules. October 21 explicitly approves progressive limits for rule version 2 and a transactional prediction-only schema upgrade replacing the former fixed bet constraint. Preserve existing rule-version-1 games, all bet IDs, financial history and unrelated ELO data.
 - No retroactive markets or awards for historical matches. Disabling creation does not abandon outstanding stakes: recovery, My Bet, refunds, deadlines, and settlement remain operational.
 - Reuse SQLite-aware compressed backups, which already include committed WAL changes. Pass the resolved `DB_PATH` / `ELO_DB` path to `scheduleBackups`; its current invocation uses the literal default `elo.db`. Verify restoring a backup preserves balances, locked stakes, and settlement versions.
 - Log market state transitions, operation IDs, and errors without ordinary users' picks/stakes in public logs. Private audit records may contain financial details.

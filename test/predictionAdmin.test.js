@@ -3,6 +3,28 @@ const test=require("node:test"),assert=require("node:assert/strict"),Database=re
 const {createPredictions}=require("../predictions");
 function setup(t){let now=1000;const db=new Database(":memory:");t.after(()=>db.close());const s=createPredictions({db,config:{predictionsEnabled:true,predictionsOwnerId:"owner"},clock:()=>now});const m=s.onMatchFinalized({matchId:"MATCH1",blueIds:["b1","b2","b3","b4"],redIds:["r1","r2","r3","r4"],offenseIds:[],steamIdsByDiscordId:{},serverKey:"east",mapName:"shutdown2",team1Starts:"offense"});const privateMessages=[],publicMessages=[];const message={id:"command",author:{id:"owner",send:async p=>privateMessages.push(p)},channel:{send:async p=>publicMessages.push(p)}};return {s,db,m,message,privateMessages,publicMessages,time:n=>now=n};}
 function confirmation(payload,id="confirm",user="owner") {const customId=payload.components[0].components[0].data.custom_id;return {id,customId,user:{id:user},reply:async function(p){this.response=p;}};}
+test("unresolved privately lists every unfinished game and locked stake without changing finances",async t=>{
+ const {s,m,message,privateMessages,publicMessages}=setup(t);
+ s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});
+ for(const [id,state] of [["TIMER","countdown"],["WAITING","closed"],["REVIEW","review_required"],["DONE","settled"],["VOID","void"]]){
+  const game=s.store.createMarket({...m.snapshot,matchId:id},s.context("create"));
+  s.db.prepare("UPDATE prediction_markets SET state=?,closes_at=?,reason=? WHERE id=?").run(state,state==="countdown"?121000:null,state==="review_required"?"server monitoring unavailable":null,game.id);
+ }
+ const before=s.db.prepare("SELECT COUNT(*) AS n FROM prediction_transactions").get().n;
+ s.config.predictionsEnabled=false;await s.handleAdminCommand(message,["unresolved"]);
+ const output=privateMessages[0].content;
+ assert.match(output,/Unresolved prediction games \(4\)/);for(const id of ["MATCH1","TIMER","WAITING","REVIEW"])assert.match(output,new RegExp(id));
+ assert.doesNotMatch(output,/DONE|VOID/);assert.match(output,/100 points locked/);assert.match(output,/server monitoring unavailable/);assert.match(output,/<t:121:F>/);
+ assert.equal(publicMessages.length,0);assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM prediction_transactions").get().n,before);assert.equal(s.store.account("u").balance,900);
+});
+test("unresolved handles empty and long private lists and refuses nonowners without leaking game IDs",async t=>{
+ const {s,m,message,privateMessages,publicMessages}=setup(t);
+ message.author.id="admin";await s.handleAdminCommand(message,["unresolved"]);assert.match(privateMessages.pop().content,/owner/i);assert.equal(privateMessages.length,0);
+ message.author.id="owner";s.store.voidMarket({marketId:m.id,context:s.context("void")});await s.handleAdminCommand(message,["unresolved"]);assert.equal(privateMessages.pop().content,"No unresolved prediction games.");
+ for(let i=0;i<40;i++)s.store.createMarket({...m.snapshot,matchId:`LONG_GAME_${i}`},s.context("create"));
+ await s.handleAdminCommand(message,["unresolved"]);const payload=privateMessages.pop();assert.ok(payload.content.length<2000);assert.equal(payload.files[0].name,"unresolved-predictions.txt");assert.match(payload.files[0].attachment.toString(),/LONG_GAME_39/);
+ message.author.send=async()=>{throw new Error("DM blocked");};await s.handleAdminCommand(message,["unresolved"]);assert.equal(publicMessages.length,0);
+});
 test("financial controls require the configured owner; admin permission is insufficient",async t=>{
  const {s,message,privateMessages,publicMessages}=setup(t);message.author.id="admin";await s.handleAdminCommand(message,["adjust","u","100","test"]);assert.equal(s.store.account("u"),undefined);assert.equal(publicMessages.length,0);assert.match(privateMessages[0].content,/owner/i);
 });
@@ -19,7 +41,7 @@ test("expired and stale previews cannot mutate finances, and DM failure never le
 });
 test("result correction requires official outcome and funds all extra credits through house issuance",async t=>{
  const {s,db,m,message,privateMessages}=setup(t);db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT)");db.prepare("INSERT INTO matches VALUES ('MATCH1','RED','completed')").run();
- s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:200,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:200,context:s.context("bet","v")});s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
+ s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:100,context:s.context("bet","v")});s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
  await s.handleAdminCommand(message,["correct","MATCH1","blue","wrong"]);assert.match(privateMessages[0].content,/official/i);
- message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1140);assert.equal(s.store.account("v").balance,1140);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
+ message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1070);assert.equal(s.store.account("v").balance,1070);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
 });

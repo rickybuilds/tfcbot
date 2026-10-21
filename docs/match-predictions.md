@@ -5,8 +5,10 @@ Predictions use points completely separate from ELO. The feature is disabled by 
 ## Player rules
 
 - Every Discord account receives 1,000 points once, on its first private balance interaction or player reward.
-- Use Blue / Team 1, Red / Team 2, or Tie on the match card. One active pick, with a whole-number stake from 1 to 250 points. Editing replaces the previous stake. Funds are reserved immediately.
-- My Bet privately shows the pick, stake, available balance and market state. Change or cancel before closure; cancellation refunds the stake.
+- Use Blue / Team 1, Red / Team 2, or Tie on the match card. One active pick, with a whole-number stake starting at a maximum of 100 points per game. Your personal maximum increases by 10 for each distinct settled game you bet on, with no fixed upper cap: `100 + 10 × settled games bet on`. You must still have enough available points. Editing replaces the previous stake. Funds are reserved immediately.
+- Wins, losses, ties and settled no-correct-bettor refunds count equally toward progression. Opening a modal, editing, cancelling, pregame refunds and voided games do not count; duplicate reports and corrections do not count again. Player rewards alone do not increase a player's limit. The higher limit does not itself grant points. Earned progression is retained when an already-settled result goes to owner review.
+- My Bet privately shows the pick, stake, available balance, game state, current maximum and settled-game count. Change or cancel before closure; cancellation refunds the stake.
+- Games created before this rule update retain the earlier fixed 250-point maximum, including their pregame replacement revisions. Newly created games use progression. My Bet and the amount modal show the applicable maximum. Prior settled betting history counts toward progression.
 - The official eight, full-time offense participants and anyone substituted out of this match cannot bet. Only the official eight receive player rewards.
 - Predictions open after teams are finalized. The bot confirms roster Steam IDs on the exact assigned server, including players already connected and players on a lobby map before the selected map loads. Full-time offense and other spectators do not count toward eight; an official player spectating still counts as connected.
 - All eight confirmed present starts one full two-minute window. Gameplay does not shorten it. Disconnects, duplicate events and restarts do not extend the deadline.
@@ -29,6 +31,8 @@ PREDICTIONS_OWNER_ID=your_discord_user_id
 
 Predictions use the existing resolved `DB_PATH` / `ELO_DB` / `elo.db` handle. Five additive tables hold accounts, markets, bets, append-only transactions, and small schema/pause metadata. No database consolidation is involved. Existing SQLite-aware backups now receive the configured ELO path.
 
+The progression update advances prediction schema version 1 to 2 in one transaction on startup, replacing the bet table's former 250-point constraint while preserving rows, IDs and immutable transaction history. ELO tables and SQLite's global `user_version` are untouched. Back up the configured database before updating. Amounts remain positive safe integers, with safe-integer balance and total-game-stake checks; these are numerical representation safeguards, not a progression ceiling. Progress is calculated from retained settled bets and is not duplicated by startup or corrections.
+
 Before separately authorized enablement:
 
 1. Confirm raw RCON `status` output on every supported pickup server, including its complete roster footer. Missing/ambiguous Steam links must not trigger eight.
@@ -45,6 +49,7 @@ Only `PREDICTIONS_OWNER_ID` can use these controls; the Discord admin role alone
 
 | Command | Action |
 |---|---|
+| `!pred unresolved` | Privately list open, countdown, closed/awaiting-result and review-required games, with IDs, server, revision, locked points, deadline and review reason. Long lists arrive as a text attachment; an empty list confirms there are none. Works with predictions disabled. |
 | `!pred status <matchId>` | Inspect current state, revision, phase, deadline and review reason. |
 | `!pred audit <matchId\|userId>` | Download private transaction history and market details. |
 | `!pred void <matchId> <reason>` | Refund and void an unsettled or reviewed market. |

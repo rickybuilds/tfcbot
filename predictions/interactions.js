@@ -23,10 +23,11 @@ async function handleInteraction(service,i) {
       service.store.mutable(marketRef,ctx.now);
       if(!["blue","red","tie"].includes(pick))throw new Error("Invalid pick");
       const b=service.store.bets(m.id).find(b=>b.discord_id===user&&b.status==="active");
-      const modal=new ModalBuilder().setCustomId(`pred:submit:${m.id}:${m.revision}:${pick}`).setTitle(`Predict ${pick.toUpperCase()} — ${m.match_id}`).addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("stake").setLabel("Stake (1–250 points)").setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(3).setValue(String(b?.stake||100))));
+      const limit=service.store.stakeLimit(m,user);
+      const modal=new ModalBuilder().setCustomId(`pred:submit:${m.id}:${m.revision}:${pick}`).setTitle(`Predict ${pick.toUpperCase()} — ${m.match_id}`).addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("stake").setLabel(`Stake (1–${limit.toLocaleString("en-US")} points)`).setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(16).setValue(String(b?.stake||Math.min(100,limit)))));
       await i.showModal(modal);
     }else if(action==="submit"){
-      const raw=i.fields.getTextInputValue("stake");if(!/^\d{1,3}$/.test(raw))throw new Error("Stake must be a whole number from 1 to 250");
+      const raw=i.fields.getTextInputValue("stake");if(!/^\d{1,16}$/.test(raw))throw new Error("Stake must be a whole number within your current limit");
       const result=service.store.placeBet({marketRef,discordId:user,pick,stake:Number(raw),context:ctx});
       await privateReply(i,`Match ${m.match_id}: ${result.pick.toUpperCase()}, stake ${result.stake}. Available balance: ${result.balance.toLocaleString("en-US")}.`);
     }else if(action==="cancel"){
@@ -34,6 +35,8 @@ async function handleInteraction(service,i) {
     }else if(action==="mine"){
       const b=service.store.bets(m.id).find(b=>b.discord_id===user),account=service.store.ensureAccount(user,ctx);
       const lines=[`Match ${m.match_id} — ${m.state}.`,b?`Your pick: ${b.pick.toUpperCase()} · stake ${b.stake} · ${b.status}.`:"You have no bet on this game.",`Available balance: ${account.balance.toLocaleString("en-US")}.`];
+      const progress=service.store.bettingProgress(user),limit=service.store.stakeLimit(m,user);
+      lines.push(`Max bet for this game: ${limit.toLocaleString("en-US")} points${m.rule_version===1?" (earlier rules)":""}.`,`${progress.settledGames.toLocaleString("en-US")} settled games bet on. Personal limit: ${progress.limit.toLocaleString("en-US")} points; +10 per settled game.`);
       if(m.settlement_version)lines.push(`Total credited for this match: ${(m.paidCredits[user]||0).toLocaleString("en-US")}.`);
       const components=[];
       if(isOpen(m,ctx.now))components.push(new ActionRowBuilder().addComponents(...["blue","red","tie"].map(p=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${p}`).setLabel(`Change to ${p}`).setStyle(ButtonStyle.Secondary)),new ButtonBuilder().setCustomId(`pred:cancel:${m.id}:${m.revision}`).setLabel("Cancel Bet").setStyle(ButtonStyle.Danger)));

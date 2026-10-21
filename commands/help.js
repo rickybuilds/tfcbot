@@ -46,7 +46,11 @@ function register(reg, { config }) {
 
     if (config.predictionsEnabled) emb.addFields({
       name: "Private Match Predictions",
-      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. My Bet privately shows your pick and points, with editing/cancellation before closure. The full two-minute window begins when all eight roster players are confirmed on the assigned server. Participants cannot bet.",
+      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. New games start your maximum at 100 points, increasing by 10 per settled game you bet on. My Bet privately shows your pick, points and applicable limit. Edit/cancel before closure. All eight confirmed starts the full two-minute window. Participants cannot bet.",
+    });
+    if(config.predictionsOwnerId&&String(message.author.id)===config.predictionsOwnerId)emb.addFields({
+      name:"Prediction Owner Controls",
+      value:"`!pred unresolved` privately lists unfinished prediction games. Use `!pred status <matchId>` for details and `!pred audit <matchId|userId>` for history. These remain available with predictions disabled.",
     });
 
     // ---------------- Admin Commands ----------------

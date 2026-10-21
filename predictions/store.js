@@ -15,6 +15,14 @@ class PredictionStore {
   latest(id) {return decode(this.db.prepare("SELECT * FROM prediction_markets WHERE match_id=? ORDER BY revision DESC LIMIT 1").get(String(id)));}
   markets() {return this.db.prepare("SELECT * FROM prediction_markets ORDER BY id").all().map(decode);}
   bets(id) {return this.db.prepare("SELECT * FROM prediction_bets WHERE market_id=?").all(id);}
+  bettingProgress(id) {
+    const {games}=this.db.prepare(`SELECT COUNT(DISTINCT m.match_id) AS games FROM prediction_bets b
+      JOIN prediction_markets m ON m.id=b.market_id WHERE b.discord_id=? AND b.status='settled' AND m.settlement_version>0`).get(String(id));
+    const limit=100+10*games;
+    if(!Number.isSafeInteger(limit))throw new Error("Unsafe stake limit");
+    return {settledGames:games,limit};
+  }
+  stakeLimit(m,id) {return m.rule_version===1?250:this.bettingProgress(id).limit;}
   metadata(key,fallback=null) {return this.db.prepare("SELECT value FROM prediction_meta WHERE key=?").get(key)?.value??fallback;}
   setMetadata(key,value) {this.db.prepare("INSERT INTO prediction_meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key,String(value));}
   entry(ctx,{accountId=null,amount=0,kind,marketId=null,betId=null,entryKey,version=null,metadata=null}) {
@@ -54,7 +62,7 @@ class PredictionStore {
         if(JSON.stringify(old.snapshot)===JSON.stringify(s))return old;
         throw new Error("Resolve previous market first");
       }
-      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at) VALUES (?,?,'open',?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now);
+      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at,rule_version) VALUES (?,?,'open',?,?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now,old?.rule_version||2);
       return this.market(Number(row.lastInsertRowid));
     });
   }
@@ -68,10 +76,13 @@ class PredictionStore {
     return this.operation(ctx,`bet:${marketRef.marketId}:${discordId}:${pick}:${stake}`,()=>{
       const m=this.mutable(marketRef,ctx.now),id=String(discordId);
       if(this.metadata("paused","0")==="1")throw new Error("Predictions paused");
-      if(!["blue","red","tie"].includes(pick)||!Number.isSafeInteger(stake)||stake<1||stake>250)throw new Error("Stake must be a whole number from 1 to 250");
+      const limit=this.stakeLimit(m,id);
+      if(!["blue","red","tie"].includes(pick)||!Number.isSafeInteger(stake)||stake<1||stake>limit)throw new Error(`Stake must be a whole number from 1 to ${limit.toLocaleString("en-US")}`);
       const participant=this.markets().filter(x=>x.match_id===m.match_id).some(x=>[...x.snapshot.blueIds,...x.snapshot.redIds,...x.snapshot.offenseIds].includes(id));
       if(participant)throw new Error("Match participant cannot bet");
       const old=this.bets(m.id).find(b=>b.discord_id===id);
+      const total=this.bets(m.id).filter(b=>b.status==="active"&&b.discord_id!==id).reduce((n,b)=>n+BigInt(b.stake),BigInt(stake));
+      if(total>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("Stake would exceed the safe game total");
       this.change(id,(old?.status==="active"?old.stake:0)-stake,ctx,{kind:"stake",marketId:m.id,entryKey:"stake"});
       this.db.prepare(`INSERT INTO prediction_bets (market_id,discord_id,pick,stake,status,created_at,updated_at) VALUES (?,?,?,?,'active',?,?) ON CONFLICT(market_id,discord_id) DO UPDATE SET pick=excluded.pick,stake=excluded.stake,status='active',updated_at=excluded.updated_at`).run(m.id,id,pick,stake,ctx.now,ctx.now);
       return {marketId:m.id,pick,stake,balance:this.account(id).balance};
