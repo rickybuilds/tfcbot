@@ -14,7 +14,7 @@ async function handleInteraction(service,i) {
     const [,action,rawId,rawRevision,pick]=parts;
     if(!/^\d+$/.test(rawId)||!/^\d+$/.test(rawRevision))throw new Error("Invalid prediction control");
     const marketRef={marketId:Number(rawId),revision:Number(rawRevision)},m=service.store.market(marketRef.marketId),user=String(i.user.id);
-    if(!m||m.revision!==marketRef.revision)throw new Error("Stale prediction market");
+    if(!m||m.revision!==marketRef.revision)throw new Error("Stale prediction game; use the latest match message");
     // Public controls are accepted only on the bound card. Ephemeral controls/modals
     // are still actor-bound by Discord, and never take an account ID from custom_id.
     if(["pick","mine"].includes(action)&&i.message&&m.message_id&&String(i.message.id)!==m.message_id&&!i.message.flags?.has?.(64))throw new Error("Stale prediction message");
@@ -33,7 +33,7 @@ async function handleInteraction(service,i) {
       const result=service.store.cancelBet({marketRef,discordId:user,context:ctx});await privateReply(i,`${result.cancelled?"Bet cancelled and stake refunded.":"No active bet."} Available balance: ${result.balance.toLocaleString("en-US")}.`);
     }else if(action==="mine"){
       const b=service.store.bets(m.id).find(b=>b.discord_id===user),account=service.store.ensureAccount(user,ctx);
-      const lines=[`Match ${m.match_id} — ${m.state}.`,b?`Your pick: ${b.pick.toUpperCase()} · stake ${b.stake} · ${b.status}.`:"You have no bet on this market.",`Available balance: ${account.balance.toLocaleString("en-US")}.`];
+      const lines=[`Match ${m.match_id} — ${m.state}.`,b?`Your pick: ${b.pick.toUpperCase()} · stake ${b.stake} · ${b.status}.`:"You have no bet on this game.",`Available balance: ${account.balance.toLocaleString("en-US")}.`];
       if(m.settlement_version)lines.push(`Total credited for this match: ${(m.paidCredits[user]||0).toLocaleString("en-US")}.`);
       const components=[];
       if(isOpen(m,ctx.now))components.push(new ActionRowBuilder().addComponents(...["blue","red","tie"].map(p=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${p}`).setLabel(`Change to ${p}`).setStyle(ButtonStyle.Secondary)),new ButtonBuilder().setCustomId(`pred:cancel:${m.id}:${m.revision}`).setLabel("Cancel Bet").setStyle(ButtonStyle.Danger)));

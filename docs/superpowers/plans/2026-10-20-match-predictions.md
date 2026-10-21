@@ -16,6 +16,7 @@
 - One-time starting grant: 1,000. Stake: whole number 1–250. One active pick per person per market revision.
 - Countdown: 120,000 milliseconds after all eight official linked roster players are present on the assigned server. No fixed ten-minute window.
 - Competitive play during that window is permitted. A competitive-start event never shortens the two-minute deadline, and disconnects/restarts never extend an existing deadline.
+- October 21 approved clarification: authorized `!rs` requests defer roster queries 15 seconds; schedule the next check at restart +2 minutes and then every minute while waiting, with connection-driven confirmation allowed after the settling delay. The full 120-second betting countdown still begins only after all eight are confirmed. Add bounded three-attempt roster retries (two-second gaps), invalidate pre-restart replies and preserve all existing deadlines. Replace player-facing "market" wording with "game".
 - Return correct stakes first. Remaining pot: 70% bettors / 25% winning players / 5% losing players; ties: 90% bettors / 10% official players.
 - Approved: no correct bettors refund all stakes with no player payouts; house-funded corrections never claw back credits or create debt; only the official eight receive player shares; former participants remain excluded. Integer allocations conserve the complete pot.
 - All picks/amounts/balances are private except authorized owner audit access.

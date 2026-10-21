@@ -10,7 +10,7 @@ test("outcome opens private modal; submit validates cap and privately debits onc
  const bad=interaction("bad",click.modal.custom_id,"u","1e2");await s.handleInteraction(bad);assert.match(bad.response.content,/whole number/i);
 });
 test("My Bet is private without a bet and cancel refunds before closure",async t=>{
- const {s,m}=setup(t);const mine=interaction("mine",`pred:mine:${m.id}:1`);await s.handleInteraction(mine);assert.equal(mine.response.flags,64);assert.match(mine.response.content,/1,000/);
+ const {s,m}=setup(t);const mine=interaction("mine",`pred:mine:${m.id}:1`);await s.handleInteraction(mine);assert.equal(mine.response.flags,64);assert.match(mine.response.content,/1,000/);assert.match(mine.response.content,/You have no bet on this game\./);
  s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"red",stake:200,context:s.context("bet","u")});
  const cancel=interaction("cancel",`pred:cancel:${m.id}:1`);await s.handleInteraction(cancel);assert.equal(s.store.account("u").balance,1000);
 });

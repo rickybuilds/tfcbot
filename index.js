@@ -628,6 +628,7 @@ startSpeedrunPlayerLinkSync({
       }
 
       try {
+        predictions.onRestartRequested({matchId:rs.matchId,serverKey});
         await runRconCommand(serverKey, `amx_map ${rs.map}`);
         console.log(`[!rs] amx_map ${rs.map} sent OK to ${serverKey}`);
       } catch (err) {
