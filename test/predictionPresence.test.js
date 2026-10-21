@@ -9,6 +9,23 @@ const { phaseFromLog } = require("../predictions/phase");
 
 const steam = n => `STEAM_0:1:${n}`;
 const status = ids => `hostname: test\nmap : shutdown2 at: 0 x, 0 y, 0 z\nplayers : ${ids.length} active (16 max)\n# name userid uniqueid frag time ping loss adr\n${ids.map((s,i) => `# ${i+1} "Player ${i}" ${i+10} ${s} 0 00:10 20 0`).join("\n")}\n${ids.length} users\n`;
+test("live-server status includes HLTV in completeness counts but counts only authenticated players",()=>{
+ const raw=`hostname: test EAST
+version : 48/1.1.2.2/Stdio 4419 secure (20)
+tcp/ip : 127.0.0.1:27015
+map     : voltage_lg at: 0 x, 0 y, 0 z
+players : 2 active (32 max)
+
+#      name userid uniqueid frag time ping loss adr
+# 1 "NoNameTV-East" 1 HLTV hltv:0/64 delay:0 12:45    6    0 127.0.0.1:27020
+# 2  "player" 4 STEAM_0:0:98260   0 02:12   46    0 127.0.0.1:27005
+2 users`;
+ const roster=parseStatus(raw);
+ assert.equal(roster.complete,true);
+ assert.equal(roster.mapName,"voltage_lg");
+ assert.deepEqual(roster.sessions,[{steamId:"STEAM_0:0:98260",userid:"4"}]);
+ assert.deepEqual(roster.steamIds,["STEAM_0:0:98260"]);
+});
 test("recorded prematch end is recognized independently of warmup and map load", () => {
   for (const file of fs.readdirSync(path.join(__dirname, "../parser/upstream/test")).filter(f => f.endsWith(".log"))) {
     const lines = fs.readFileSync(path.join(__dirname, "../parser/upstream/test", file), "utf8").split(/\r?\n/);

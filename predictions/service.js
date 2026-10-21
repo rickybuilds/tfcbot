@@ -87,7 +87,12 @@ class PredictionsService {
       }catch(error){
         this.knownServers.delete(serverKey);
         for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state))){this.store.markReview(m.id,"server monitoring unavailable");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
-        this.logger.warn?.(`[predictions] roster reconciliation failed for ${serverKey}`);
+        // Only fixed diagnostic labels: exceptions can contain raw responses or secrets.
+        const message=String(error?.message||"");
+        const reason=/^Incomplete (?:server status (?:roster|player)|roster)$/.test(message)?"incomplete status roster"
+          : /timeout/i.test(message)?"RCON timeout"
+          : /ECONNREFUSED/.test(message)?"RCON connection refused":"RCON/status query failed";
+        this.logger.warn?.(`[predictions] roster reconciliation failed for ${serverKey}: ${reason}`);
       }
     })();
     this.inflight.set(serverKey,work);try{return await work;}finally{this.inflight.delete(serverKey);}

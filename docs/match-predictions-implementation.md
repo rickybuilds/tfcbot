@@ -34,3 +34,7 @@ Current-server signal delivery, actual raw RCON output and multi-user staging we
 ## Verification
 
 The final full suite passed 205/205 tests, including 45/45 prediction tests, with zero failures or skips. The existing parser was built successfully first. The suite ran with `node --test --test-force-exit --test-concurrency=1 "test/*.test.js"`, the existing local dependency path, and a loopback-only server fixture (`TFC_RCON_EAST_HOST=127.0.0.1`). JavaScript syntax and whitespace checks also passed. No test run starts the Discord bot or operates on a production database. Prediction tests use in-memory/temporary SQLite files; backup checks include committed WAL data, escrow, original deadlines and settlement retry safety.
+
+## October 21 server diagnostics
+
+The user's East-server RCON sample parsed successfully: two status rows (HLTV plus one authenticated player) correctly produce one eligible Steam identity. This sample does not establish the cause of an earlier failed reconciliation or verify a complete eight-player countdown. Added regression coverage for that response shape and fixed-category reconciliation warnings distinguishing incomplete status, timeout and connection refusal without exposing raw response data or credentials. Unknown errors retain a generic label. No lifecycle or payout behavior changed: a successful later query cannot reopen a market frozen by monitoring failure. The updated prediction suite passed 47/47 tests; syntax and whitespace checks passed. The full-suite result above predates this diagnostic-only update.

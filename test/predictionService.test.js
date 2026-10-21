@@ -48,3 +48,22 @@ test("wrong-map reconciliation freezes bets and unavailable phase evidence never
  s.queryServerPhase=async()=>({phase:"unknown"});await s.prepareTermsChange(snapshot.matchId);
  s.applyRosterChange({matchId:snapshot.matchId,nextSnapshot:{...snapshot,mapName:"other"},applyMatchWrites:()=>{}});assert.equal(s.store.latest(snapshot.matchId).revision,1);assert.equal(s.store.market(m.id).phase,"unknown");
 });
+test("roster failures identify safe causes without leaking response data or reopening reviewed markets",async t=>{
+ const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot),warnings=[];
+ s.logger={warn:message=>warnings.push(message)};
+ for(const [message,reason] of [
+  ["Incomplete server status roster","incomplete status roster"],
+  ["RCON UDP timeout - server may be busy","RCON timeout"],
+  ["RCON error (attempt 1): connect ECONNREFUSED","RCON connection refused"],
+  ["unexpected payload secret-password private-player-data","RCON/status query failed"]
+ ]){
+  s.queryServerRoster=async()=>{throw new Error(message);};
+  await s.reconcileServer("east");
+  assert.equal(warnings.at(-1),`[predictions] roster reconciliation failed for east: ${reason}`);
+  assert.equal(s.store.market(m.id).state,"review_required");
+ }
+ s.queryServerRoster=async()=>({complete:true,mapName:"shutdown2",steamIds:Object.values(snapshot.steamIdsByDiscordId).flat()});
+ await s.reconcileServer("east");
+ assert.equal(s.store.market(m.id).state,"review_required");
+ assert.equal(s.store.market(m.id).closes_at,null);
+});
