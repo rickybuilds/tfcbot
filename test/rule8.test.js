@@ -40,6 +40,11 @@ test("Rule 8 transfers one Elo and persists the target infraction count", () => 
     const reopened = new EloDB(tmp.file);
     assert.equal(reopened.getRule8InfractionCount("target"), 1);
     assert.equal(reopened.peekRating("target"), 1999);
+    const cleared = reopened.clearLatestRule8Infraction("target");
+    assert.equal(cleared.reversedElo, true);
+    assert.equal(reopened.getRule8InfractionCount("target"), 0);
+    assert.equal(reopened.peekRating("target"), 2000);
+    assert.equal(reopened.peekRating("issuer"), 1800);
     reopened.db.close();
   } finally {
     if (elo.db.open) elo.db.close();
@@ -129,7 +134,7 @@ test("bare Rule 8 command displays the rule text", async () => {
   }
 });
 
-test("Rule 8 clear resets only the stored infraction count", async () => {
+test("Rule 8 clear refunds the latest Elo transfer and threshold jail", async () => {
   const previousAdminRole = process.env.ADMIN_ROLE_ID;
   process.env.ADMIN_ROLE_ID = "admin-role";
   const posted = [];
@@ -140,21 +145,36 @@ test("Rule 8 clear resets only the stored infraction count", async () => {
     member: { roles: { cache: roleCollection([["admin-role", { id: "admin-role" }]]) } },
     mentions: {
       users: { first: () => ({ id: "target" }) },
-      members: { first: () => ({ id: "target" }) },
+      members: {
+        first: () => ({
+          id: "target",
+          guild: { roles: { cache: new Map([["old-role", { id: "old-role" }]]) } },
+          roles: { cache: new Map([["jail-role", { id: "jail-role" }]]), async remove() {}, async add() {} },
+        }),
+      },
     },
     channel: { async send(value) { posted.push(value); } },
   };
 
   try {
     register(registry, {
-      elo: { clearLatestRule8Infraction(id) { cleared = id; return { cleared: true, count: 3 }; } },
-      jailStore: null,
-      config: { roles: {} },
+      elo: {
+        clearLatestRule8Infraction(id) {
+          cleared = id;
+          return { cleared: true, count: 4, reversedElo: true, releaseJail: true };
+        },
+      },
+      jailStore: {
+        get() { return { oldRoles: ["old-role"], expires: Date.now() + 1000 }; },
+        delete() { cleared = `${cleared}:unjail`; },
+      },
+      config: { roles: { jail: "jail-role" } },
     });
     await registry.get("rule8clear")(message, []);
-    assert.equal(cleared, "target");
+    assert.equal(cleared, "target:unjail");
     assert.match(posted[0], /cleared the most recent/);
-    assert.match(posted[0], /does not refund Elo or change jail status/);
+    assert.match(posted[0], /refunded 1 Elo/);
+    assert.match(posted[0], /jail was also cleared/);
   } finally {
     if (previousAdminRole === undefined) delete process.env.ADMIN_ROLE_ID;
     else process.env.ADMIN_ROLE_ID = previousAdminRole;

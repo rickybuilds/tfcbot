@@ -10,16 +10,34 @@ function register(reg, { config, elo, jailStore }) {
   reg.set("rule8clear", async (message) => {
     if (!isAdmin(message)) return;
     const user = message.mentions?.users?.first();
-    if (!user) {
+    const target = message.mentions?.members?.first();
+    if (!user || !target) {
       await message.channel.send("Usage: `!rule8clear @user`");
       return;
     }
 
     const result = elo.clearLatestRule8Infraction(user.id);
+    let jailCleared = false;
+    if (result.releaseJail && result.cleared) {
+      const jailData = jailStore.get(target.id);
+      if (jailData) {
+        const jailRoleId = config.roles.jail;
+        if (jailRoleId && target.roles.cache.has(jailRoleId)) {
+          await target.roles.remove(jailRoleId).catch(() => {});
+        }
+        for (const roleId of jailData.oldRoles || []) {
+          const role = target.guild?.roles?.cache?.get(roleId);
+          if (role) await target.roles.add(role).catch(() => {});
+        }
+        jailStore.delete(target.id);
+        jailCleared = true;
+      }
+    }
     await message.channel.send(
       `✅ ${result.cleared ? "Cleared the most recent" : "No stored"} Rule 8 infraction for <@${user.id}> ` +
       `(remaining: ${result.count}). ` +
-      "This does not refund Elo or change jail status."
+      `${result.reversedElo ? "Refunded 1 Elo." : "No Elo refund was available."} ` +
+      `${jailCleared ? "The jail was also cleared." : "Jail status was unchanged."}`
     );
   });
 
