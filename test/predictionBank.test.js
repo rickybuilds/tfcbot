@@ -17,7 +17,7 @@ const body=payload=>payload.content||payload.files?.[0]?.attachment.toString();
 
 test("bank deletes the guild command and privately grants once, with points as an identical self-only alias",async t=>{
  const {s,db,message,events,privateMessages,publicMessages,context}=setup(t);
- const reg=new Map();require("../predictions/bank").register(reg,s);assert.equal(reg.get("bank"),reg.get("points"));
+ const reg=new Map();require("../predictions/bank").register(reg,s);assert.equal(typeof reg.get("bank"),"function");assert.equal(typeof reg.get("points"),"function");
  s.store.adjust("SECRET_OTHER",9000,context());await reg.get("bank")(message,["SECRET_OTHER"]);
  assert.deepEqual(events,["delete","dm"]);const text=body(privateMessages[0]);assert.match(text,/Available:.*1,000/);assert.match(text,/Held in active bets:.*0/);assert.match(text,/Bet limit:.*100/);assert.match(text,/No bets yet/);assert.match(text,/No settled prediction games played yet/);assert.doesNotMatch(text,/SECRET_OTHER|10,000/);
  await reg.get("points")(message);assert.equal(s.store.account("u").balance,1000);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM prediction_transactions WHERE account_id='u' AND kind='grant'").get().n,1);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
@@ -71,4 +71,23 @@ test("bank query failures expose no partial statement or internal error",async t
  s.store.bettingProgress=()=>{throw new Error("sensitive SQL details");};
  await s.handleBankCommand(message);assert.match(privateMessages[0].content,/could not be loaded/);assert.doesNotMatch(JSON.stringify(privateMessages),/sensitive|SQL|1,000/);
  assert.equal(s.store.account("u"),undefined);assert.equal(publicMessages.length,0);
+});
+
+test("both bank aliases audit caller, command, location and time without financial details, including DM failures",async t=>{
+ const {s,message,privateMessages,publicMessages,game,bet}=setup(t);
+ s.config.channels={audit:"audit-channel"};message.guild.name="Pickup Guild";
+ const audits=[];message.client={channels:{fetch:async id=>{assert.equal(id,"audit-channel");return {isTextBased:()=>true,send:async payload=>audits.push(payload)};}}};
+ bet(game("PRIVATE_MATCH"));const reg=new Map();require("../predictions/bank").register(reg,s);
+ await reg.get("bank")(message);message.guild=null;await reg.get("points")(message);
+ message.author.send=async()=>{throw new Error("blocked");};await reg.get("points")(message);
+ assert.equal(audits.length,3);assert.match(audits[0].content,/<@u>.*`!bank`.*Pickup Guild.*<t:1000:T>/);
+ assert.match(audits[1].content,/<@u>.*`!points`.*DM/);assert.match(audits[2].content,/`!points`/);
+ assert.doesNotMatch(JSON.stringify(audits),/PRIVATE_MATCH|900|1,000|balance|stake|BLUE|RED|blocked/);
+ for(const payload of audits)assert.deepEqual(payload.allowedMentions,{parse:[]});assert.equal(privateMessages.length,2);assert.equal(publicMessages.length,0);
+});
+
+test("an unavailable audit channel does not prevent private bank delivery",async t=>{
+ const {s,message,privateMessages}=setup(t);s.config.channels={audit:"audit-channel"};
+ let attempts=0;message.client={channels:{fetch:async()=>{attempts++;throw new Error("unavailable");}}};
+ await s.handleBankCommand(message);assert.match(body(privateMessages[0]),/1,000/);assert.equal(attempts,1);
 });

@@ -1,4 +1,5 @@
 "use strict";
+const {sendAuditLog}=require("../lib/auditLog");
 const points=value=>BigInt(value).toLocaleString("en-US");
 const signed=value=>`${value>=0n?"+":""}${points(value)}`;
 function credited(store,marketId,user){
@@ -41,7 +42,7 @@ function buildStatement(service,user){
       "", "Returns include your stake; net is profit/loss. Player rewards are separate. Points are separate from ELO."].join("\n");
   });
 }
-async function handleBankCommand(service,message){
+async function handleBankCommand(service,message,command="bank"){
   if(message.guild){try{await message.delete();}catch{service.logger.warn?.("[predictions] bank command cleanup failed");}}
   let payload;
   try{
@@ -55,9 +56,14 @@ async function handleBankCommand(service,message){
     service.logger.warn?.("[predictions] bank DM unavailable");
     if(message.guild)try{await message.channel.send({content:"I couldn't DM your statement. Enable DMs from server members and try !bank or !points again.",allowedMentions:{parse:[]}});}catch{}
   }
+  await sendAuditLog({
+    client:message.client||service.client,
+    guild:message.guild,
+    channelId:service.config.channels?.audit,
+    payload:{content:`🏦 <@${message.author.id}> ran \`!${command==="points"?"points":"bank"}\` in **${message.guild?.name||"DM"}** at <t:${Math.floor(service.clock()/1000)}:T>`,allowedMentions:{parse:[]}},
+  });
 }
 function register(registry,service){
-  const handler=message=>service.handleBankCommand(message);
-  registry.set("bank",handler);registry.set("points",handler);
+  for(const command of ["bank","points"])registry.set(command,message=>service.handleBankCommand(message,command));
 }
 module.exports={handleBankCommand,register};

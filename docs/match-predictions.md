@@ -25,6 +25,8 @@ It includes the caller's last five bets with pick, stake, status and actual sett
 
 Long statements arrive as a private text attachment. If DMs are blocked, the server receives only a generic instruction to enable DMs, never financial details. The bot requires Manage Messages to delete the triggering command; missing permission does not prevent the private statement.
 
+Both aliases log command usage to the configured audit channel (`AUDIT_CHANNEL_ID`), including the caller, actual alias, server name or DM, and time. Audit entries contain no balances, picks, stakes or rewards, and are attempted even if DMs are blocked. An unavailable audit channel does not prevent the private statement.
+
 ## Payouts and corrections
 
 Correct bettors first receive their stakes back. The remaining pot is allocated 70% proportionally to correct stakes, 25% equally to the winning four and 5% equally to the losing four. A tie uses 90% for correct bettors and 10% equally among the eight players. Integer rounding uses largest remainders with stable tie breaking, conserving the full pot. If nobody picked correctly, all stakes are refunded and there are no player rewards. No bets means no rewards.

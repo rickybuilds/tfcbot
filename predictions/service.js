@@ -238,7 +238,7 @@ class PredictionsService {
   }
   handleInteraction(i) {return require("./interactions").handleInteraction(this,i);}
   handleAdminCommand(message,args) {return require("./admin").handleAdminCommand(this,message,args);}
-  handleBankCommand(message) {return require("./bank").handleBankCommand(this,message);}
+  handleBankCommand(message,command) {return require("./bank").handleBankCommand(this,message,command);}
   stop() {if(this.timer)clearInterval(this.timer);this.timer=null;}
 }
 module.exports={PredictionsService,termsKey};
