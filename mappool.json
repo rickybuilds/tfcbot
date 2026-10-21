@@ -196,5 +196,17 @@
     "name": "foundry_b3",
     "mirv": 1,
     "tier": 1
+  },
+  {
+    "key": "mm-chateau-b1-780e",
+    "name": "mm_chateau_b2",
+    "mirv": 1,
+    "tier": 1
+  },
+  {
+    "key": "hammer2-b5-fdaf",
+    "name": "hammer2_b5",
+    "mirv": 1,
+    "tier": 2
   }
 ]
