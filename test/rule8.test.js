@@ -147,13 +147,13 @@ test("Rule 8 clear resets only the stored infraction count", async () => {
 
   try {
     register(registry, {
-      elo: { clearRule8Infractions(id) { cleared = id; return 4; } },
+      elo: { clearLatestRule8Infraction(id) { cleared = id; return { cleared: true, count: 3 }; } },
       jailStore: null,
       config: { roles: {} },
     });
     await registry.get("rule8clear")(message, []);
     assert.equal(cleared, "target");
-    assert.match(posted[0], /cleared/);
+    assert.match(posted[0], /cleared the most recent/);
     assert.match(posted[0], /does not refund Elo or change jail status/);
   } finally {
     if (previousAdminRole === undefined) delete process.env.ADMIN_ROLE_ID;

@@ -15,9 +15,10 @@ function register(reg, { config, elo, jailStore }) {
       return;
     }
 
-    const cleared = elo.clearRule8Infractions(user.id);
+    const result = elo.clearLatestRule8Infraction(user.id);
     await message.channel.send(
-      `✅ Cleared ${cleared ? "the" : "no"} stored Rule 8 infraction count for <@${user.id}>. ` +
+      `✅ ${result.cleared ? "Cleared the most recent" : "No stored"} Rule 8 infraction for <@${user.id}> ` +
+      `(remaining: ${result.count}). ` +
       "This does not refund Elo or change jail status."
     );
   });
