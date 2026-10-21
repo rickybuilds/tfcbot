@@ -51,7 +51,7 @@ The embed initially says: "Predictions open — closes 2 minutes after all 8 ros
 
 Old messages and modals carry the market ID and roster revision. Every submission checks current database state, eligibility, deadline, and funds. A stale modal cannot place a bet on a replacement market. Discord delivery failure never rolls back a committed financial operation; a repeated interaction returns the already-recorded result.
 
-Optional public `!points` command is deferred because balances are private. My Bet provides balance access even when the user has not placed a bet.
+Approved follow-up: `!bank` and its alias `!points` delete the server command when permitted and DM the caller their available/held/total points, personal limit, last five bets with actual returns/net, and player rewards from their last five settled prediction games as an official roster player. Edits replace the same bet; refunded/cancelled bets remain labelled. Include zero player rewards and retained correction credits, excluding grants and balance adjustments. Works in DMs and with new predictions disabled. Long statements use a private attachment; blocked DMs produce only a generic public notice, with no financial details. My Bet continues to provide private balance access.
 
 ## Market lifecycle and connection tracking
 

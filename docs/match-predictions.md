@@ -17,6 +17,14 @@ Predictions use points completely separate from ELO. The feature is disabled by 
 - Successful pregame substitutions, shuffles, map changes and starting-order changes refund the old market and create updated controls. Substitutions use the final balanced teams; captain substitutions preserve the outgoing player's team. Changes during live play refund without reopening.
 - Original Blue / Team 1 and Red / Team 2 identities remain fixed across halftime colors.
 
+## Private bank commands
+
+Anyone can use `!bank` or its alias `!points`, including when new predictions are disabled. The bot deletes the command in a server when it has permission and DMs only the caller. The statement shows available points, points held in active bets, their combined total and the current personal betting limit.
+
+It includes the caller's last five bets with pick, stake, status and actual settled returns/net profit or loss, plus player rewards from their last five settled prediction games as one of the official eight (including zero rewards). Cancelled/refunded bets are labelled; edits replace the same bet rather than creating extra history. Player rewards exclude grants and owner balance adjustments. Result corrections show the credits actually received, including retained earlier payouts. Games awaiting their first settlement do not appear in player reward history.
+
+Long statements arrive as a private text attachment. If DMs are blocked, the server receives only a generic instruction to enable DMs, never financial details. The bot requires Manage Messages to delete the triggering command; missing permission does not prevent the private statement.
+
 ## Payouts and corrections
 
 Correct bettors first receive their stakes back. The remaining pot is allocated 70% proportionally to correct stakes, 25% equally to the winning four and 5% equally to the losing four. A tie uses 90% for correct bettors and 10% equally among the eight players. Integer rounding uses largest remainders with stable tie breaking, conserving the full pot. If nobody picked correctly, all stakes are refunded and there are no player rewards. No bets means no rewards.

@@ -374,6 +374,7 @@ deps.predictions = predictions;
 state.predictions = predictions;
 matchesStore.predictions = predictions;
 registry.set("pred", (message, args) => predictions.handleAdminCommand(message, args));
+require("./predictions/bank").register(registry,predictions);
 client.on("interactionCreate", interaction => {
   if (String(interaction.customId || "").startsWith("pred:")) {
     predictions.handleInteraction(interaction).catch(() => console.error("[predictions] interaction failure"));
@@ -784,7 +785,7 @@ client.on("messageCreate", async (message) => {
 		"eloagainst",
 		"help",
 		"privacy"
-		,"pred"
+		,"pred", "bank", "points"
 	  ];
 
 		if (dmAllowed.includes(cmd) && registry.has(cmd)) {

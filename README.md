@@ -15,7 +15,7 @@ service token, persistent log archive, deployment and reprocessing commands.
 - Queue and matchmaking system
 - Elo tracking and rankings
 
-Private 4v4 match predictions are available behind `PREDICTIONS_ENABLED=0` by default. Points are separate from ELO; betting closes a full two minutes after all eight roster players are confirmed on the assigned server. See [prediction rules, owner controls and rollout checks](docs/match-predictions.md).
+Private 4v4 match predictions are available behind `PREDICTIONS_ENABLED=0` by default. Points are separate from ELO; betting closes a full two minutes after all eight roster players are confirmed on the assigned server. Use `!bank` or `!points` for a private DM with your balance, recent bets and player rewards. See [prediction rules, owner controls and rollout checks](docs/match-predictions.md).
 
 New games start each person's maximum bet at 100 points, increasing by 10 for each distinct settled game they bet on, without a fixed upper cap. My Bet privately shows the applicable limit. Owners can use `!pred unresolved` to list unfinished prediction games, including while the feature is disabled. A [future standings website brief](docs/prompts/prediction-standings-website.md) records the privacy and ranking decisions still needed before website implementation.
 

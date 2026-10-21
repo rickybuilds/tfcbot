@@ -190,6 +190,8 @@ Approved by the user after clarification of player eligibility, refund/reset pol
 
 ## Implementation verification
 
+October 21 approved bank follow-up: register `!bank`/`!points` for everyone in guilds and DMs, including when new predictions are disabled. Delete the guild command when permitted and privately deliver available/held/total points, current personal limit, the last five bets and actual player rewards from the last five settled prediction games. Use existing account/ledger data, preserve one-time grants, exclude unrelated adjustments from rewards, distinguish returns from net profit, and never fall back to public financial output. Cover caller isolation, ordering/limits, corrections, refunds, zero rewards, blocked DMs, deletion failure, long attachments and query rollback before pushing to this branch.
+
 Implementation uses the approved full window and house-funded corrections. Accounts, escrow, immutable allocations, lifecycle recovery, private UI, match mutation integration, report hooks, owner controls and WAL restore are implemented and exercised by the tracked prediction tests. Current-server discovery and multi-user staging remain unchecked rollout gates; no deployment is included.
 
 Final verification: 205/205 full-suite tests pass, including 45 prediction tests. Independent whole-branch review findings were reproduced and fixed in one test-first pass, with follow-up checks for log-anchor continuity, publication recovery and async match-flow guards. See [implementation decisions and review record](../../match-predictions-implementation.md). Production/server staging remains pending; feature disabled by default.
