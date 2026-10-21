@@ -101,9 +101,12 @@ function register(reg, { config, elo, jailStore }) {
         jailMessage = ` They are jailed for ${durationHours} hours.`;
       }
 
+      const eloMessage = result.target.delta === 0
+        ? "**no net Elo change** because the target is the designated recipient."
+        : `**-1 Elo** transferred to <@${RULE8_ELO_RECIPIENT_ID}>.`;
       await message.channel.send(
         `⚖️ Rule 8 infraction for <@${target.id}> (${result.count}/5): ` +
-        `**-1 Elo** transferred to <@${RULE8_ELO_RECIPIENT_ID}>.${jailMessage}`
+        `${eloMessage}${jailMessage}`
       );
       await sendAuditLog({
         client: message.client,

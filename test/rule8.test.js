@@ -43,13 +43,29 @@ test("Rule 8 transfers one Elo and persists the target infraction count", () => 
     assert.equal(reopened.getRule8InfractionCount("target"), 1);
     assert.equal(reopened.peekRating("target"), 1999);
     assert.equal(reopened.peekRating("recipient"), 1701);
+    reopened.bump("target", 5, "later-target-change");
+    reopened.bump("recipient", 10, "later-recipient-change");
     const cleared = reopened.clearLatestRule8Infraction("target");
     assert.equal(cleared.reversedElo, true);
     assert.equal(reopened.getRule8InfractionCount("target"), 0);
-    assert.equal(reopened.peekRating("target"), 2000);
+    assert.equal(reopened.peekRating("target"), 2005);
     assert.equal(reopened.peekRating("issuer"), 1800);
-    assert.equal(reopened.peekRating("recipient"), 1700);
+    assert.equal(reopened.peekRating("recipient"), 1710);
     reopened.db.close();
+  } finally {
+    if (elo.db.open) elo.db.close();
+    tmp.cleanup();
+  }
+});
+
+test("Rule 8 records an infraction without changing Elo when recipient is the target", () => {
+  const tmp = tempDb();
+  const elo = new EloDB(tmp.file);
+  try {
+    elo.setRatingAdmin("target", 2000, "Target");
+    const result = elo.recordRule8Infraction("target", "issuer", "target");
+    assert.equal(result.count, 1);
+    assert.equal(elo.peekRating("target"), 2000);
   } finally {
     if (elo.db.open) elo.db.close();
     tmp.cleanup();
