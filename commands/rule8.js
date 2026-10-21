@@ -5,6 +5,7 @@ const { sendAuditLog } = require("../lib/auditLog");
 
 const INFRACTIONS_PER_JAIL = 5;
 const JAIL_HOURS_PER_THRESHOLD = 24;
+const RULE8_ELO_RECIPIENT_ID = "737481545216163891";
 
 function register(reg, { config, elo, jailStore }) {
   reg.set("rule8clear", async (message) => {
@@ -62,8 +63,10 @@ function register(reg, { config, elo, jailStore }) {
       const result = elo.recordRule8Infraction(
         user.id,
         message.author.id,
+        RULE8_ELO_RECIPIENT_ID,
         target.displayName || user.username,
         message.member?.displayName || message.author.username,
+        "Rule 8 recipient",
       );
       let jailMessage = "";
 
@@ -100,14 +103,14 @@ function register(reg, { config, elo, jailStore }) {
 
       await message.channel.send(
         `⚖️ Rule 8 infraction for <@${target.id}> (${result.count}/5): ` +
-        `**-1 Elo** transferred to <@${message.author.id}>.${jailMessage}`
+        `**-1 Elo** transferred to <@${RULE8_ELO_RECIPIENT_ID}>.${jailMessage}`
       );
       await sendAuditLog({
         client: message.client,
         channelId: config?.channels?.audit,
         payload: `⚖️ RULE 8: <@${message.author.id}> issued an infraction to <@${target.id}>; ` +
           `Elo transferred ${result.target.before}→${result.target.after}, ` +
-          `${result.issuer.before}→${result.issuer.after}; total ${result.count}`,
+          `recipient <@${RULE8_ELO_RECIPIENT_ID}> ${result.recipient.before}→${result.recipient.after}; total ${result.count}`,
         errorMessage: "[rule8 audit] failed:",
       });
     } catch (err) {

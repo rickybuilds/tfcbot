@@ -31,20 +31,24 @@ test("Rule 8 transfers one Elo and persists the target infraction count", () => 
   try {
     elo.setRatingAdmin("target", 2000, "Target");
     elo.setRatingAdmin("issuer", 1800, "Issuer");
+    elo.setRatingAdmin("recipient", 1700, "Rule 8 recipient");
 
-    const first = elo.recordRule8Infraction("target", "issuer");
+    const first = elo.recordRule8Infraction("target", "issuer", "recipient");
     assert.equal(first.count, 1);
     assert.equal(elo.peekRating("target"), 1999);
-    assert.equal(elo.peekRating("issuer"), 1801);
+    assert.equal(elo.peekRating("issuer"), 1800);
+    assert.equal(elo.peekRating("recipient"), 1701);
 
     const reopened = new EloDB(tmp.file);
     assert.equal(reopened.getRule8InfractionCount("target"), 1);
     assert.equal(reopened.peekRating("target"), 1999);
+    assert.equal(reopened.peekRating("recipient"), 1701);
     const cleared = reopened.clearLatestRule8Infraction("target");
     assert.equal(cleared.reversedElo, true);
     assert.equal(reopened.getRule8InfractionCount("target"), 0);
     assert.equal(reopened.peekRating("target"), 2000);
     assert.equal(reopened.peekRating("issuer"), 1800);
+    assert.equal(reopened.peekRating("recipient"), 1700);
     reopened.db.close();
   } finally {
     if (elo.db.open) elo.db.close();
@@ -89,6 +93,8 @@ test("Rule 8 command jails at five infractions and escalates by 24 hours", async
     for (let i = 0; i < 5; i++) await registry.get("rule8")(message, []);
 
     assert.equal(elo.getRule8InfractionCount("target"), 5);
+    assert.equal(elo.peekRating("issuer"), 1941, "the command issuer does not receive Elo");
+    assert.equal(elo.peekRating("737481545216163891"), 1946, "the fixed Rule 8 recipient receives Elo");
     assert.equal(jailCalls.length, 1);
     assert.ok(jailCalls[0].value.expires - Date.now() > 23 * 60 * 60 * 1000);
     assert.match(sent.at(-1), /24 hours/);
