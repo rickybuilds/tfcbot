@@ -51,7 +51,7 @@ function register(reg, { config }) {
     emb.addFields({name:"Your Prediction Bank",value:"`!bank` or `!points` — privately DM your points, betting limit, last five bets and player rewards from your last five settled prediction games. The bot deletes the command in servers when permitted. Available even with predictions disabled."});
     if(config.predictionsOwnerId&&String(message.author.id)===config.predictionsOwnerId)emb.addFields({
       name:"Prediction Owner Controls",
-      value:"`!pred unresolved` privately lists unfinished prediction games. Use `!pred status <matchId>` for details and `!pred audit <matchId|userId>` for history. These remain available with predictions disabled.",
+      value:"`!pred unresolved` privately lists unfinished prediction games. Use `!pred status <matchId>` for details and `!pred audit <matchId|userId>` for history. `!pred settle <matchId> <blue|red|tie> <reason>` recovers a reviewed game matching its completed official report, after private confirmation. These remain available with predictions disabled.",
     });
 
     // ---------------- Admin Commands ----------------

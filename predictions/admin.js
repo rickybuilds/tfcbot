@@ -7,29 +7,46 @@ function official(service,matchId) {
   const row=service.db.prepare("SELECT winner,status FROM matches WHERE match_id=?").get(String(matchId));
   return row&&String(row.status).toLowerCase()==="completed"?String(row.winner).toLowerCase():null;
 }
+function reviewedSettlement(service,p) {
+  const m=service.store.latest(p.target);
+  if(!m)throw new Error("Unknown prediction match");
+  if(m.settlement_version)throw new Error("Game already has a settlement; use !pred correct for a changed result");
+  if(m.state!=="review_required")throw new Error("Only an unsettled game frozen for review can use !pred settle");
+  const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
+  if(!["blue","red","tie"].includes(p.outcome)||!row||String(row.status).toLowerCase()!=="completed"||String(row.winner).toLowerCase()!==p.outcome)throw new Error("Settlement must match the completed official result");
+  const team=value=>{try{const ids=JSON.parse(value);return Array.isArray(ids)?JSON.stringify(ids.map(String).sort()):null;}catch{return null;}};
+  if(team(row.blue_ids)!==JSON.stringify(m.snapshot.blueIds.slice().sort())||team(row.red_ids)!==JSON.stringify(m.snapshot.redIds.slice().sort()))throw new Error("Official teams differ from the frozen prediction teams; review the roster before settlement");
+  if(String(row.map_name||"").toLowerCase()!==String(m.snapshot.mapName).toLowerCase())throw new Error("Official map differs from the frozen prediction map");
+  return {m,row};
+}
 function signature(service,p) {
   if(p.action==="adjust")return JSON.stringify(service.store.account(p.target)||null);
   if(["pause","resume"].includes(p.action))return service.store.metadata("paused","0");
   const m=service.store.latest(p.target);
+  if(p.action==="settle"){
+    const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
+    return JSON.stringify([m, row, service.store.bets(m.id)]);
+  }
   return JSON.stringify(m?[m.id,m.revision,m.state,m.settlement_version,m.observed_result,m.result,m.deletion_authorized,m.closes_at,officialIfAvailable(service,p.target)]:null);
 }
 function officialIfAvailable(service,id) {return service.db.prepare("SELECT 1 FROM sqlite_master WHERE name='matches'").get()?official(service,id):null;}
 function parse(service,args) {
   const [action,target,third,...rest]=args;
-  if(!["void","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred unresolved/status/audit/void/correct/adjust/pause/resume/retain");
+  if(!["void","settle","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred unresolved/status/audit/void/settle/correct/adjust/pause/resume/retain");
   const p={action,target};
   if(action==="adjust"){
     p.target=String(target||"").replace(/^<@!?(\d+)>$/,"$1");
     if(!p.target||!/^[-+]?\d+$/.test(third||"")||!Number.isSafeInteger(Number(third))||!Number(third))throw new Error("Adjustment requires a user, nonzero safe integer and reason");
     p.amount=Number(third);p.reason=rest.join(" ");
-  }else if(action==="correct"){
+  }else if(action==="correct"||action==="settle"){
     p.outcome=third;p.reason=rest.join(" ");
-    if(!["blue","red","tie"].includes(p.outcome)||official(service,target)!==p.outcome)throw new Error("Correction must match the completed official result; fix the match report first");
+    if(action==="settle")reviewedSettlement(service,p);
+    else if(!["blue","red","tie"].includes(p.outcome)||official(service,target)!==p.outcome)throw new Error("Correction must match the completed official result; fix the match report first");
   }else if(action==="pause"||action==="resume")p.reason=args.slice(1).join(" ");
   else p.reason=args.slice(2).join(" ");
   if(!p.reason?.trim())throw new Error("A reason is required");
   if(!["adjust","pause","resume"].includes(action)&&!service.store.latest(target))throw new Error("Unknown prediction match");
-  if(action==="correct"&&!service.store.latest(target).settlement_version)throw new Error("No previous settlement; void the reviewed market instead");
+  if(action==="correct"&&!service.store.latest(target).settlement_version)throw new Error("No previous settlement; use !pred settle for a reviewed completed game");
   if(action==="retain"&&!service.store.latest(target).settlement_version)throw new Error("Only settled history can be retained for deletion; void unresolved markets first");
   return p;
 }
@@ -63,7 +80,12 @@ async function handleAdminCommand(service,message,args=[]) {
       const p={...payload,ownerId:ctx.actorId,expiresAt:ctx.now+60000,signature:signature(service,payload),token:randomUUID()};
       service.store.entry(ctx,{kind:"preview",entryKey:"preview",metadata:p});return p;
     });
-    await sendPrivate(message,{content:`Confirm ${preview.action} ${preview.target||""}${preview.amount!=null?` ${preview.amount}`:""}${preview.outcome?` → ${preview.outcome}`:""}.\nReason: ${preview.reason}\nExpires in 60 seconds.${preview.action==="correct"?" Prior payouts remain untouched; the house funds additional entitlements.":""}`,components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pred:confirm:${preview.token}`).setLabel("Confirm").setStyle(ButtonStyle.Danger))]});
+    let recovery="";
+    if(preview.action==="settle"){
+      const {m}=reviewedSettlement(service,preview),bets=service.store.bets(m.id).filter(b=>b.status==="active"),pot=bets.reduce((n,b)=>n+BigInt(b.stake),0n);
+      recovery=`\nFrozen reason: ${m.reason||"unspecified"}.\n${bets.length} active bets; ${pot.toLocaleString("en-US")} points locked; revision ${m.revision}.\nOriginal betting deadline: ${m.closes_at==null?"not recorded":`<t:${Math.floor(m.closes_at/1000)}:F>`}.\nBy confirming, you accept the frozen bets despite the unverified closing window and authorize the normal payout. Bets stay closed; ELO is unchanged.`;
+    }
+    await sendPrivate(message,{content:`Confirm ${preview.action} ${preview.target||""}${preview.amount!=null?` ${preview.amount}`:""}${preview.outcome?` → ${preview.outcome}`:""}.\nReason: ${preview.reason}${recovery}\nExpires in 60 seconds.${preview.action==="correct"?" Prior payouts remain untouched; the house funds additional entitlements.":""}`,components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pred:confirm:${preview.token}`).setLabel("Confirm").setStyle(ButtonStyle.Danger))]});
   }catch(error){await sendPrivate(message,{content:error.message});}
 }
 async function confirm(service,i,token) {
@@ -78,6 +100,10 @@ async function confirm(service,i,token) {
     const m=service.store.latest(p.target),inner={...ctx,operationKey:`${ctx.operationKey}:action`};
     if(p.action==="adjust")service.store.adjust(p.target,p.amount,inner);
     if(p.action==="void")service.store.voidMarket({marketId:m.id,context:inner});
+    if(p.action==="settle"){
+      reviewedSettlement(service,p);
+      service.store.settleReviewedMarket({marketId:m.id,outcome:p.outcome,context:inner});
+    }
     if(p.action==="correct"){
       if(official(service,p.target)!==p.outcome)throw new Error("Correction no longer matches official result");
       service.store.correctSettlement({marketId:m.id,outcome:p.outcome,context:inner});

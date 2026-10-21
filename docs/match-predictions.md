@@ -64,12 +64,15 @@ Only `PREDICTIONS_OWNER_ID` can use these controls; the Discord admin role alone
 | `!pred status <matchId>` | Inspect current state, revision, phase, deadline and review reason. |
 | `!pred audit <matchId\|userId>` | Download private transaction history and market details. |
 | `!pred void <matchId> <reason>` | Refund and void an unsettled or reviewed market. |
+| `!pred settle <matchId> <blue\|red\|tie> <reason>` | Settle an initially unpaid reviewed game matching its completed official result, teams and map. Private confirmation explicitly accepts the frozen bets despite uncertain closure history. |
 | `!pred correct <matchId> <blue\|red\|tie> <reason>` | Apply a house-funded correction matching the completed official report. Fix the report first. |
 | `!pred adjust <userId> <signedPoints> <reason>` | Audited grant/deduction. Deductions cannot create a negative balance. |
 | `!pred pause <reason>` / `!pred resume <reason>` | Persistently stop/resume new and edited bets. Deadlines, pre-lock cancellation, refunds and settlement continue. |
 | `!pred retain <matchId> <reason>` | Explicitly allow deleting a settled match while preserving all financial snapshots and history. |
 
 Mutations require an owner-bound confirmation expiring after 60 seconds. Changed relevant state invalidates the preview. Repeating the same confirmation returns its stored result. There is no manual early-close command or selective owner refund in V1.
+
+For example, `!pred settle DH96AX red Verified official Red 90-80; accept frozen bets` privately previews the frozen reason, revision, bet count, pot and original deadline (including a missing deadline). Confirm within 60 seconds after reviewing the official game and frozen bets. The official report must be completed, match the chosen outcome, and have the same Blue/Red roster identities and map as the frozen prediction snapshot. It never reopens betting, fabricates an earlier deadline, changes ELO, revives a void, or replaces an existing settlement. The owner's reason, original freeze details and payout are recorded atomically in the transaction history. Relevant state/report/bet changes invalidate the preview; repeated confirmations/reports and restarts cannot repeat the payout. Use `!pred correct` for later corrections to already-paid games. This recovery does not repair the underlying server-monitoring/map failure.
 
 ## Recovery and rollback
 
