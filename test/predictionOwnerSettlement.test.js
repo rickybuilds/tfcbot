@@ -53,3 +53,20 @@ test('tie recovery retains an existing deadline and pays only the normal tie all
  await s.handleAdminCommand(message,['settle','DH96AX','tie','Verified completed tie and frozen bets']);const p=messages.at(-1);assert.match(p.content,/<t:121:F>/);await confirm(p);
  assert.equal(s.store.account('a').balance,1270);assert.equal(s.store.latest('DH96AX').result,'tie');assert.equal(s.store.latest('DH96AX').closes_at,121000);assert.equal(s.store.houseFunding(),0);assert.equal(s.store.assertAccounting(),true);
 });
+
+test('owner explicitly accepts the reported map change without rewriting the frozen snapshot or duplicating payouts',async t=>{
+ const {s,db,m,message,messages,confirm}=setup(t);db.prepare('UPDATE prediction_markets SET snapshot=json_set(snapshot,\'$.mapName\',?) WHERE id=?').run('hammer2_b5',m.id);
+ const args=['settle','DH96AX','red','--accept-map-change','Verified alchimy_lg Red 90-80; accept frozen bets'];
+ await s.handleAdminCommand(message,args);const p=messages.at(-1);assert.ok(p.components);assert.match(p.content,/hammer2_b5.*alchimy_lg/);assert.match(p.content,/accept.*map|map.*accept/i);assert.match(p.content,/400/);
+ await confirm(p);assert.equal(s.store.market(m.id).state,'settled');assert.equal(s.store.account('a').balance,1070);assert.equal(s.store.market(m.id).snapshot.mapName,'hammer2_b5');
+ const audit=JSON.parse(db.prepare("SELECT metadata FROM prediction_transactions WHERE kind='owner_settlement'").get().metadata);assert.deepEqual(audit.mapChange,{predictionMap:'hammer2_b5',officialMap:'alchimy_lg',accepted:true});
+ await confirm(p);s.onMatchReported({matchId:'DH96AX'});assert.equal(s.store.account('a').balance,1070);assert.equal(s.store.market(m.id).settlement_version,1);assert.equal(s.store.assertAccounting(),true);
+});
+
+test('accepting a map change requires a reason, unchanged official map and matching official teams/result',async t=>{
+ const {s,db,m,message,messages,confirm}=setup(t);db.prepare('UPDATE prediction_markets SET snapshot=json_set(snapshot,\'$.mapName\',?) WHERE id=?').run('hammer2_b5',m.id);
+ const base=['settle','DH96AX','red','--accept-map-change'];await s.handleAdminCommand(message,base);assert.match(messages.at(-1).content,/reason/i);assert.equal(messages.at(-1).components,undefined);
+ const args=[...base,'Verified actual map and result'];await s.handleAdminCommand(message,args);const p=messages.at(-1);assert.ok(p.components);db.prepare("UPDATE matches SET map_name='different_map'").run();assert.match((await confirm(p)).content,/changed/i);
+ db.prepare("UPDATE matches SET winner='BLUE'").run();await s.handleAdminCommand(message,args);assert.equal(messages.at(-1).components,undefined);
+ db.prepare("UPDATE matches SET winner='RED',blue_ids='[]'").run();await s.handleAdminCommand(message,args);assert.match(messages.at(-1).content,/teams/i);assert.equal(messages.at(-1).components,undefined);assert.equal(s.store.account('a').balance,900);assert.equal(s.store.market(m.id).state,'review_required');
+});
