@@ -19,6 +19,8 @@ async function handleInteraction(service,i) {
     // are still actor-bound by Discord, and never take an account ID from custom_id.
     if(["pick","mine"].includes(action)&&i.message&&m.message_id&&String(i.message.id)!==m.message_id&&!i.message.flags?.has?.(64))throw new Error("Stale prediction message");
     const ctx={operationKey:`discord:${i.id}`,actorId:user,now:service.clock()};
+    // Repair an old public card as well as rejecting bets against its closed state.
+    if(!isOpen(m,ctx.now))service.refreshCard(m.id);
     if(action==="pick"){
       service.store.mutable(marketRef,ctx.now);
       if(!["blue","red","tie"].includes(pick))throw new Error("Invalid pick");

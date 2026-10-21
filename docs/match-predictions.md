@@ -29,7 +29,7 @@ PREDICTIONS_ENABLED=0
 PREDICTIONS_OWNER_ID=your_discord_user_id
 ```
 
-Predictions use the existing resolved `DB_PATH` / `ELO_DB` / `elo.db` handle. Five additive tables hold accounts, markets, bets, append-only transactions, and small schema/pause metadata. No database consolidation is involved. Existing SQLite-aware backups now receive the configured ELO path.
+Predictions use the existing resolved `DB_PATH` / `ELO_DB` / `elo.db` handle. Five additive tables hold accounts, markets, bets, append-only transactions, and small schema/pause/card-delivery metadata. No database consolidation is involved. Existing SQLite-aware backups now receive the configured ELO path.
 
 The progression update advances prediction schema version 1 to 2 in one transaction on startup, replacing the bet table's former 250-point constraint while preserving rows, IDs and immutable transaction history. ELO tables and SQLite's global `user_version` are untouched. Back up the configured database before updating. Amounts remain positive safe integers, with safe-integer balance and total-game-stake checks; these are numerical representation safeguards, not a progression ceiling. Progress is calculated from retained settled bets and is not duplicated by startup or corrections.
 
@@ -63,6 +63,8 @@ Mutations require an owner-bound confirmation expiring after 60 seconds. Changed
 ## Recovery and rollback
 
 The database is authoritative even when Discord delivery fails. Unpublished match cards retain their destination for startup/periodic retry. All-eight candidates from log events are confirmed with a complete server roster query before persisting a deadline. On restart, expired deadlines close immediately. Unfinished open/countdown markets with uncertain connection history freeze for review; their original deadline is retained. Do not infer the first all-eight time from a reconnect poll or grant a fresh window. The owner can void/refund a reviewed unsettled market. Completed official results retry settlement independently of delayed ELO writes. Changed reports freeze financial settlement for owner correction.
+
+Deleting an unresolved match atomically refunds its stakes, voids predictions and queues an update to the original match card. The card states that predictions are voided/refunded and disables outcome buttons while retaining My Bet. Failed bound-card edits remain queued in prediction metadata for startup/15-second retries, including while new predictions are disabled. An old edit completing out of order cannot discard the required refresh. The database rejects bets immediately even if Discord is unavailable. For an already deleted game whose card predates this fix, clicking My Bet refreshes that stale card; it does not repeat refunds.
 
 Unexpected maps, incomplete presence monitoring and unknown phase prevent automatic reopening. Original locked bet inputs, allocations, grants, corrections and house funding remain auditable. Match deletion/purge cannot erase unresolved financial dependencies, and deleting an allowed match retains prediction history. Identity merge tools refuse existing prediction accounts pending a dedicated merge policy.
 

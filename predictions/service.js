@@ -185,12 +185,25 @@ class PredictionsService {
     if(all.some(m=>m.settlement_version>0&&!m.deletion_authorized))throw new Error("Owner must authorize retaining settled prediction history before deletion");
   }
   applyMatchDeletion({matchId,applyMatchWrites,context=this.context("delete","system","match deleted")}) {
-    return this.store.atomic(()=>{this.assertCanDeleteMatch(matchId);for(const m of this.store.markets().filter(m=>m.match_id===String(matchId)&&m.state!=="void"&&!m.settlement_version))this.store.voidMarket({marketId:m.id,context:{...context,operationKey:`${context.operationKey}:${m.id}`}});return applyMatchWrites();});
+    const dirty=[];
+    const result=this.store.atomic(()=>{
+      this.assertCanDeleteMatch(matchId);
+      for(const m of this.store.markets().filter(m=>m.match_id===String(matchId)&&m.state!=="void"&&!m.settlement_version)){
+        this.store.voidMarket({marketId:m.id,context:{...context,operationKey:`${context.operationKey}:${m.id}`}});
+        if(m.channel_id){this.store.setMetadata(`card_refresh:${m.id}`,randomUUID());dirty.push(m.id);}
+      }
+      return applyMatchWrites();
+    });
+    // Run after synchronous callers have committed, including an enclosing
+    // transaction. A rollback removes the durable refresh request as well.
+    if(this.client)for(const id of dirty)queueMicrotask(()=>{if(this.store.metadata(`card_refresh:${id}`))this.refreshCard(id);});
+    return result;
   }
   bindMessage(id,message) {this.db.prepare("UPDATE prediction_markets SET channel_id=?,message_id=? WHERE id=?").run(String(message.channelId||message.channel?.id),String(message.id),id);}
   queueCardPublication(id,channelId) {if(channelId)this.db.prepare("UPDATE prediction_markets SET channel_id=? WHERE id=?").run(String(channelId),id);}
   async retryPendingCards() {
     if(!this.client)return;
+    for(const row of this.db.prepare("SELECT key FROM prediction_meta WHERE key GLOB 'card_refresh:*'").all())await this.refreshCard(Number(row.key.slice("card_refresh:".length)));
     for(const m of this.store.markets().filter(m=>m.channel_id&&!m.message_id&&m.state!=="void"&&this.store.latest(m.match_id)?.id===m.id)){
       if(this.cardJobs.has(m.id))continue;this.cardJobs.add(m.id);
       try{
@@ -202,8 +215,19 @@ class PredictionsService {
     }
   }
   async refreshCard(id) {
-    const m=this.store.market(id);if(!this.client||!m?.channel_id||!m.message_id)return;
-    try{const channel=await this.client.channels.fetch(m.channel_id);const msg=await channel.messages.fetch(m.message_id);await msg.edit(require("./messages").cardUpdate(m,this.clock()));}catch{this.logger.warn?.(`[predictions] card update failed for market ${id}`);}
+    const key=`card_refresh:${id}`,m=this.store.market(id);
+    if(!m?.channel_id){this.db.prepare("DELETE FROM prediction_meta WHERE key=?").run(key);return;}
+    // Pending publication may bind a message later; retain its refresh request.
+    if(!m.message_id)return;
+    const token=randomUUID();this.store.setMetadata(key,token);
+    if(!this.client)return;
+    try{
+      const channel=await this.client.channels.fetch(m.channel_id),msg=await channel.messages.fetch(m.message_id);
+      const update=require("./messages").cardUpdate(this.store.market(id),this.clock());
+      await msg.edit(update);
+      if(JSON.stringify(update)!==JSON.stringify(require("./messages").cardUpdate(this.store.market(id),this.clock())))this.store.setMetadata(key,randomUUID());
+      else this.db.prepare("DELETE FROM prediction_meta WHERE key=? AND value=?").run(key,token);
+    }catch{this.logger.warn?.(`[predictions] card update failed for market ${id}`);}
   }
   handleInteraction(i) {return require("./interactions").handleInteraction(this,i);}
   handleAdminCommand(message,args) {return require("./admin").handleAdminCommand(this,message,args);}
