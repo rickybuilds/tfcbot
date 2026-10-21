@@ -128,3 +128,35 @@ test("bare Rule 8 command displays the rule text", async () => {
     else process.env.ADMIN_ROLE_ID = previousAdminRole;
   }
 });
+
+test("Rule 8 clear resets only the stored infraction count", async () => {
+  const previousAdminRole = process.env.ADMIN_ROLE_ID;
+  process.env.ADMIN_ROLE_ID = "admin-role";
+  const posted = [];
+  const registry = new Map();
+  let cleared;
+  const message = {
+    author: { id: "issuer" },
+    member: { roles: { cache: roleCollection([["admin-role", { id: "admin-role" }]]) } },
+    mentions: {
+      users: { first: () => ({ id: "target" }) },
+      members: { first: () => ({ id: "target" }) },
+    },
+    channel: { async send(value) { posted.push(value); } },
+  };
+
+  try {
+    register(registry, {
+      elo: { clearRule8Infractions(id) { cleared = id; return 4; } },
+      jailStore: null,
+      config: { roles: {} },
+    });
+    await registry.get("rule8clear")(message, []);
+    assert.equal(cleared, "target");
+    assert.match(posted[0], /cleared/);
+    assert.match(posted[0], /does not refund Elo or change jail status/);
+  } finally {
+    if (previousAdminRole === undefined) delete process.env.ADMIN_ROLE_ID;
+    else process.env.ADMIN_ROLE_ID = previousAdminRole;
+  }
+});

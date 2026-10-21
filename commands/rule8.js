@@ -7,6 +7,21 @@ const INFRACTIONS_PER_JAIL = 5;
 const JAIL_HOURS_PER_THRESHOLD = 24;
 
 function register(reg, { config, elo, jailStore }) {
+  reg.set("rule8clear", async (message) => {
+    if (!isAdmin(message)) return;
+    const user = message.mentions?.users?.first();
+    if (!user) {
+      await message.channel.send("Usage: `!rule8clear @user`");
+      return;
+    }
+
+    const cleared = elo.clearRule8Infractions(user.id);
+    await message.channel.send(
+      `✅ Cleared ${cleared ? "the" : "no"} stored Rule 8 infraction count for <@${user.id}>. ` +
+      "This does not refund Elo or change jail status."
+    );
+  });
+
   reg.set("rule8", async (message) => {
     const user = message.mentions?.users?.first();
     const target = message.mentions?.members?.first();
