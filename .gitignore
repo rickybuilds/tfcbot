@@ -128,6 +128,7 @@ test_api.js
 /amxx/1v1
 !/test/
 /test/*
+!/test/rule8.test.js
 !/test/captains.test.js
 !/test/restartRequestPolicy.test.js
 !/test/hldsQueue.test.js

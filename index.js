@@ -239,6 +239,7 @@ registry.set("tfcadmins", (m, a) => tfcAdmin.list(m, a, deps));
 require("./commands/jail").register(registry, deps);
 require("./commands/unjail").register(registry, deps);
 require("./commands/jaillist").register(registry, deps);
+require("./commands/rule8").register(registry, deps);
 
 // RCON commands (!timeleft, !rcon <cmd>)
 registry.set("rcon", (m, a) => rconCommands.execute(m, a, deps));

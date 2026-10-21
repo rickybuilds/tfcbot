@@ -76,6 +76,7 @@ function register(reg, { config }) {
           value:
             "`!ban @user <games> [reason]` — Temporary ban (x games)\n" +
             "`!permaban @user` — Permanent ban (adds permaban role)\n" +
+            "`!rule8 @user` — Transfer 1 Elo and record a Rule 8 infraction\n" +
             "`!unban @user` — Remove active ban / restore permissions\n" +
             "`!unjail @user` — Restore roles to a jailed player\n" +
             "`!listbans` — Show active game bans",
