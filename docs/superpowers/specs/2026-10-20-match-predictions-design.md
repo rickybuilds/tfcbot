@@ -41,6 +41,8 @@ This document records the approved rules and implementation decisions. Deploymen
 
 The existing Match Ready/Match Updated embed gains one row: Blue, Red, Tie, My Bet. Label colors as the original teams in that match card; they are not the physical team colors after halftime.
 
+October 21 approved display update: include the existing ELO matchup estimate in the Blue/Team 1 and Red/Team 2 button labels, such as `Blue / Team 1 · 58%` and `Red / Team 2 · 42%`. Use `lib/odds`' actual-team rating lookup and split summary; store the resulting complementary percentages in the prediction snapshot for that revision. Recompute for updated pregame teams. Retain original team identities across halftime and do not let unrelated rating changes alter an existing estimate. Tie and My Bet remain unchanged; missing/invalid stored estimates fall back to the original labels. Do not add an odds field to the embed or change financial rules.
+
 Selecting an outcome opens a private amount modal, prefilled with the existing stake or 100 points for a new bet. Submission is the final placement/edit action. The private response confirms match, selected team, stake, remaining balance, and closing status. No stake is reserved just by opening the modal.
 
 My Bet gives a private view with Change and Cancel buttons while open/counting down. Cancel refunds the stake immediately. After lock, My Bet still works but editing and cancellation do not. After settlement it displays that user's outcome and payout.

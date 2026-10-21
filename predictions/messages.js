@@ -9,7 +9,10 @@ function statusText(m) {
   return m.state==="void"?"Predictions voided — stakes refunded.":"Predictions closed — waiting for the official result.";
 }
 function actionRow(m,now) {
-  const buttons=[...["blue","red","tie"].map((pick,i)=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${pick}`).setLabel(["Blue / Team 1","Red / Team 2","Tie"][i]).setStyle([ButtonStyle.Primary,ButtonStyle.Danger,ButtonStyle.Secondary][i]).setDisabled(!isOpen(m,now))),new ButtonBuilder().setCustomId(`pred:mine:${m.id}:${m.revision}`).setLabel("My Bet").setStyle(ButtonStyle.Secondary)];
+  const odds=m.snapshot?.eloOdds;
+  const validOdds=odds&&[odds.blue,odds.red].every(n=>Number.isInteger(n)&&n>=0&&n<=100)&&odds.blue+odds.red===100;
+  const labels=[`Blue / Team 1${validOdds?` · ${odds.blue}%`:""}`,`Red / Team 2${validOdds?` · ${odds.red}%`:""}`,"Tie"];
+  const buttons=[...["blue","red","tie"].map((pick,i)=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${pick}`).setLabel(labels[i]).setStyle([ButtonStyle.Primary,ButtonStyle.Danger,ButtonStyle.Secondary][i]).setDisabled(!isOpen(m,now))),new ButtonBuilder().setCustomId(`pred:mine:${m.id}:${m.revision}`).setLabel("My Bet").setStyle(ButtonStyle.Secondary)];
   return new ActionRowBuilder().addComponents(buttons);
 }
 function cardUpdate(m,now=Date.now()) {return {content:statusText(m),components:[actionRow(m,now)]};}

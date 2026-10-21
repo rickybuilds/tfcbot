@@ -23,6 +23,13 @@ class PredictionsService {
     this.rosterSchedules=new Map();
   }
   context(prefix="system",actorId="system",reason) {return {operationKey:`${prefix}:${randomUUID()}`,actorId,reason,now:this.clock()};}
+  snapshotWithOdds(snapshot) {
+    const {getRating,summarizeSplit}=require("../lib/odds");
+    const blue=snapshot.blueIds.map(id=>({id:String(id)})),red=snapshot.redIds.map(id=>({id:String(id)}));
+    const ratings=new Map([...blue,...red].map(player=>[player.id,getRating({db:this.db},player)]));
+    const odds=summarizeSplit(blue,red,ratings);
+    return {...snapshot,eloOdds:{blue:odds.pctBlue,red:odds.pctRed}};
+  }
   snapshotFromRow(row,overrides={}) {
     const parse=(s,fallback)=>{try{return JSON.parse(s||"null")||fallback;}catch{return fallback;}};
     const blueIds=parse(row.blue_ids,[]).map(String),redIds=parse(row.red_ids,[]).map(String),offense=parse(row.offense_ids,{});
@@ -36,7 +43,7 @@ class PredictionsService {
     if(this.store.latest(snapshot.matchId)?.state==="void")throw new Error("Historical match ID cannot be reused after a void");
     const active=this.store.markets().find(m=>m.snapshot.serverKey===snapshot.serverKey&&m.match_id!==String(snapshot.matchId)&&!["void","settled"].includes(m.state));
     if(active)throw new Error("Assigned server already has an unresolved prediction market");
-    const market=this.store.createMarket(snapshot,context);
+    const market=this.store.createMarket(this.snapshotWithOdds(snapshot),context);
     this.rosterSchedules.delete(snapshot.serverKey);
     return market;
   }
@@ -54,7 +61,7 @@ class PredictionsService {
       }
       this.store.voidMarket({marketId:m.id,context});
       if(m.phase==="live")return this.store.market(m.id);
-      const next=this.store.createMarket(nextSnapshot,context);
+      const next=this.store.createMarket(this.snapshotWithOdds(nextSnapshot),context);
       if(m.snapshot.serverKey===nextSnapshot.serverKey&&m.snapshot.mapName===nextSnapshot.mapName)this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(m.phase_evidence,next.id);
       return this.store.market(next.id);
     });
