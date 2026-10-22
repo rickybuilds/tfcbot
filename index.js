@@ -212,6 +212,7 @@ require("./commands/ranks").register(registry, deps);
 require("./commands/mapcaps").register(registry, deps);
 require("./commands/idea").register(registry, deps);
 require("./commands/botch").register(registry);
+require("./commands/selfdestruct").register(registry);
 require("./commands/noticeRoles").register(registry, {
   state,
   elo,

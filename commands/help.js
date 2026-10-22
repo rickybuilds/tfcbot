@@ -32,6 +32,7 @@ function register(reg, { config }) {
         "`!notice` — Ping @TFCPlayer role when queue ≥ 5\n" +
         "`!admin` — Ping admin role for assistance\n" +
         "`!botch` — Visit the coolest dude page\n" +
+        "`!selfdestruct` — Trigger the owner-only fake self-destruct prank\n" +
         "`!timeleft` — Show current map and time left on the active server\n" +  // ✅ added here
         "`!maplist` — Shows current maplist\n" +
         "`!ranks` — Display Elo rank bands\n" +
