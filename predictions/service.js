@@ -1,5 +1,5 @@
 "use strict";
-const {randomUUID}=require("node:crypto");
+const {randomUUID,createHash}=require("node:crypto");
 const {PredictionStore,validSnapshot}=require("./store");
 const {PresenceTracker,rosterPresence,parseStatus}=require("./presence");
 const recoverableReviews=new Set(["unexpected server map","server monitoring unavailable"]);
@@ -28,7 +28,7 @@ function rosterFailureReason(error) {
 class PredictionsService {
   constructor({db,client,config={},clock=Date.now,logger=console,queryServerRoster,queryServerPhase,waitForRosterRetry}) {
     this.store=new PredictionStore(db);this.db=db;this.client=client;this.config=config;this.clock=clock;this.logger=logger;
-    this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.cardJobs=new Set();this.timer=null;
+    this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.cardJobs=new Map();this.timer=null;
     this.queryServerRoster=queryServerRoster|| (async serverKey=>parseStatus(await require("../services/rconClient").runRawRconCommand(serverKey,"status")));
     this.queryServerPhase=queryServerPhase||require("./phase").queryServerPhase;
     this.waitForRosterRetry=waitForRosterRetry||(()=>new Promise(resolve=>setTimeout(resolve,2000)));
@@ -241,18 +241,49 @@ class PredictionsService {
     return result;
   }
   bindMessage(id,message) {this.db.prepare("UPDATE prediction_markets SET channel_id=?,message_id=? WHERE id=?").run(String(message.channelId||message.channel?.id),String(message.id),id);}
-  queueCardPublication(id,channelId) {if(channelId)this.db.prepare("UPDATE prediction_markets SET channel_id=? WHERE id=?").run(String(channelId),id);}
+  queueCardPublication(id,channelId,payload) {
+    if(channelId)this.db.prepare("UPDATE prediction_markets SET channel_id=? WHERE id=? AND message_id IS NULL").run(String(channelId),id);
+    if(payload){
+      const key=`card_payload:${id}`,previous=JSON.parse(this.store.metadata(key,"{}"));
+      this.store.setMetadata(key,JSON.stringify({...previous,...payload}));
+    }
+  }
+  cardPayload(m) {
+    const payload=JSON.parse(this.store.metadata(`card_payload:${m.id}`,"{}")),update=require("./messages").cardUpdate(m,this.clock());
+    const heading=payload.content?`${payload.content}\n`:payload.embeds?.length?"":`Match ${m.match_id}\nBlue / Team 1: ${m.snapshot.blueIds.map(id=>`<@${id}>`).join(", ")}\nRed / Team 2: ${m.snapshot.redIds.map(id=>`<@${id}>`).join(", ")}\n`;
+    return {...payload,...update,content:heading+update.content,allowedMentions:{parse:[]}};
+  }
+  publishCard(id,channel) {
+    if(this.cardJobs.has(id))return this.cardJobs.get(id);
+    // All publication paths share this job, including initial Match Ready
+    // posts. Acquire it before any Discord await or recovery scan can send.
+    const job=Promise.resolve().then(async()=>{
+      const m=this.store.market(id);if(!m)return;
+      if(m.message_id)return this.refreshCard(id);
+      if(m.state==="void")return;
+      const payload=this.cardPayload(m);
+      // Also let Discord deduplicate a recently accepted send whose response
+      // was lost. This token stays stable across retries and process restarts.
+      const nonce=createHash("sha256").update(`${m.id}:${m.match_id}:${m.revision}:${m.opened_at}`).digest("hex").slice(0,24);
+      const message=await channel.send({...payload,nonce,enforceNonce:true});
+      this.bindMessage(id,message);
+      // A nonce retry can return an earlier accepted message. Refresh the
+      // canonical card from current state without delaying match arming.
+      this.refreshCard(id);
+      return message;
+    }).finally(()=>this.cardJobs.delete(id));
+    this.cardJobs.set(id,job);
+    return job;
+  }
   async retryPendingCards() {
     if(!this.client)return;
     for(const row of this.db.prepare("SELECT key FROM prediction_meta WHERE key GLOB 'card_refresh:*'").all())await this.refreshCard(Number(row.key.slice("card_refresh:".length)));
     for(const m of this.store.markets().filter(m=>m.channel_id&&!m.message_id&&m.state!=="void"&&this.store.latest(m.match_id)?.id===m.id)){
-      if(this.cardJobs.has(m.id))continue;this.cardJobs.add(m.id);
+      if(this.cardJobs.has(m.id))continue;
       try{
         const channel=await this.client.channels.fetch(m.channel_id);
-        const update=require("./messages").cardUpdate(this.store.market(m.id),this.clock());
-        const teams=`Match ${m.match_id}\nBlue / Team 1: ${m.snapshot.blueIds.map(id=>`<@${id}>`).join(", ")}\nRed / Team 2: ${m.snapshot.redIds.map(id=>`<@${id}>`).join(", ")}\n`;
-        const message=await channel.send({...update,content:teams+update.content,allowedMentions:{parse:[]}});this.bindMessage(m.id,message);
-      }catch{this.logger.warn?.(`[predictions] pending card still unavailable for ${m.id}`);}finally{this.cardJobs.delete(m.id);}
+        await this.publishCard(m.id,channel);
+      }catch{this.logger.warn?.(`[predictions] pending card still unavailable for ${m.id}`);}
     }
   }
   async refreshCard(id) {
@@ -264,10 +295,11 @@ class PredictionsService {
     if(!this.client)return;
     try{
       const channel=await this.client.channels.fetch(m.channel_id),msg=await channel.messages.fetch(m.message_id);
-      const update=require("./messages").cardUpdate(this.store.market(id),this.clock());
+      const update=this.cardPayload(this.store.market(id));
       await msg.edit(update);
-      if(JSON.stringify(update)!==JSON.stringify(require("./messages").cardUpdate(this.store.market(id),this.clock())))this.store.setMetadata(key,randomUUID());
+      if(JSON.stringify(update)!==JSON.stringify(this.cardPayload(this.store.market(id))))this.store.setMetadata(key,randomUUID());
       else this.db.prepare("DELETE FROM prediction_meta WHERE key=? AND value=?").run(key,token);
+      return msg;
     }catch{this.logger.warn?.(`[predictions] card update failed for market ${id}`);}
   }
   handleInteraction(i) {return require("./interactions").handleInteraction(this,i);}

@@ -69,7 +69,7 @@ test("finalization persists match and market before publishing buttons and stops
  db.exec("ALTER TABLE matches ADD COLUMN created_at INTEGER; ALTER TABLE matches ADD COLUMN rng_multiplier REAL; ALTER TABLE matches ADD COLUMN bonus_elo TEXT");
  state.queueSnapshot=ids.map(id=>({id,name:id}));state.queue=[...state.queueSnapshot];state.offenseQueue=[];state.lockedServers=new Set();state.lockedPlayers=new Map();
  let published=0;const channel={id:"pickup",send:async payload=>{
-   if(payload.embeds?.[0]?.data?.title?.startsWith("Match Ready")){
+   if((payload.embeds?.[0]?.data?.title||payload.embeds?.[0]?.title)?.startsWith("Match Ready")){
     published++;assert.ok(db.prepare("SELECT 1 FROM matches WHERE match_id='NEW123'").get());assert.ok(s.store.latest("NEW123"));assert.equal(payload.components.length,1);
    }
    return {id:`card${published}`,channelId:"pickup"};
