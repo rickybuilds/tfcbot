@@ -57,10 +57,11 @@ test("failed publication remains durable and can be retried after restart",async
  s.client={channels:{fetch:async()=>({id:"pickup",send:async()=>({id:"recovered-card",channelId:"pickup"})})}};
  await s.retryPendingCards();assert.equal(s.store.market(m.id).message_id,"recovered-card");
 });
-test("all eight on the assigned server count before the selected map loads",async t=>{
+test("all eight on the assigned server wait for the selected map before the countdown starts",async t=>{
  const {s,m}=setup(t);const links={};const steamIds=[];[...roster.blueIds,...roster.redIds].forEach((id,i)=>{links[id]=[`STEAM_0:1:${i}`];steamIds.push(`STEAM_0:1:${i}`);});
  s.db.prepare("UPDATE prediction_markets SET snapshot=? WHERE id=?").run(JSON.stringify({...roster,steamIdsByDiscordId:links}),m.id);
- s.queryServerRoster=async()=>({complete:true,mapName:"lobby",steamIds});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"countdown");assert.equal(s.store.market(m.id).closes_at,121000);
+ s.queryServerRoster=async()=>({complete:true,mapName:"lobby",steamIds});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"open");assert.equal(s.store.market(m.id).closes_at,null);
+ s.queryServerRoster=async()=>({complete:true,mapName:"shutdown2",steamIds});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"countdown");assert.equal(s.store.market(m.id).closes_at,121000);
 });
 test("publishing betting controls does not delay existing match arming on a slow roster query",async t=>{
  const {s,m}=setup(t);let release;s.queryServerRoster=()=>new Promise(r=>{release=r;});

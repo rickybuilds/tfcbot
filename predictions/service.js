@@ -2,6 +2,18 @@
 const {randomUUID}=require("node:crypto");
 const {PredictionStore,validSnapshot}=require("./store");
 const {PresenceTracker,rosterPresence,parseStatus}=require("./presence");
+const recoverableReviews=new Set(["unexpected server map","server monitoring unavailable"]);
+function sameMap(a,b) {
+  const name=value=>String(value||"").trim().toLowerCase();
+  return !!name(a)&&name(a)===name(b);
+}
+function officialTermsMatch(row,snapshot) {
+  const team=value=>{try{const ids=JSON.parse(value);return Array.isArray(ids)?JSON.stringify(ids.map(String).sort()):null;}catch{return null;}};
+  return sameMap(row.map_name,snapshot.mapName)
+    &&team(row.blue_ids)===JSON.stringify(snapshot.blueIds.slice().sort())
+    &&team(row.red_ids)===JSON.stringify(snapshot.redIds.slice().sort())
+    &&!!row.server_name&&require("../services/autoRecap").determineServerKey(row.server_name)===snapshot.serverKey;
+}
 function termsKey(s) {
   return JSON.stringify([s.blueIds.slice().sort(),s.redIds.slice().sort(),(s.offenseIds||[]).slice().sort(),s.serverKey,s.mapName,s.team1Starts]);
 }
@@ -81,7 +93,7 @@ class PredictionsService {
   maybeStart(serverKey,authoritative=false) {
     if(!this.knownServers.has(serverKey))return;
     for(const m of this.store.markets().filter(m=>m.state==="open"&&m.snapshot.serverKey===serverKey)){
-      if(rosterPresence([...m.snapshot.blueIds,...m.snapshot.redIds],m.snapshot.steamIdsByDiscordId,this.presence.get(serverKey)).allPresent){
+      if(sameMap(this.presence.state(serverKey).mapName,m.snapshot.mapName)&&rosterPresence([...m.snapshot.blueIds,...m.snapshot.redIds],m.snapshot.steamIdsByDiscordId,this.presence.get(serverKey)).allPresent){
         if(!authoritative)return this.reconcileServer(serverKey);
         this.store.startCountdown(m.id,this.clock());this.refreshCard(m.id);
       }
@@ -116,8 +128,8 @@ class PredictionsService {
           this.knownServers.add(serverKey);
           for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state))){
             const evidence=JSON.parse(m.phase_evidence||"{}");
-            if(roster.mapName===m.snapshot.mapName)this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true}),m.id);
-            else if(evidence.mapObserved||m.phase==="live"){this.store.markReview(m.id,"unexpected server map");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
+            if(sameMap(roster.mapName,m.snapshot.mapName))this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true}),m.id);
+            else if(m.closes_at!=null){this.store.markReview(m.id,"unexpected server map");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
           }
           this.maybeStart(serverKey,true);
           return;
@@ -129,7 +141,9 @@ class PredictionsService {
           this.logger.warn?.(`[predictions] roster reconciliation retry for ${serverKey}: ${reason} (attempt ${attempt}/3)`);
           await this.waitForRosterRetry();continue;
         }
-        for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===serverKey&&["open","countdown"].includes(m.state))){this.store.markReview(m.id,"server monitoring unavailable");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);this.refreshCard(m.id);}
+        // Bound each query burst, not the lifetime of readiness detection. A
+        // later scheduled poll must still be able to confirm the map and eight.
+        // An existing persisted deadline remains enforceable during an outage.
         this.logger.warn?.(`[predictions] roster reconciliation failed for ${serverKey}: ${reason}`);
       }
      }
@@ -144,15 +158,21 @@ class PredictionsService {
   }
   onHldsEvent(evt) {
     if(!evt.serverKey)return;
+    const previousVersion=this.presence.state(evt.serverKey).version;
     this.presence.event(evt);
+    // Presence rejects stale/out-of-order map packets; they cannot change the
+    // market either, or an old lobby packet could freeze a valid countdown.
+    if(evt.type==="map"&&this.presence.state(evt.serverKey).version===previousVersion)return;
     for(const m of this.store.markets().filter(m=>m.snapshot.serverKey===evt.serverKey&&!["settled","void"].includes(m.state))){
       const previousEvidence=JSON.parse(m.phase_evidence||"{}");
-      if(evt.type==="map"&&evt.name!==m.snapshot.mapName&&(previousEvidence.mapObserved||m.phase==="live"))this.store.markReview(m.id,"unexpected server map");
-      if(evt.type==="map"&&evt.name===m.snapshot.mapName&&m.phase!=="live"){
+      // A map warning cannot replace a result/roster/deadline review cause:
+      // those causes must never become eligible for automatic recovery.
+      if(evt.type==="map"&&!sameMap(evt.name,m.snapshot.mapName)&&m.closes_at!=null&&(m.state!=="review_required"||recoverableReviews.has(m.reason)))this.store.markReview(m.id,"unexpected server map");
+      if(evt.type==="map"&&sameMap(evt.name,m.snapshot.mapName)&&m.phase!=="live"){
         const evidence=JSON.parse(m.phase_evidence||"{}");
         this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true,...(!evidence.anchorLogInstance&&evt.logInstance?{anchorLogInstance:evt.logInstance,anchorObservedAt:this.clock()}:{})}),m.id);
       }
-      if(evt.type==="prediction_live_start"&&this.presence.state(evt.serverKey).mapName===m.snapshot.mapName){
+      if(evt.type==="prediction_live_start"&&sameMap(this.presence.state(evt.serverKey).mapName,m.snapshot.mapName)){
         this.db.prepare("UPDATE prediction_markets SET phase='live',live_at=COALESCE(live_at,?),phase_evidence=? WHERE id=?").run(evt.receivedAt||evt.ts||this.clock(),JSON.stringify({...previousEvidence,sourceTime:evt.sourceTime,logInstance:evt.logInstance,sourceKey:evt.sourceKey}),m.id);
       }
     }
@@ -169,20 +189,34 @@ class PredictionsService {
     this.db.prepare("UPDATE prediction_markets SET observed_result=? WHERE id=?").run(outcome,m.id);
   }
   onMatchReported({matchId}) {
-    const m=this.store.latest(matchId);if(!m||m.state==="void"||m.state==="review_required")return;
-    const row=this.db.prepare("SELECT winner,status FROM matches WHERE match_id=?").get(String(matchId));
-    if(!row||String(row.status).toLowerCase()!=="completed")return;
-    const outcome=String(row.winner).toLowerCase();
-    this.observeOfficialResult({matchId,outcome});
-    if(this.store.market(m.id).state==="review_required")return;
-    this.tick();
-    if(!["closed","settled"].includes(this.store.market(m.id).state)){this.store.markReview(m.id,"result before betting deadline");return;}
-    const result=this.store.settleMarket({marketId:m.id,outcome,context:this.context("settle")});this.refreshCard(m.id);return result;
+    let marketId;
+    const result=this.store.atomic(()=>{
+      const m=this.store.latest(matchId);if(!m||m.state==="void")return;
+      const row=this.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(matchId));
+      if(!row||String(row.status).toLowerCase()!=="completed")return;
+      const outcome=String(row.winner).toLowerCase();
+      marketId=m.id;
+      // Always record the authoritative winner, including for reviewed games.
+      this.observeOfficialResult({matchId,outcome});
+      const current=this.store.market(m.id),now=this.clock();
+      if(current.state==="review_required"){
+        if(current.settlement_version||!recoverableReviews.has(current.reason)||current.closes_at==null||now<current.closes_at||!officialTermsMatch(row,current.snapshot))return;
+        const ctx=this.context("automatic-recovery","system",current.reason);
+        this.store.entry(ctx,{kind:"automatic_recovery",marketId:m.id,entryKey:"recovery",metadata:{reviewReason:current.reason,originalDeadline:current.closes_at,revision:current.revision,outcome}});
+        this.db.prepare("UPDATE prediction_markets SET state='closed',closed_at=COALESCE(closed_at,closes_at),reason=NULL WHERE id=?").run(m.id);
+      }else if(["open","countdown"].includes(current.state)&&current.closes_at!=null&&now>=current.closes_at){
+        this.store.closeMarket(m.id,this.context("deadline"));
+      }
+      if(!["closed","settled"].includes(this.store.market(m.id).state)){this.store.markReview(m.id,"result before betting deadline");return;}
+      return this.store.settleMarket({marketId:m.id,outcome,context:this.context("settle")});
+    });
+    if(marketId)this.refreshCard(marketId);
+    return result;
   }
   async initialize() {
     this.tick();
     for(const m of this.store.markets())if(["open","countdown"].includes(m.state)){this.store.markReview(m.id,"restart: connection/terms history requires owner review");this.db.prepare("UPDATE prediction_markets SET phase='unknown' WHERE id=?").run(m.id);}
-    if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").get())for(const m of this.store.markets())if(m.state==="closed")this.onMatchReported({matchId:m.match_id});
+    if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").get())for(const m of this.store.markets())if(m.state==="closed"||(m.state==="review_required"&&!m.settlement_version&&recoverableReviews.has(m.reason)&&m.closes_at!=null&&this.clock()>=m.closes_at))this.onMatchReported({matchId:m.match_id});
     this.store.assertAccounting();
     await this.retryPendingCards();
     if(!this.timer){let cycle=0;this.timer=setInterval(()=>{this.tick();this.pollRosters();if(++cycle%15===0)this.retryPendingCards();},1000);this.timer.unref?.();}

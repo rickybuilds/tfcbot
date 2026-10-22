@@ -21,6 +21,29 @@ test("setmap commits a refund/reset with changed terms and no-op changes preserv
  await require("../commands/setmap").register(reg,deps);
  await reg.get("setmap")(message,["MATCH1","shutdown2"]);assert.equal(s.store.account("spectator").balance,900);
  await reg.get("setmap")(message,["MATCH1","openfire"]);assert.equal(s.store.account("spectator").balance,1000);assert.equal(s.store.latest("MATCH1").revision,2);assert.equal(db.prepare("SELECT map_name FROM matches").get().map_name,"openfire");
+ assert.equal(s.store.latest("MATCH1").snapshot.mapName,"openfire");assert.equal(s.store.market(m.id).snapshot.mapName,"shutdown2");
+});
+test("setmap waits for the replacement map before starting its new window and live changes refund without reopening",async t=>{
+ process.env.ADMIN_ROLE_ID="admin";const {s,db,ids,m,message,deps}=setup(t),reg=new Map();let now=1000,mapName="shutdown2";
+ s.clock=()=>now;
+ db.exec("CREATE TABLE player_steam_ids(discord_id TEXT,steam_id TEXT)");
+ const steamIds=ids.map((id,i)=>{const steam=`STEAM_0:1:${i}`;db.prepare("INSERT INTO player_steam_ids VALUES (?,?)").run(id,steam);return steam;});
+ s.queryServerRoster=async()=>({complete:true,mapName,steamIds});
+ await require("../commands/setmap").register(reg,deps);
+ await reg.get("setmap")(message,["MATCH1","openfire"]);await s.inflight.get("east");
+ const next=s.store.latest("MATCH1");assert.equal(next.snapshot.mapName,"openfire");assert.equal(next.state,"open");assert.equal(next.closes_at,null);
+ assert.equal(db.prepare("SELECT map_name FROM matches").get().map_name,"openfire");
+ assert.equal(s.store.market(m.id).state,"void");assert.equal(s.store.market(m.id).snapshot.mapName,"shutdown2");assert.equal(s.store.account("spectator").balance,1000);
+ assert.throws(()=>s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"spectator",pick:"blue",stake:100,context:s.context("stale","spectator")}),/closed/);
+ s.store.placeBet({marketRef:{marketId:next.id,revision:next.revision},discordId:"spectator",pick:"red",stake:100,context:s.context("new-bet","spectator")});
+ await reg.get("setmap")(message,["MATCH1","openfire"]);await s.inflight.get("east");
+ assert.equal(s.store.latest("MATCH1").revision,2);assert.equal(s.store.account("spectator").balance,900);
+ now=5000;mapName="openfire";await s.reconcileServer("east");assert.equal(s.store.latest("MATCH1").closes_at,125000);
+ await s.onHldsEvent({serverKey:"east",type:"prediction_live_start"});
+ await reg.get("setmap")(message,["MATCH1","well"]);await s.inflight.get("east");
+ assert.equal(db.prepare("SELECT map_name FROM matches").get().map_name,"well");
+ assert.equal(s.store.latest("MATCH1").state,"void");assert.equal(s.store.latest("MATCH1").revision,2);assert.equal(s.store.account("spectator").balance,1000);
+ assert.equal(s.store.assertAccounting(),true);
 });
 test("captain substitution keeps team assignment and atomically rolls back locks and financials on failure",async t=>{
  process.env.ADMIN_ROLE_ID="admin";const {s,db,ids,m,state,message,deps}=setup(t);

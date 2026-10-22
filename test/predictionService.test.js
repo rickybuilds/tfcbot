@@ -43,13 +43,14 @@ test("changed official results freeze settlement before follow-up failures; dupl
 });
 test("wrong-map reconciliation freezes bets and unavailable phase evidence never authorizes reopening",async t=>{
  const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot);
- s.onHldsEvent({serverKey:"east",type:"map",name:"shutdown2"});
+ s.onHldsEvent({serverKey:"east",type:"map",name:"shutdown2"});await s.reconcileServer("east");
  s.queryServerRoster=async()=>({complete:true,mapName:"other",steamIds:[]});await s.reconcileServer("east");assert.equal(s.store.market(m.id).state,"review_required");
  s.queryServerPhase=async()=>({phase:"unknown"});await s.prepareTermsChange(snapshot.matchId);
  s.applyRosterChange({matchId:snapshot.matchId,nextSnapshot:{...snapshot,mapName:"other"},applyMatchWrites:()=>{}});assert.equal(s.store.latest(snapshot.matchId).revision,1);assert.equal(s.store.market(m.id).phase,"unknown");
 });
 test("roster failures identify safe causes without leaking response data or reopening reviewed markets",async t=>{
  const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot),warnings=[];
+ s.store.markReview(m.id,"historical roster/terms change");
  s.logger={warn:message=>warnings.push(message)};
  for(const [message,reason] of [
   ["Incomplete server status roster","incomplete status roster"],
@@ -97,13 +98,13 @@ test("transient roster failures cannot extend or reopen a countdown that expires
  assert.equal(calls,2);assert.equal(s.store.market(m.id).closes_at,deadline);assert.equal(s.store.market(m.id).state,"closed");
  assert.throws(()=>s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"spectator",pick:"blue",stake:100,context:s.context("late","spectator")}),/closed/);
 });
-test("persistent roster failure exhausts a bounded retry and freezes rather than trusting connect logs",async t=>{
+test("persistent roster failure bounds each retry burst and keeps waiting without trusting connect logs",async t=>{
  const {s,snapshot}=setup(t),m=s.onMatchFinalized(snapshot);let calls=0,waits=0;s.logger={warn:()=>{}};
  s.knownServers.add("east");
  s.queryServerRoster=async()=>{calls++;throw new Error("Incomplete server status roster");};
  s.waitForRosterRetry=async()=>{waits++;for(let i=0;i<8;i++)s.onHldsEvent({type:"connect",serverKey:"east",steamid:`STEAM_0:1:${i}`,userid:String(i+1)});};
  await s.reconcileServer("east");
- assert.equal(calls,3);assert.equal(waits,2);assert.equal(s.store.market(m.id).state,"review_required");
+ assert.equal(calls,3);assert.equal(waits,2);assert.equal(s.store.market(m.id).state,"open");
  assert.equal(s.store.market(m.id).closes_at,null);assert.equal(s.knownServers.has("east"),false);
 });
 test("accepted restart checks at 15 seconds, two minutes and minute intervals; eight arrivals still get two full minutes",async t=>{
