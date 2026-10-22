@@ -40,8 +40,52 @@ test("expired and stale previews cannot mutate finances, and DM failure never le
  message.id="other";message.author.send=async()=>{throw new Error("DM blocked");};await s.handleAdminCommand(message,["audit","MATCH1"]);assert.equal(publicMessages.length,0);
 });
 test("result correction requires official outcome and funds all extra credits through house issuance",async t=>{
- const {s,db,m,message,privateMessages}=setup(t);db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT)");db.prepare("INSERT INTO matches VALUES ('MATCH1','RED','completed')").run();
- s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:100,context:s.context("bet","v")});s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
+ const {s,db,m,message,privateMessages}=setup(t);db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT,server_name TEXT)");db.prepare("INSERT INTO matches VALUES (?,?,?,?,?,?,?)").run("MATCH1","RED","in_progress",JSON.stringify(m.snapshot.blueIds),JSON.stringify(m.snapshot.redIds),m.snapshot.mapName,"TFC East US Server");
+ s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:100,context:s.context("bet","v")});db.prepare("UPDATE matches SET status='completed'").run();s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
  await s.handleAdminCommand(message,["correct","MATCH1","blue","wrong"]);assert.match(privateMessages[0].content,/official/i);
  message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1070);assert.equal(s.store.account("v").balance,1070);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
+});
+
+
+function completedCorrection(t){
+ const f=setup(t),{s,db,m}=f;
+ db.exec('CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT,server_name TEXT)');
+ db.prepare('INSERT INTO matches VALUES (?,?,?,?,?,?,?)').run('MATCH1','RED','in_progress',JSON.stringify(m.snapshot.blueIds),JSON.stringify(m.snapshot.redIds),m.snapshot.mapName,'TFC East US Server');
+ for(const [user,pick] of [['u','blue'],['v','red']])s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:user,pick,stake:100,context:s.context('bet',user)});
+ db.prepare("UPDATE matches SET status='completed'").run();s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:'blue',context:s.context()});
+ s.store.markReview(m.id,'official terms conflict');return f;
+}
+
+test('owner corrections cannot clear frozen roster, map or server conflicts using only the official winner',async t=>{
+ const {s,db,message,privateMessages,publicMessages}=completedCorrection(t);
+ for(const [column,value] of [['blue_ids','["b1","b2","b3","other"]'],['map_name','different_map'],['server_name','TFC West US Server']]){
+  const original=db.prepare(`SELECT ${column} AS value FROM matches`).get().value;
+  db.prepare(`UPDATE matches SET ${column}=?`).run(value);message.id=`reject:${column}`;
+  await s.handleAdminCommand(message,['correct','MATCH1','red','verified official winner']);
+  assert.equal(privateMessages.at(-1).components,undefined);assert.match(privateMessages.at(-1).content,/teams|map|server/i);
+  db.prepare(`UPDATE matches SET ${column}=?`).run(original);
+ }
+ assert.equal(s.store.latest('MATCH1').state,'review_required');assert.equal(s.store.latest('MATCH1').settlement_version,1);assert.equal(s.store.account('v').balance,900);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
+});
+
+test('correction confirmation rejects changed official terms and settled bet inputs privately',async t=>{
+ const {s,db,message,privateMessages,publicMessages}=completedCorrection(t);
+ for(const [name,mutate,restore] of [
+  ['server',()=>db.prepare("UPDATE matches SET server_name='TFC West US Server'").run(),()=>db.prepare("UPDATE matches SET server_name='TFC East US Server'").run()],
+  ['bets',()=>db.prepare("UPDATE prediction_bets SET pick='red' WHERE discord_id='u'").run(),()=>db.prepare("UPDATE prediction_bets SET pick='blue' WHERE discord_id='u'").run()]
+ ]){
+  message.id=`preview:${name}`;await s.handleAdminCommand(message,['correct','MATCH1','red','verified official correction']);const p=privateMessages.at(-1);assert.ok(p.components);mutate();
+  const i=confirmation(p,`confirm:${name}`);await s.handleInteraction(i);assert.match(i.response.content,/changed/i);restore();
+ }
+ assert.equal(s.store.latest('MATCH1').settlement_version,1);assert.equal(s.store.account('v').balance,900);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
+});
+
+test('repeated owner corrections pay only extra entitlements and stay private',async t=>{
+ const {s,db,message,privateMessages,publicMessages}=completedCorrection(t);
+ for(const [index,outcome] of ['red','blue','red'].entries()){
+  db.prepare('UPDATE matches SET winner=?').run(outcome.toUpperCase());message.id=`correction:${index}`;
+  await s.handleAdminCommand(message,['correct','MATCH1',outcome,'verified official correction']);const p=privateMessages.at(-1);assert.ok(p.components);
+  await s.handleInteraction(confirmation(p,`correct:${index}`));await s.handleInteraction(confirmation(p,`repeat:${index}`));
+ }
+ assert.equal(s.store.account('u').balance,1070);assert.equal(s.store.account('v').balance,1070);assert.equal(s.store.houseFunding(),190);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
 });

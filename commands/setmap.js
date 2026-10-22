@@ -54,6 +54,10 @@ async function register(reg, deps) {
         return;
       }
 
+      if (state.restartRequest && String(state.restartRequest.matchId) === String(matchId)) {
+        state.restartRequest.map = newMap;
+      }
+
       // --- Update in-memory match record (best effort) ---
       try {
         const mem = (state.matches || []).find((m) => String(m?.id) === String(matchId));

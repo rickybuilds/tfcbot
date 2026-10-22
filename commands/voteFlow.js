@@ -878,16 +878,24 @@ async function finalizeMatch(
 	    ? JSON.stringify({ blue: offense.blue.map(p => p.id), red: offense.red.map(p => p.id) })
 	    : null
 	);
-    if (state.predictions) {
-      const saved = elo.db.prepare("SELECT * FROM matches WHERE match_id=?").get(matchId);
-      predictionMarket = state.predictions.onMatchFinalized(state.predictions.snapshotFromRow(saved, { serverKey: determineServerKey(serverObj.ip || serverObj.name), team1Starts }));
-    }
     })();
 } catch (e) {
   console.error("[finalizeMatch] DB insert failed:", e);
   throw e;
 }
 
+  // Prediction initialization has its own rollback boundary after the pickup
+  // is durable. An unavailable market must not stop the match from arming.
+  if (state.predictions) {
+    try {
+      predictionMarket = elo.db.transaction(() => {
+        const saved = elo.db.prepare("SELECT * FROM matches WHERE match_id=?").get(matchId);
+        return state.predictions.onMatchFinalized(state.predictions.snapshotFromRow(saved, { serverKey: determineServerKey(serverObj.ip || serverObj.name), team1Starts }));
+      })();
+    } catch {
+      console.warn("[predictions] match initialization unavailable");
+    }
+  }
 
 	// Build "Match Ready" embed
   const emb = new EmbedBuilder()
@@ -921,7 +929,17 @@ async function finalizeMatch(
 		)
 		.setTimestamp();
 
-    await require("../predictions/integration").postMatchCard(state.predictions, predictionMarket, channel, { embeds: [emb] });
+  if (predictionMarket) {
+    try {
+      await require("../predictions/integration").postMatchCard(state.predictions, predictionMarket, channel, { embeds: [emb] });
+    } catch {
+      // A send may already have succeeded before message binding failed. The
+      // pending card recovery handles retry and deduplication.
+      console.warn("[predictions] match card publication deferred");
+    }
+  } else {
+    await channel.send({ embeds: [emb] });
+  }
 
   if (bonus) {
     let reason = bonus.triggeredBy?.includes("ADL Mode") ? "ADL Mode"

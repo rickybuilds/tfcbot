@@ -35,10 +35,10 @@ test("recovery enforces expired deadlines and freezes uncertain open history wit
 });
 test("changed official results freeze settlement before follow-up failures; duplicate result does not pay twice",t=>{
  const {s,db,snapshot,time}=setup(t),m=s.onMatchFinalized(snapshot);
- db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT)");db.prepare("INSERT INTO matches VALUES (?,'BLUE','completed')").run(snapshot.matchId);
+ db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT,server_name TEXT)");db.prepare("INSERT INTO matches VALUES (?,'BLUE','in_progress',?,?,?,?)").run(snapshot.matchId,JSON.stringify(snapshot.blueIds),JSON.stringify(snapshot.redIds),snapshot.mapName,snapshot.serverKey);
  s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});
- s.store.startCountdown(m.id,1000);time(121000);s.tick();s.observeOfficialResult({matchId:snapshot.matchId,outcome:"blue"});s.onMatchReported({matchId:snapshot.matchId});
- const balance=s.store.account("u").balance;s.onMatchReported({matchId:snapshot.matchId});assert.equal(s.store.account("u").balance,balance);
+ db.prepare("UPDATE matches SET status='completed'").run();s.store.startCountdown(m.id,1000);time(121000);s.tick();s.observeOfficialResult({matchId:snapshot.matchId,outcome:"blue"});s.onMatchReported({matchId:snapshot.matchId});
+ assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).settlement_version,1);const balance=s.store.account("u").balance;s.onMatchReported({matchId:snapshot.matchId});assert.equal(s.store.account("u").balance,balance);
  s.observeOfficialResult({matchId:snapshot.matchId,outcome:"red"});assert.equal(s.store.market(m.id).state,"review_required");
 });
 test("wrong-map reconciliation freezes bets and unavailable phase evidence never authorizes reopening",async t=>{

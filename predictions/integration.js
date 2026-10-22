@@ -14,7 +14,28 @@ function commitMatchTerms({db,predictions,row,next,write,context}) {
 }
 async function postMatchCard(predictions,market,channel,payload) {
   if(!market)return channel.send(payload);
-  predictions.queueCardPublication(market.id,channel.id,payload);
+  try{predictions.queueCardPublication(market.id,channel.id,payload);}
+  catch(error){
+    const current=predictions.store.market(market.id);
+    if(predictions.cardJobs.has(market.id))return predictions.cardJobs.get(market.id);
+    if(current?.channel_id||current?.message_id)throw error;
+    // Plain fallback and normal publication share one owner, including a queue
+    // that recovers while this send is awaiting Discord.
+    const job=Promise.resolve().then(async()=>{
+      predictions.logger.warn?.("[predictions] controls unavailable; posting original match card");
+      const message=await channel.send({...payload,nonce:predictions.cardNonce(current||market),enforceNonce:true});
+      try{
+        predictions.db.transaction(()=>{
+          if(!predictions.store.market(market.id).channel_id)predictions.queueCardPublication(market.id,channel.id,payload);
+          predictions.bindMessage(market.id,message);
+        })();
+        predictions.refreshCard(market.id);
+      }catch{predictions.logger.warn?.("[predictions] original match card delivered without prediction controls");}
+      return message;
+    }).finally(()=>predictions.cardJobs.delete(market.id));
+    predictions.cardJobs.set(market.id,job);
+    return job;
+  }
   const message=await predictions.publishCard(market.id,channel);
   if(message?.id){
     // The normal match flow must arm its recorder/voice state without waiting

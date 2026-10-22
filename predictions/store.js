@@ -70,6 +70,10 @@ class PredictionStore {
     const m=this.market(ref.marketId);
     if(!m||m.revision!==ref.revision)throw new Error("Stale prediction market");
     if(!["open","countdown"].includes(m.state)||(m.closes_at!=null&&now>=m.closes_at))throw new Error("Predictions closed");
+    if(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").get()){
+      const official=this.db.prepare("SELECT status FROM matches WHERE match_id=?").get(m.match_id);
+      if(official&&String(official.status).toLowerCase()==="completed")throw new Error("Predictions closed; official match already completed");
+    }
     return m;
   }
   placeBet({marketRef,discordId,pick,stake,context:ctx}) {
@@ -145,12 +149,21 @@ class PredictionStore {
   }
   houseFunding() {return this.db.prepare("SELECT COALESCE(SUM(amount),0) n FROM prediction_transactions WHERE kind='house_funding'").get().n;}
   assertAccounting() {
-    const balance=this.db.prepare("SELECT COALESCE(SUM(balance),0) n FROM prediction_accounts").get().n;
-    const escrow=this.db.prepare("SELECT COALESCE(SUM(stake),0) n FROM prediction_bets WHERE status='active'").get().n;
-    const issued=this.db.prepare("SELECT COALESCE(SUM(amount),0) n FROM prediction_transactions WHERE kind IN ('grant','adjustment','house_funding')").get().n;
+    // Each persisted amount is an integer, but totals can exceed both JS's safe
+    // number range and SQLite SUM's signed 64-bit range. Sum individual rows.
+    let balance=0n,escrow=0n,issued=0n;
+    const accounts=new Map(),histories=new Map();
+    for(const row of this.db.prepare("SELECT discord_id,balance FROM prediction_accounts").safeIntegers(true).iterate()){
+      accounts.set(row.discord_id,row.balance);balance+=row.balance;
+    }
+    for(const row of this.db.prepare("SELECT stake FROM prediction_bets WHERE status='active'").safeIntegers(true).iterate())escrow+=row.stake;
+    for(const row of this.db.prepare("SELECT account_id,amount,kind FROM prediction_transactions").safeIntegers(true).iterate()){
+      if(["grant","adjustment","house_funding"].includes(row.kind))issued+=row.amount;
+      if(accounts.has(row.account_id))histories.set(row.account_id,(histories.get(row.account_id)||0n)+row.amount);
+    }
     if(balance+escrow!==issued)throw new Error("Prediction accounting invariant failed");
-    const mismatch=this.db.prepare("SELECT a.discord_id FROM prediction_accounts a LEFT JOIN prediction_transactions t ON t.account_id=a.discord_id GROUP BY a.discord_id HAVING a.balance!=COALESCE(SUM(t.amount),0)").all();
-    if(mismatch.length)throw new Error("Account history mismatch");return true;
+    for(const [id,amount] of accounts)if(amount!==(histories.get(id)||0n))throw new Error("Account history mismatch");
+    return true;
   }
 }
 module.exports={PredictionStore,validSnapshot};

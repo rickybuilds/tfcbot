@@ -124,3 +124,22 @@ test("nonce recovery refreshes an accepted card whose betting deadline passed be
   assert.match(messages.get("1").payload.content, /Predictions closed/);
   assert.equal(messages.get("1").payload.components[0].components[0].disabled, true);
 });
+
+for(const failure of ["channel","payload"]){
+ test(`a ${failure} queue write failure preserves the original plain Match Ready and leaves no partial publication`,async t=>{
+  const {s,db,m,channel,messages,payload}=setup(t);
+  db.exec(failure==="channel"?"CREATE TRIGGER fail_queue BEFORE UPDATE OF channel_id ON prediction_markets BEGIN SELECT RAISE(ABORT,'queue failure'); END":"CREATE TRIGGER fail_queue BEFORE INSERT ON prediction_meta WHEN NEW.key LIKE 'card_payload:%' BEGIN SELECT RAISE(ABORT,'payload failure'); END");
+  const message=await postMatchCard(s,m,channel,payload);assert.equal(messages.size,1);assert.equal(message.payload.embeds[0].title,payload.embeds[0].title);assert.equal(message.payload.components,undefined);assert.equal(s.store.market(m.id).channel_id,null);assert.equal(s.store.market(m.id).message_id,null);
+  db.exec("DROP TRIGGER fail_queue");await s.retryPendingCards();assert.equal(messages.size,1);
+ });
+}
+test("failed payload updates on an existing queued publication never send a second plain card",async t=>{
+ const {s,db,m,channel,messages,payload}=setup(t);await postMatchCard(s,m,channel,payload);const original=s.store.market(m.id);db.exec("CREATE TRIGGER fail_payload BEFORE INSERT ON prediction_meta WHEN NEW.key LIKE 'card_payload:%' BEGIN SELECT RAISE(ABORT,'payload failure'); END");
+ await assert.rejects(postMatchCard(s,m,channel,payload),/payload failure/);assert.equal(messages.size,1);assert.equal(s.store.market(m.id).message_id,original.message_id);
+});
+for(const recovered of [false,true])test(`concurrent publications share a plain fallback when queue storage ${recovered?'recovers':'still fails'}`,async t=>{
+ const {s,db,m,channel,messages,payload,hold}=setup(t),started=deferred(),release=deferred();hold(async()=>{started.resolve();await release.promise;});db.exec("CREATE TRIGGER fail_queue BEFORE UPDATE OF channel_id ON prediction_markets BEGIN SELECT RAISE(ABORT,'queue failure'); END");
+ const first=postMatchCard(s,m,channel,payload);await started.promise;if(recovered)db.exec("DROP TRIGGER fail_queue");const second=postMatchCard(s,m,channel,payload);await flush();
+ try{assert.equal(messages.size,1);assert.equal(s.cardJobs.size,1);}finally{release.resolve();await Promise.allSettled([first,second]);}
+ assert.equal((await first).id,(await second).id);if(!recovered)db.exec("DROP TRIGGER fail_queue");await s.retryPendingCards();assert.equal(messages.size,1);if(recovered){assert.equal(s.store.market(m.id).message_id,'1');assert.equal(messages.get('1').payload.embeds[0].title,payload.embeds[0].title);}
+});

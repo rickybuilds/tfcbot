@@ -59,23 +59,24 @@ class PresenceTracker {
     const s = this.state(evt.serverKey);
     const stamp=String(evt.sourceTime||"").match(/^(\d{2})\/(\d{2})\/(\d{4}) - (\d{2}:\d{2}:\d{2})$/);
     const order=stamp?`${stamp[3]}${stamp[1]}${stamp[2]}${stamp[4]}`:null;
-    if(order&&s.sourceOrder&&order<s.sourceOrder)return;
+    if(order&&s.sourceOrder&&order<s.sourceOrder)return false;
     if(order)s.sourceOrder=order;
     if(evt.type==="logfile")s.logInstance=evt.file;
-    if(evt.logInstance&&s.logInstance&&evt.logInstance!==s.logInstance&&evt.type!=="logfile")return;
+    if(evt.logInstance&&s.logInstance&&evt.logInstance!==s.logInstance&&evt.type!=="logfile")return false;
     const steam = normalizeSteamId(evt.steamid);
     if (evt.type === "map") { s.version++; s.sessions.clear();s.lastIds.clear();s.departed.clear(); s.mapName = evt.name;if(evt.logInstance)s.logInstance=evt.logInstance; }
-    if (!steam) return;
+    if (!steam) return true;
     const session=String(evt.userid),previous=s.lastIds.get(steam);
-    if(previous!=null&&/^\d+$/.test(previous)&&/^\d+$/.test(session)&&BigInt(session)<BigInt(previous))return;
+    if(previous!=null&&/^\d+$/.test(previous)&&/^\d+$/.test(session)&&BigInt(session)<BigInt(previous))return false;
     if (evt.type === "connect") {
-      if(s.departed.has(`${steam}:${session}`))return;
+      if(s.departed.has(`${steam}:${session}`))return false;
       s.version++;s.lastIds.set(steam,session);s.sessions.set(steam,session);
     }
     if (evt.type === "disconnect") {
       s.version++;s.lastIds.set(steam,session);s.departed.add(`${steam}:${session}`);
       if (s.sessions.get(steam) === session || s.sessions.get(steam) === null) s.sessions.delete(steam);
     }
+    return true;
   }
 }
 module.exports = { parseStatus, rosterPresence, PresenceTracker, normalizeSteamId };

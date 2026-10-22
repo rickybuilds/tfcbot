@@ -3,7 +3,7 @@ const test=require("node:test"),assert=require("node:assert/strict"),Database=re
 const {createPredictions}=require("../predictions");
 function setup(t){
  const db=new Database(":memory:");t.after(()=>db.close());
- db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY); CREATE TABLE rating_changes(match_id TEXT); INSERT INTO matches VALUES('DELETED')");
+ db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,status TEXT DEFAULT 'in_progress'); CREATE TABLE rating_changes(match_id TEXT); INSERT INTO matches(match_id) VALUES('DELETED')");
  const edits=[],sent=[];let failEdit=false;
  const card={edit:async payload=>{if(failEdit)throw new Error("Discord unavailable");edits.push(payload);}};
  const client={channels:{fetch:async()=>({messages:{fetch:async()=>card}})}};

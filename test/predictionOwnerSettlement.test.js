@@ -8,8 +8,8 @@ function setup(t){
  const m=s.store.createMarket(snapshot,s.context('create'));
  for(const [user,pick] of [['a','red'],['b','red'],['c','blue'],['d','blue']])s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:user,pick,stake:100,context:s.context('bet',user)});
  s.store.markReview(m.id,'unexpected server map');
- db.exec('CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT)');
- db.prepare('INSERT INTO matches VALUES (?,?,?,?,?,?)').run('DH96AX','RED','completed',JSON.stringify(snapshot.blueIds),JSON.stringify(snapshot.redIds),snapshot.mapName);
+ db.exec('CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT,server_name TEXT)');
+ db.prepare('INSERT INTO matches VALUES (?,?,?,?,?,?,?)').run('DH96AX','RED','completed',JSON.stringify(snapshot.blueIds),JSON.stringify(snapshot.redIds),snapshot.mapName,'TFC East US Server');
  const messages=[],publicMessages=[];let id=0;
  const message={get id(){return `cmd:${++id}`;},author:{id:'owner',send:async p=>messages.push(p)},channel:{send:async p=>publicMessages.push(p)}};
  const preview=async()=>{await s.handleAdminCommand(message,['settle','DH96AX','red','Verified official Red 90-80; accept frozen bets']);return messages.at(-1);};
@@ -69,4 +69,34 @@ test('accepting a map change requires a reason, unchanged official map and match
  const args=[...base,'Verified actual map and result'];await s.handleAdminCommand(message,args);const p=messages.at(-1);assert.ok(p.components);db.prepare("UPDATE matches SET map_name='different_map'").run();assert.match((await confirm(p)).content,/changed/i);
  db.prepare("UPDATE matches SET winner='BLUE'").run();await s.handleAdminCommand(message,args);assert.equal(messages.at(-1).components,undefined);
  db.prepare("UPDATE matches SET winner='RED',blue_ids='[]'").run();await s.handleAdminCommand(message,args);assert.match(messages.at(-1).content,/teams/i);assert.equal(messages.at(-1).components,undefined);assert.equal(s.store.account('a').balance,900);assert.equal(s.store.market(m.id).state,'review_required');
+});
+
+
+test('owner settlement rejects assigned-server conflicts even when map changes are accepted',async t=>{
+ const {s,db,message,messages,publicMessages}=setup(t);
+ const args=['settle','DH96AX','red','--accept-map-change','Verified official result'];
+ for(const server of ['TFC West US Server','',null,'unrecognized server']){
+  db.prepare('UPDATE matches SET server_name=?').run(server);
+  await s.handleAdminCommand(message,args);
+  assert.equal(messages.at(-1).components,undefined);assert.match(messages.at(-1).content,/server/i);
+ }
+ assert.equal(s.store.latest('DH96AX').state,'review_required');assert.equal(s.store.account('a').balance,900);assert.equal(publicMessages.length,0);
+});
+
+test('official map whitespace and roster ordering do not require owner map-change acceptance',async t=>{
+ const {db,preview,confirm,s}=setup(t);
+ db.prepare('UPDATE matches SET map_name=?,blue_ids=?,server_name=?').run(' ALCHIMY_LG ',JSON.stringify(['b4','b2','b1','b3']),' EAST ');
+ const p=await preview();assert.ok(p.components);await confirm(p);assert.equal(s.store.latest('DH96AX').state,'settled');assert.equal(s.store.assertAccounting(),true);
+});
+
+test('correction honors only the previously accepted official map and preserves its immutable acceptance audit',async t=>{
+ const {s,db,m,message,messages,confirm,publicMessages}=setup(t);
+ db.prepare('UPDATE prediction_markets SET snapshot=json_set(snapshot,\'$.mapName\',?) WHERE id=?').run('hammer2_b5',m.id);
+ await s.handleAdminCommand(message,['settle','DH96AX','red','--accept-map-change','Verified actual map and result']);const initial=messages.at(-1);assert.ok(initial.components);await confirm(initial);
+ db.prepare("UPDATE matches SET winner='BLUE'").run();s.store.markReview(m.id,'official result changed');
+ await s.handleAdminCommand(message,['correct','DH96AX','blue','Verified corrected official score']);const correction=messages.at(-1);assert.ok(correction.components);await confirm(correction);
+ assert.equal(s.store.market(m.id).result,'blue');assert.equal(s.store.market(m.id).settlement_version,2);
+ db.prepare("UPDATE matches SET winner='RED',map_name='third_map'").run();s.store.markReview(m.id,'official map changed again');
+ await s.handleAdminCommand(message,['correct','DH96AX','red','Verified corrected score']);assert.equal(messages.at(-1).components,undefined);assert.match(messages.at(-1).content,/map/i);
+ const audits=db.prepare("SELECT metadata FROM prediction_transactions WHERE kind='owner_settlement'").all();assert.equal(audits.length,1);assert.deepEqual(JSON.parse(audits[0].metadata).mapChange,{predictionMap:'hammer2_b5',officialMap:'alchimy_lg',accepted:true});assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
 });

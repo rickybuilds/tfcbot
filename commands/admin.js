@@ -119,7 +119,7 @@ function register(reg, deps) {
           SET
             winner=?,
             status='completed',
-            processed_at=?,
+            processed_at=CASE WHEN lower(status)='completed' AND processed_at IS NOT NULL THEN processed_at ELSE ? END,
             hampalyzer_url=COALESCE(NULLIF(hampalyzer_url, ''), NULLIF(?, '')),
             tfcstats_url=COALESCE(NULLIF(tfcstats_url, ''), NULLIF(?, ''))
           WHERE match_id=?
@@ -130,9 +130,14 @@ function register(reg, deps) {
           match.tfcstats_url || match.tfcstatsUrl || match.tfcstats || "",
           String(matchId)
         );
-        deps.predictions?.observeOfficialResult({ matchId, outcome: result });
       })();
-      deps.predictions?.onMatchReported({ matchId });
+      // The official report commits independently. Prediction reconciliation
+      // reads that row and must never interrupt normal reporting or Elo work.
+      try {
+        elo.db.transaction(() => deps.predictions?.onMatchReported({ matchId }))();
+      } catch {
+        console.warn("[predictions] result reconciliation deferred");
+      }
 
       try {
         if (liveGentle) {

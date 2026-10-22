@@ -2,6 +2,7 @@
 const {randomUUID}=require("node:crypto");
 const {ActionRowBuilder,ButtonBuilder,ButtonStyle}=require("discord.js");
 const {privateReply}=require("./interactions");
+const {sameMap,officialTermsMismatch,acceptedMapChange}=require("./official");
 function assertOwner(service,id) {if(!service.config.predictionsOwnerId||String(id)!==service.config.predictionsOwnerId)throw new Error("Only the configured prediction owner can use financial controls");}
 function official(service,matchId) {
   const row=service.db.prepare("SELECT winner,status FROM matches WHERE match_id=?").get(String(matchId));
@@ -14,18 +15,31 @@ function reviewedSettlement(service,p) {
   if(m.state!=="review_required")throw new Error("Only an unsettled game frozen for review can use !pred settle");
   const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
   if(!["blue","red","tie"].includes(p.outcome)||!row||String(row.status).toLowerCase()!=="completed"||String(row.winner).toLowerCase()!==p.outcome)throw new Error("Settlement must match the completed official result");
-  const team=value=>{try{const ids=JSON.parse(value);return Array.isArray(ids)?JSON.stringify(ids.map(String).sort()):null;}catch{return null;}};
-  if(team(row.blue_ids)!==JSON.stringify(m.snapshot.blueIds.slice().sort())||team(row.red_ids)!==JSON.stringify(m.snapshot.redIds.slice().sort()))throw new Error("Official teams differ from the frozen prediction teams; review the roster before settlement");
-  if(!String(row.map_name||"").trim())throw new Error("Official report has no map; verify the match report first");
-  const mapChanged=String(row.map_name).toLowerCase()!==String(m.snapshot.mapName).toLowerCase();
-  if(mapChanged&&!p.acceptMapChange)throw new Error("Official map differs from the frozen prediction map; use --accept-map-change after the outcome only if you verified the actual game and accept the frozen bets");
+  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:!!p.acceptMapChange});
+  if(mismatch==='teams')throw new Error("Official teams differ from the frozen prediction teams; review the roster before settlement");
+  if(mismatch==='server')throw new Error("Official server differs from the frozen assigned server; verify the match report first");
+  if(mismatch==='map'){
+    if(!String(row.map_name||"").trim())throw new Error("Official report has no map; verify the match report first");
+    throw new Error("Official map differs from the frozen prediction map; use --accept-map-change after the outcome only if you verified the actual game and accept the frozen bets");
+  }
+  const mapChanged=!sameMap(row.map_name,m.snapshot.mapName);
   return {m,row,mapChange:mapChanged?{predictionMap:m.snapshot.mapName,officialMap:row.map_name,accepted:true}:null};
+}
+function reviewedCorrection(service,p) {
+  const m=service.store.latest(p.target);
+  if(!m)throw new Error("Unknown prediction match");
+  if(!m.settlement_version)throw new Error("No previous settlement; use !pred settle for a reviewed completed game");
+  const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
+  if(!["blue","red","tie"].includes(p.outcome)||!row||String(row.status).toLowerCase()!=="completed"||String(row.winner).toLowerCase()!==p.outcome)throw new Error("Correction must match the completed official result; fix the match report first");
+  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:acceptedMapChange(service.db,m,row)});
+  if(mismatch)throw new Error(`Official ${mismatch} differ from the frozen prediction terms; review the match report before correction`);
+  return {m,row};
 }
 function signature(service,p) {
   if(p.action==="adjust")return JSON.stringify(service.store.account(p.target)||null);
   if(["pause","resume"].includes(p.action))return service.store.metadata("paused","0");
   const m=service.store.latest(p.target);
-  if(p.action==="settle"){
+  if(p.action==="settle"||p.action==="correct"){
     const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
     return JSON.stringify([m, row, service.store.bets(m.id)]);
   }
@@ -46,7 +60,7 @@ function parse(service,args) {
     p.reason=rest.join(" ");
     if(!p.reason.trim())throw new Error("A reason is required");
     if(action==="settle")reviewedSettlement(service,p);
-    else if(!["blue","red","tie"].includes(p.outcome)||official(service,target)!==p.outcome)throw new Error("Correction must match the completed official result; fix the match report first");
+    else reviewedCorrection(service,p);
   }else if(action==="pause"||action==="resume")p.reason=args.slice(1).join(" ");
   else p.reason=args.slice(2).join(" ");
   if(!p.reason?.trim())throw new Error("A reason is required");
@@ -110,7 +124,7 @@ async function confirm(service,i,token) {
       service.store.settleReviewedMarket({marketId:m.id,outcome:p.outcome,context:inner,mapChange});
     }
     if(p.action==="correct"){
-      if(official(service,p.target)!==p.outcome)throw new Error("Correction no longer matches official result");
+      reviewedCorrection(service,p);
       service.store.correctSettlement({marketId:m.id,outcome:p.outcome,context:inner});
     }
     if(p.action==="retain"){
