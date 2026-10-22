@@ -35,16 +35,15 @@ test("selfdestruct only runs for the configured owner", async () => {
 test("selfdestruct performs a harmless fake countdown for the owner", async () => {
   const message = messageFor(OWNER_ID);
 
-  await execute(message, [], { delayMs: 0 });
+  await execute(message, [], { delayMs: 0, finalDelayMs: 0 });
 
-  assert.deepEqual(message.replies, ["⚠️ **CRITICAL COMMAND ACCEPTED**"]);
-  assert.deepEqual(message.sentMessages[0].edits, [
-    "⚠️ **CRITICAL COMMAND ACCEPTED**\nInitializing emergency shutdown protocol...\n`[████░░░░░░░░░░░░░░░░] 20%`",
-    "⚠️ **CRITICAL COMMAND ACCEPTED**\nInitializing emergency shutdown protocol...\n`[████████░░░░░░░░░░░░] 40%`\n🛰 Simulating Discord relay shutdown...",
-    "⚠️ **CRITICAL COMMAND ACCEPTED**\nInitializing emergency shutdown protocol...\n`[████████████░░░░░░░░] 60%`\n🛰 Simulating Discord relay shutdown...\n🗄 Pretending to delete absolutely nothing...",
-    "⚠️ **FINAL WARNING**\nCancellation window closes in 3 seconds.\n\n💥 3... 2... 1...",
-    "😎 **SELF-DESTRUCT CANCELED**\n\nYou got pranked. Nothing was changed. Probably.",
-  ]);
+  assert.deepEqual(message.replies, ["⚠️ **NONAMEPUGS SHUTDOWN PROTOCOL**"]);
+  const edits = message.sentMessages[0].edits;
+  assert.match(edits[0], /Loading nonamepugs\.\.\.[\s\S]*Progress: .* 7%$/);
+  assert.match(edits[2], /Loading nonamepugs-website\.\.\.[\s\S]*Progress: .* 20%$/);
+  assert.match(edits[edits.length - 3], /Progress: .* 100%$/);
+  assert.equal(edits[edits.length - 2], "⚠️ **THIS IS GOODBYE.**\n\nThe server will be missed.");
+  assert.equal(edits[edits.length - 1], "😎 **Never mind.**\n\nYou got pranked. Nothing was changed.");
 });
 
 test("selfdestruct registers under its command name", () => {
