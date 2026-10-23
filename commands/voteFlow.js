@@ -240,7 +240,7 @@ function eligibleStreakPlayers(players, elo) {
 	  spinnerDuration,
 	  kind: "server",
 	  options: serverOptions,
-	  showVoters: true, 
+	  showVoters: true,
 	  elo,
 	  privacy,
 	  onVote: async ({ eligible, voted, voteHandle }) => {
@@ -658,7 +658,7 @@ return startVote(state, message, {
 async function finalizeMatch(
   channel, registry, settings, state,
   serverObj, mapObj, elo, privacy, matchesStore, config,
-  MODE, streaks, 
+  MODE, streaks,
   forceMatchId = null,   // 👈 new arg
   options = {}
 ) {
@@ -781,8 +781,123 @@ async function finalizeMatch(
 	  bonus = { multiplier: WINNER_BONUS_MULTIPLIER, type: "WINNER_ONLY", triggeredBy: ["ADL Mode"] };
 	}
 
-	// Build "Match Ready" embed
   const matchMode = captainMode ? "CAPTAINS" : MODE;
+  // Build this once so the saved scenario numbers exactly match the posted card.
+  const teamScenarios = buildMatchScenarios(
+    bal.blue,
+    bal.red,
+    players,
+    elo,
+    4
+  );
+  const teamScenarioState = JSON.stringify({
+    version: 1,
+    selected: 1,
+    scenarios: teamScenarios.map(s => ({
+      blue: s.blue.map(p => String(p.id)),
+      red: s.red.map(p => String(p.id)),
+    })),
+  });
+
+  // Post scenarios (force Scenario 1 = actual teams)
+  try {
+    const chanId = String(config.channels.odds || "").trim();
+    const oddsChan = chanId ? await channel.client.channels.fetch(chanId) : null;
+
+    if (chanId && oddsChan?.isTextBased()) {
+      const perms = oddsChan.permissionsFor(channel.client.user.id);
+      const need = ["ViewChannel", "SendMessages", "EmbedLinks"];
+
+      if (perms && need.every(p => perms.has(p))) {
+        const scenEmb = buildTeamScenariosEmbed({
+          matchId,
+          serverName: serverObj?.name,
+          ip: serverObj?.ip,
+          mapName: mapObj?.name,
+          scenarios: teamScenarios,
+          kFactor: Number(process.env.ELO_K || 32),
+          elo,
+          match: null,
+        });
+
+        await oddsChan.send({ embeds: [scenEmb] });
+      }
+    }
+  } catch (e) {
+    console.error("[odds] failed to post scenarios:", e);
+  }
+
+  // Persist before betting controls and lock updates.
+  let predictionMarket = null;
+	try {
+    elo.db.transaction(() => {
+	  const matchColumns = elo.db.prepare("PRAGMA table_info(matches)").all();
+	  if (!matchColumns.some(c => c.name === "team_scenarios")) {
+		elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
+	  }
+	  if (!matchColumns.some(c => c.name === "offense_ids")) {
+		elo.db.exec("ALTER TABLE matches ADD COLUMN offense_ids TEXT");
+	  }
+	  elo.db.prepare(`
+	  INSERT INTO matches (
+		match_id, created_at, map_name, server_name,
+		mode, avg_blue, avg_red, rng_multiplier, bonus_elo,
+		blue_ids, red_ids, team_scenarios, offense_ids, status
+	  )
+	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
+	  ON CONFLICT(match_id) DO UPDATE SET
+		map_name=excluded.map_name,
+		server_name=excluded.server_name,
+	  mode=excluded.mode,
+		avg_blue=excluded.avg_blue,
+		avg_red=excluded.avg_red,
+		rng_multiplier=excluded.rng_multiplier,
+		bonus_elo=excluded.bonus_elo,
+		blue_ids=excluded.blue_ids,
+		red_ids=excluded.red_ids,
+		team_scenarios=excluded.team_scenarios,
+		offense_ids=excluded.offense_ids,
+		status='in_progress'
+	`).run(
+	  matchId,
+	  Math.floor(Date.now() / 1000),
+	  mapObj?.name || "(unknown)",
+	  serverObj?.name || "(unknown)",
+	  matchMode || "STANDARD",
+	  bal.avgBlue,
+	  bal.avgRed,
+	  bonus?.multiplier || 1.0,
+	  bonus ? JSON.stringify(bonus) : null,
+
+	  // 👉 Save full objects instead of just IDs
+	  JSON.stringify(bal.blue.map(p => p.id)), // only IDs
+	  JSON.stringify(bal.red.map(p => p.id)),  // only IDs
+	  teamScenarioState,
+	  // Full-time offense: recorded for history, never read by Elo.
+	  offense.blue.length || offense.red.length
+	    ? JSON.stringify({ blue: offense.blue.map(p => p.id), red: offense.red.map(p => p.id) })
+	    : null
+	);
+    })();
+} catch (e) {
+  console.error("[finalizeMatch] DB insert failed:", e);
+  throw e;
+}
+
+  // Prediction initialization has its own rollback boundary after the pickup
+  // is durable. An unavailable market must not stop the match from arming.
+  if (state.predictions) {
+    try {
+      predictionMarket = elo.db.transaction(() => {
+        const saved = elo.db.prepare("SELECT * FROM matches WHERE match_id=?").get(matchId);
+        return state.predictions.onMatchFinalized(state.predictions.snapshotFromRow(saved, { serverKey: determineServerKey(serverObj.ip || serverObj.name), team1Starts }));
+      })();
+    } catch {
+      console.warn("[predictions] match initialization unavailable");
+    }
+  }
+
+	// Build "Match Ready" embed
   const emb = new EmbedBuilder()
 		.setColor(0x57f287)
 		.setTitle(`Match Ready — ${serverObj?.name || "Unknown Server"} — ${mapObj?.name || "Unknown Map"}`)
@@ -814,7 +929,17 @@ async function finalizeMatch(
 		)
 		.setTimestamp();
 
+  if (predictionMarket) {
+    try {
+      await require("../predictions/integration").postMatchCard(state.predictions, predictionMarket, channel, { embeds: [emb] });
+    } catch {
+      // A send may already have succeeded before message binding failed. The
+      // pending card recovery handles retry and deduplication.
+      console.warn("[predictions] match card publication deferred");
+    }
+  } else {
     await channel.send({ embeds: [emb] });
+  }
 
   if (bonus) {
     let reason = bonus.triggeredBy?.includes("ADL Mode") ? "ADL Mode"
@@ -881,104 +1006,6 @@ async function finalizeMatch(
     console.error("[finalizeMatch] autoArmFromMatchReady failed:", e);
   }
 
-  // Build this once so the saved scenario numbers exactly match the posted card.
-  const teamScenarios = buildMatchScenarios(
-    bal.blue,
-    bal.red,
-    players,
-    elo,
-    4
-  );
-  const teamScenarioState = JSON.stringify({
-    version: 1,
-    selected: 1,
-    scenarios: teamScenarios.map(s => ({
-      blue: s.blue.map(p => String(p.id)),
-      red: s.red.map(p => String(p.id)),
-    })),
-  });
-
-  // Post scenarios (force Scenario 1 = actual teams)
-  try {
-    const chanId = String(config.channels.odds || "").trim();
-    const oddsChan = chanId ? await channel.client.channels.fetch(chanId) : null;
-
-    if (chanId && oddsChan?.isTextBased()) {
-      const perms = oddsChan.permissionsFor(channel.client.user.id);
-      const need = ["ViewChannel", "SendMessages", "EmbedLinks"];
-
-      if (perms && need.every(p => perms.has(p))) {
-        const scenEmb = buildTeamScenariosEmbed({
-          matchId,
-          serverName: serverObj?.name,
-          ip: serverObj?.ip,
-          mapName: mapObj?.name,
-          scenarios: teamScenarios,
-          kFactor: Number(process.env.ELO_K || 32),
-          elo,
-          match: null,
-        });
-
-        await oddsChan.send({ embeds: [scenEmb] });
-      }
-    }
-  } catch (e) {
-    console.error("[odds] failed to post scenarios:", e);
-  }
-
-  // DB insert
-	try {
-	  const matchColumns = elo.db.prepare("PRAGMA table_info(matches)").all();
-	  if (!matchColumns.some(c => c.name === "team_scenarios")) {
-		elo.db.exec("ALTER TABLE matches ADD COLUMN team_scenarios TEXT");
-	  }
-	  if (!matchColumns.some(c => c.name === "offense_ids")) {
-		elo.db.exec("ALTER TABLE matches ADD COLUMN offense_ids TEXT");
-	  }
-	  elo.db.prepare(`
-	  INSERT INTO matches (
-		match_id, created_at, map_name, server_name,
-		mode, avg_blue, avg_red, rng_multiplier, bonus_elo,
-		blue_ids, red_ids, team_scenarios, offense_ids, status
-	  )
-	  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_progress')
-	  ON CONFLICT(match_id) DO UPDATE SET
-		map_name=excluded.map_name,
-		server_name=excluded.server_name,
-	  mode=excluded.mode,
-		avg_blue=excluded.avg_blue,
-		avg_red=excluded.avg_red,
-		rng_multiplier=excluded.rng_multiplier,
-		bonus_elo=excluded.bonus_elo,
-		blue_ids=excluded.blue_ids,
-		red_ids=excluded.red_ids,
-		team_scenarios=excluded.team_scenarios,
-		offense_ids=excluded.offense_ids,
-		status='in_progress'
-	`).run(
-	  matchId,
-	  Math.floor(Date.now() / 1000),
-	  mapObj?.name || "(unknown)",
-	  serverObj?.name || "(unknown)",
-	  matchMode || "STANDARD",
-	  bal.avgBlue,
-	  bal.avgRed,
-	  bonus?.multiplier || 1.0,
-	  bonus ? JSON.stringify(bonus) : null,
-
-	  // 👉 Save full objects instead of just IDs
-	  JSON.stringify(bal.blue.map(p => p.id)), // only IDs
-	  JSON.stringify(bal.red.map(p => p.id)),  // only IDs
-	  teamScenarioState,
-	  // Full-time offense: recorded for history, never read by Elo.
-	  offense.blue.length || offense.red.length
-	    ? JSON.stringify({ blue: offense.blue.map(p => p.id), red: offense.red.map(p => p.id) })
-	    : null
-	);
-} catch (e) {
-  console.error("[finalizeMatch] DB insert failed:", e);
-}
-
   // Record object for in-memory + file store
 const record = {
   id: matchId,
@@ -1029,7 +1056,7 @@ const record = {
   state.pendingTeam1Starts = null;
 
   // 👇 Reset ADL votes so they don't carry over
-  try { 
+  try {
     const adl = require("../lib/adl");
     adl.clearAll();
   } catch (e) {

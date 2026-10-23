@@ -45,6 +45,16 @@ function register(reg, { config }) {
     });
 
 
+    if (config.predictionsEnabled) emb.addFields({
+      name: "Private Match Predictions",
+      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. New games start your maximum at 100 points, increasing by 10 per settled game you bet on. My Bet privately shows your pick, points and applicable limit. Edit/cancel before closure. All eight confirmed starts the full two-minute window. Participants cannot bet.",
+    });
+    emb.addFields({name:"Your Prediction Bank",value:"`!bank` or `!points` — privately DM your points, betting limit, last five bets and player rewards from your last five settled prediction games. The bot deletes the command in servers when permitted. Available even with predictions disabled."});
+    if(config.predictionsOwnerId&&String(message.author.id)===config.predictionsOwnerId)emb.addFields({
+      name:"Prediction Owner Controls",
+      value:"`!pred unresolved` privately lists unfinished prediction games. Use `!pred status <matchId>` for details and `!pred audit <matchId|userId>` for history. `!pred settle <matchId> <blue|red|tie> <reason>` recovers a reviewed game matching its completed official report, after private confirmation. These remain available with predictions disabled.",
+    });
+
     // ---------------- Admin Commands ----------------
     if (admin) {
       emb.addFields(

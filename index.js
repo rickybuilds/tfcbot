@@ -78,7 +78,7 @@ else throw new Error("lib/elo: export must be class or instance with getRating()
 // init singletons
 const settings     = new SettingsDB("bot.db");
 const privacy      = new PrivacyDB(eloDbPath);
-const matchesStore = new MatchStore(eloDbPath);
+const matchesStore = new MatchStore(elo.db);
 const queueStore   = new QueueStore("queue.json");
 const offenseStore = new QueueStore("offense_queue.json");
 const banStore     = new BanStore("bot.db");
@@ -371,6 +371,17 @@ memberLeaves(client, config);
 
 // now extend deps with client
 deps.client = client;
+const predictions = require("./predictions").createPredictions({ db: elo.db, client, config });
+deps.predictions = predictions;
+state.predictions = predictions;
+matchesStore.predictions = predictions;
+registry.set("pred", (message, args) => predictions.handleAdminCommand(message, args));
+require("./predictions/bank").register(registry,predictions);
+client.on("interactionCreate", interaction => {
+  if (String(interaction.customId || "").startsWith("pred:")) {
+    predictions.handleInteraction(interaction).catch(() => console.error("[predictions] interaction failure"));
+  }
+});
 const eloShadow = new EloShadowService({
   db: matchesStore.db,
   elo,
@@ -417,6 +428,10 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  try { await predictions.initialize(); } catch (error) {
+    predictions.store.setMetadata("paused", "1");
+    console.error("[predictions] recovery failed; betting paused");
+  }
   try { await refreshBotName(client, state); } catch {}
   try { eloShadow.start(); } catch (e) { console.error("[elo-shadow] startup failed:", e); }
 
@@ -519,6 +534,8 @@ startSpeedrunPlayerLinkSync({
       return;
     }
 
+    // Observe before queue/duel consumers can consume connects/disconnects.
+    predictions.onHldsEvent(evt);
     // Give active duels first refusal on standard HLDS player activity. The
     // queue handler may consume disconnect events, and duel timers must see
     // those events (plus ordinary connect/kill evidence) before that happens.
@@ -614,6 +631,7 @@ startSpeedrunPlayerLinkSync({
       }
 
       try {
+        predictions.onRestartRequested({matchId:rs.matchId,serverKey});
         await runRconCommand(serverKey, `amx_map ${rs.map}`);
         console.log(`[!rs] amx_map ${rs.map} sent OK to ${serverKey}`);
       } catch (err) {
@@ -634,7 +652,7 @@ startSpeedrunPlayerLinkSync({
   });
   } catch (e) { console.error("[HLDS-LOG] failed:", e); }
 
-  scheduleBackups(settings);
+  scheduleBackups(settings, { sources: [eloDbPath, "queue.json"] });
 });
 
 // ============================================================================
@@ -769,6 +787,7 @@ client.on("messageCreate", async (message) => {
 		"eloagainst",
 		"help",
 		"privacy"
+		,"pred", "bank", "points"
 	  ];
 
 		if (dmAllowed.includes(cmd) && registry.has(cmd)) {

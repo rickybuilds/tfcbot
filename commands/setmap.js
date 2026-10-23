@@ -38,13 +38,24 @@ async function register(reg, deps) {
       }
 
       // --- Perform update (DB) ---
-      const res = elo.db
+      const original = elo.db.prepare("SELECT * FROM matches WHERE match_id=?").get(matchId);
+      if (original.map_name !== newMap) await state.predictions?.prepareTermsChange(matchId);
+      let res;
+      const market = require("../predictions/integration").commitMatchTerms({
+        db: elo.db, predictions: state.predictions, row: original,
+        next: { ...original, map_name: newMap },
+        write: () => { res = elo.db
         .prepare("UPDATE matches SET map_name = ? WHERE match_id = ?")
-        .run(newMap, matchId);
+        .run(newMap, matchId); },
+      });
 
       if (!res || res.changes <= 0) {
         await message.reply(`⚠️ No map change was made (already set to **${newMap}**?)`);
         return;
+      }
+
+      if (state.restartRequest && String(state.restartRequest.matchId) === String(matchId)) {
+        state.restartRequest.map = newMap;
       }
 
       // --- Update in-memory match record (best effort) ---
@@ -68,6 +79,9 @@ async function register(reg, deps) {
 
       // --- Respond ---
       await message.reply(`✅ Updated map for match **${matchId}** → **${newMap}**`);
+      if (market) {
+        await require("../predictions/integration").postMatchCard(state.predictions, market, message.channel, {});
+      }
       if (didAutoRecap) {
         await message.channel.send(
           `🧠 autoRecap updated — now tracking **${newMap}** for match **${matchId}**`

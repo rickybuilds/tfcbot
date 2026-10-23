@@ -113,12 +113,13 @@ function register(reg, deps) {
         elo.applyTeamResult(eloArgs);
       }
 
+      elo.db.transaction(() => {
               elo.db.prepare(`
           UPDATE matches
           SET
             winner=?,
             status='completed',
-            processed_at=?,
+            processed_at=CASE WHEN lower(status)='completed' AND processed_at IS NOT NULL THEN processed_at ELSE ? END,
             hampalyzer_url=COALESCE(NULLIF(hampalyzer_url, ''), NULLIF(?, '')),
             tfcstats_url=COALESCE(NULLIF(tfcstats_url, ''), NULLIF(?, ''))
           WHERE match_id=?
@@ -129,6 +130,14 @@ function register(reg, deps) {
           match.tfcstats_url || match.tfcstatsUrl || match.tfcstats || "",
           String(matchId)
         );
+      })();
+      // The official report commits independently. Prediction reconciliation
+      // reads that row and must never interrupt normal reporting or Elo work.
+      try {
+        elo.db.transaction(() => deps.predictions?.onMatchReported({ matchId }))();
+      } catch {
+        console.warn("[predictions] result reconciliation deferred");
+      }
 
       try {
         if (liveGentle) {
@@ -347,9 +356,14 @@ reg.set("fixscores", async (message, args = []) => {
     if (!matchId) return message.channel.send("Usage: `!delmatch <matchId>`");
 
     try {
+      deps.predictions?.assertCanDeleteMatch(matchId);
+      const deleteWrites = () => {
       try { elo.unreportMatch(matchId); } catch {}
       elo.db.prepare("DELETE FROM matches WHERE match_id=?").run(String(matchId));
       elo.db.prepare("DELETE FROM rating_changes WHERE match_id=?").run(String(matchId));
+      };
+      if (deps.predictions) deps.predictions.applyMatchDeletion({ matchId, applyMatchWrites: deleteWrites });
+      else elo.db.transaction(deleteWrites)();
 
       // 🧩 Disarm autoRecap if still tracking
       if (reg?.autoRecap) reg.autoRecap.disarmByMatchId(matchId);

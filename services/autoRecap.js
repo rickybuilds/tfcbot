@@ -386,10 +386,40 @@ function attachAutoRecap(ctx, options = {}) {
         continue;
       }
 
+      let market = state.predictions?.store.latest(a.matchId);
+      let revisedMarket = null;
+      if (market) {
+        if (market.snapshot.team1Starts !== team1Starts) await state.predictions.prepareTermsChange(a.matchId);
+        // Phase verification awaited network I/O: use the current revision and
+        // recheck the armed match before committing against its final roster.
+        market = state.predictions.store.latest(a.matchId);
+        if (armed.get(a.serverKey) !== a || a.done || (a.half || 0) > 0 || (a.liveCaps || 0) > 0) {
+          blocked.push({ matchId: String(a.matchId), reason: "Match changed while starting-order verification was pending" });
+          continue;
+        }
+        revisedMarket = state.predictions.applyRosterChange({
+          matchId: a.matchId,
+          nextSnapshot: { ...market.snapshot, team1Starts },
+          applyMatchWrites: () => {},
+          context: state.predictions.context("starting-order", "system", "armed match starting order changed"),
+        });
+      }
       a.team1Starts = team1Starts;
       for (const match of state.matches || []) {
         if (String(match.id || match.matchId) === String(a.matchId)) {
           match.team1Starts = team1Starts;
+        }
+      }
+
+      // Accepted state is consistent before any fallible publication work.
+      if (market) {
+        await state.predictions.refreshCard(market.id);
+        if (revisedMarket && revisedMarket.id !== market.id) {
+          state.predictions.queueCardPublication(revisedMarket.id, reportChannel);
+          try {
+            const channel = await client.channels.fetch(reportChannel);
+            await require("../predictions/integration").postMatchCard(state.predictions, revisedMarket, channel, {});
+          } catch { console.warn(`[predictions] updated card unavailable for ${a.matchId}; accepted starting order retained`); }
         }
       }
 

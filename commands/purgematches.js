@@ -14,6 +14,9 @@ function register(reg, { state, matchesStore, config }) {
     }
 
     try {
+      // Refuse before clearing memory; raw SQL is also protected by a DB trigger.
+      const dependent = state.predictions?.store.markets().some(m => m.state !== "void" && !m.deletion_authorized);
+      if (dependent) throw new Error("Resolve prediction markets individually before purging matches");
       // 1) Clear in-memory matches
       state.matches = [];
 

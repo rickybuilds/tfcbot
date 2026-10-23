@@ -147,7 +147,11 @@ module.exports = {
     }
 
     snapshot.selected = scenarioNumber;
-    db.prepare(`
+    await state?.predictions?.prepareTermsChange(matchId);
+    const market = require("../predictions/integration").commitMatchTerms({
+      db, predictions: state?.predictions, row: match,
+      next: { ...match, blue_ids: JSON.stringify(chosenIds.blue), red_ids: JSON.stringify(chosenIds.red) },
+      write: () => db.prepare(`
       UPDATE matches
       SET blue_ids = ?, red_ids = ?, avg_blue = ?, avg_red = ?, team_scenarios = ?
       WHERE match_id = ?
@@ -158,7 +162,8 @@ module.exports = {
       odds.avgRed,
       JSON.stringify(snapshot),
       matchId
-    );
+    ),
+    });
 
     const memoryMatch = state?.matches?.find(m => String(m.id) === String(matchId));
     if (memoryMatch) {
@@ -187,7 +192,7 @@ module.exports = {
       })
       .setTimestamp();
 
-    await pickupChannel.send({ embeds: [embed] });
+    await require("../predictions/integration").postMatchCard(state?.predictions, market, pickupChannel, { embeds: [embed] });
     await message.reply(
       `✅ Scenario ${scenarioNumber} applied to match **${matchId}**. ` +
       `The updated teams were posted in <#${pickupChannelId}>.`

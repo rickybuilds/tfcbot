@@ -41,6 +41,8 @@ module.exports = {
   // UI / Game
   MAX_BUTTONS: 9,
   MAX_PLAYERS: Number(process.env.MAX_PLAYERS) || 8,
+  predictionsEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.PREDICTIONS_ENABLED || "0")),
+  predictionsOwnerId: String(process.env.PREDICTIONS_OWNER_ID || "").trim(),
   pickupRecordingEnabled: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_RECORDING_ENABLED || "")
   ),
