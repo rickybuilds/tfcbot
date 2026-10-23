@@ -1,0 +1,126 @@
+"use strict";
+
+const { isAdmin } = require("../lib/guards");
+const { sendAuditLog } = require("../lib/auditLog");
+
+const INFRACTIONS_PER_JAIL = 5;
+const JAIL_HOURS_PER_THRESHOLD = 24;
+const RULE8_ELO_RECIPIENT_ID = "737481545216163891";
+
+function register(reg, { config, elo, jailStore }) {
+  reg.set("rule8clear", async (message) => {
+    if (!isAdmin(message)) return;
+    const user = message.mentions?.users?.first();
+    const target = message.mentions?.members?.first();
+    if (!user || !target) {
+      await message.channel.send("Usage: `!rule8clear @user`");
+      return;
+    }
+
+    const result = elo.clearLatestRule8Infraction(user.id);
+    let jailCleared = false;
+    if (result.releaseJail && result.cleared) {
+      const jailData = jailStore.get(target.id);
+      if (jailData) {
+        const jailRoleId = config.roles.jail;
+        if (jailRoleId && target.roles.cache.has(jailRoleId)) {
+          await target.roles.remove(jailRoleId).catch(() => {});
+        }
+        for (const roleId of jailData.oldRoles || []) {
+          const role = target.guild?.roles?.cache?.get(roleId);
+          if (role) await target.roles.add(role).catch(() => {});
+        }
+        jailStore.delete(target.id);
+        jailCleared = true;
+      }
+    }
+    await message.channel.send(
+      `✅ ${result.cleared ? "Cleared the most recent" : "No stored"} Rule 8 infraction for <@${user.id}> ` +
+      `(remaining: ${result.count}). ` +
+      `${result.reversedElo ? "Refunded 1 Elo." : "No Elo refund was available."} ` +
+      `${jailCleared ? "The jail was also cleared." : "Jail status was unchanged."}`
+    );
+  });
+
+  reg.set("rule8", async (message) => {
+    const user = message.mentions?.users?.first();
+    const target = message.mentions?.members?.first();
+    if (!user || !target) {
+      await message.channel.send(
+        "**Rule 8 — Have Fun**\n" +
+        "We’re here to play, improve, and enjoy the game together.\n\n" +
+        "To issue an infraction, use: `!rule8 @user`"
+      );
+      return;
+    }
+    if (!isAdmin(message)) return;
+    if (String(user.id) === String(message.author.id)) {
+      await message.channel.send("You cannot issue a Rule 8 infraction to yourself.");
+      return;
+    }
+
+    try {
+      const result = elo.recordRule8Infraction(
+        user.id,
+        message.author.id,
+        RULE8_ELO_RECIPIENT_ID,
+        target.displayName || user.username,
+        message.member?.displayName || message.author.username,
+        "Rule 8 recipient",
+      );
+      let jailMessage = "";
+
+      if (result.count % INFRACTIONS_PER_JAIL === 0) {
+        const durationHours = (result.count / INFRACTIONS_PER_JAIL) * JAIL_HOURS_PER_THRESHOLD;
+        const durationMs = durationHours * 60 * 60 * 1000;
+        const existing = jailStore.get(target.id);
+
+        if (!existing) {
+          const oldRoles = target.roles.cache
+            .filter(role => role.name !== "@everyone" && !role.managed)
+            .map(role => role.id);
+          for (const [, role] of target.roles.cache) {
+            if (role.name === "@everyone" || role.managed) continue;
+            await target.roles.remove(role).catch(() => {});
+          }
+          await target.roles.add(config.roles.jail).catch(() => {});
+          jailStore.set(target.id, {
+            oldRoles,
+            expires: Date.now() + durationMs,
+            reason: `Rule 8 — ${result.count} infractions`,
+            admin: message.author.id,
+          });
+        } else {
+          jailStore.set(target.id, {
+            ...existing,
+            expires: Math.max(Date.now(), existing.expires || 0) + durationMs,
+            reason: `Rule 8 — ${result.count} infractions`,
+            admin: message.author.id,
+          });
+        }
+        jailMessage = ` They are jailed for ${durationHours} hours.`;
+      }
+
+      const eloMessage = result.target.delta === 0
+        ? "**no net Elo change** because the target is the designated recipient."
+        : `**-1 Elo** transferred to <@${RULE8_ELO_RECIPIENT_ID}>.`;
+      await message.channel.send(
+        `⚖️ Rule 8 infraction for <@${target.id}> (${result.count}/5): ` +
+        `${eloMessage}${jailMessage}`
+      );
+      await sendAuditLog({
+        client: message.client,
+        channelId: config?.channels?.audit,
+        payload: `⚖️ RULE 8: <@${message.author.id}> issued an infraction to <@${target.id}>; ` +
+          `Elo transferred ${result.target.before}→${result.target.after}, ` +
+          `recipient <@${RULE8_ELO_RECIPIENT_ID}> ${result.recipient.before}→${result.recipient.after}; total ${result.count}`,
+        errorMessage: "[rule8 audit] failed:",
+      });
+    } catch (err) {
+      console.error("[!rule8 error]", err);
+      await message.channel.send("Failed to record the Rule 8 infraction.");
+    }
+  });
+}
+
+module.exports = { register };

@@ -32,6 +32,7 @@ function register(reg, { config }) {
         "`!notice` — Ping @TFCPlayer role when queue ≥ 5\n" +
         "`!admin` — Ping admin role for assistance\n" +
         "`!botch` — Visit the coolest dude page\n" +
+        "`!selfdestruct` — Trigger the owner-only fake self-destruct prank\n" +
         "`!timeleft` — Show current map and time left on the active server\n" +  // ✅ added here
         "`!maplist` — Shows current maplist\n" +
         "`!ranks` — Display Elo rank bands\n" +
@@ -86,6 +87,8 @@ function register(reg, { config }) {
           value:
             "`!ban @user <games> [reason]` — Temporary ban (x games)\n" +
             "`!permaban @user` — Permanent ban (adds permaban role)\n" +
+            "`!rule8 @user` — Transfer 1 Elo and record a Rule 8 infraction\n" +
+            "`!rule8clear @user` — Clear the most recent Rule 8 infraction\n" +
             "`!unban @user` — Remove active ban / restore permissions\n" +
             "`!unjail @user` — Restore roles to a jailed player\n" +
             "`!listbans` — Show active game bans",
