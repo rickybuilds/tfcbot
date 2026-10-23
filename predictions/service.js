@@ -184,7 +184,12 @@ class PredictionsService {
         this.db.prepare("UPDATE prediction_markets SET phase_evidence=? WHERE id=?").run(JSON.stringify({...evidence,mapObserved:true,...(!evidence.anchorLogInstance&&evt.logInstance?{anchorLogInstance:evt.logInstance,anchorObservedAt:this.clock()}:{})}),m.id);
       }
       if(evt.type==="prediction_live_start"&&sameMap(this.presence.state(evt.serverKey).mapName,m.snapshot.mapName)){
-        this.db.prepare("UPDATE prediction_markets SET phase='live',live_at=COALESCE(live_at,?),phase_evidence=? WHERE id=?").run(evt.receivedAt||evt.ts||this.clock(),JSON.stringify({...previousEvidence,sourceTime:evt.sourceTime,logInstance:evt.logInstance,sourceKey:evt.sourceKey}),m.id);
+        const liveAt=Number.isSafeInteger(evt.receivedAt)?evt.receivedAt:Number.isSafeInteger(evt.ts)?evt.ts:this.clock();
+        this.db.prepare("UPDATE prediction_markets SET phase='live',live_at=COALESCE(live_at,?),phase_evidence=? WHERE id=?").run(liveAt,JSON.stringify({...previousEvidence,sourceTime:evt.sourceTime,logInstance:evt.logInstance,sourceKey:evt.sourceKey}),m.id);
+        if(["open","countdown"].includes(m.state)){
+          this.store.closeMarket(m.id,{...this.context("live-start","system","live play started"),now:liveAt});
+          this.refreshCard(m.id);
+        }
       }
     }
     return this.maybeStart(evt.serverKey);
@@ -196,7 +201,7 @@ class PredictionsService {
     const m=this.store.latest(matchId);if(!m||m.state==="void")return;
     outcome=String(outcome).toLowerCase();if(!["blue","red","tie"].includes(outcome))throw new Error("Invalid official outcome");
     let reason;
-    if(!m.settlement_version&&(m.closes_at==null||context.now<m.closes_at))reason="official result received before betting deadline";
+    if(!m.settlement_version&&["open","countdown"].includes(m.state)&&(m.closes_at==null||context.now<m.closes_at))reason="official result received before betting deadline";
     if((m.observed_result&&m.observed_result!==outcome)||(m.result&&m.result!==outcome))reason="official result changed; owner correction required";
     if(reason&&(m.state!=="review_required"||m.reason!==reason))this.store.markReview(m.id,reason);
     if(m.observed_result!==outcome)this.db.prepare("UPDATE prediction_markets SET observed_result=? WHERE id=?").run(outcome,m.id);
@@ -225,7 +230,8 @@ class PredictionsService {
       }
       if(current.state==="settled"&&current.result===outcome)return {version:current.settlement_version,duplicate:true};
       if(current.state==="review_required"){
-        if(current.settlement_version||!recoverableReviews.has(current.reason)||current.closes_at==null||now<current.closes_at)return;
+          const earlyResultWithLiveEvidence=current.reason==="official result received before betting deadline"&&current.phase==="live"&&Number.isSafeInteger(current.live_at)&&this.store.bets(m.id).every(b=>Number.isSafeInteger(Number(b.created_at))&&Number(b.created_at)<=current.live_at);
+          if(current.settlement_version||(!recoverableReviews.has(current.reason)&&!earlyResultWithLiveEvidence)||current.closes_at==null||now<current.closes_at)return;
         const ctx=this.context("automatic-recovery","system",current.reason);
         this.store.entry(ctx,{kind:"automatic_recovery",marketId:m.id,entryKey:"recovery",metadata:{reviewReason:current.reason,originalDeadline:current.closes_at,revision:current.revision,outcome}});
         this.db.prepare("UPDATE prediction_markets SET state='closed',closed_at=COALESCE(closed_at,closes_at),reason=NULL WHERE id=?").run(m.id);

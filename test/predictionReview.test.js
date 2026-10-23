@@ -22,6 +22,27 @@ test("same-map halftime reload does not erase durable competitive-start evidence
  const text='L 10/20/2026 - 10:00:00: Started map "shutdown2"\nL 10/20/2026 - 10:01:00: World triggered "Match_Begins_Now"\nL 10/20/2026 - 10:16:00: Started map "shutdown2"\n';
  assert.equal(phaseFromLog(text,"shutdown2"),"live");
 });
+test("live-start closes a countdown market before its scheduled deadline",t=>{
+ const {s,m}=setup(t);
+ s.store.startCountdown(m.id,1000);
+ s.onHldsEvent({type:"map",name:"shutdown2",serverKey:"east",logInstance:"logs/L1020000.log"});
+ s.onHldsEvent({type:"prediction_live_start",serverKey:"east",logInstance:"logs/L1020000.log"});
+ assert.equal(s.store.market(m.id).state,"closed");
+ s.observeOfficialResult({matchId:"MATCH1",outcome:"blue",context:{operationKey:"result",actorId:"system",now:30000}});
+ assert.equal(s.store.market(m.id).state,"closed");
+});
+test("a completed report recovers an early result after live-start evidence",t=>{
+ const {s,db,m,time}=setup(t);
+ db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,blue_ids TEXT,red_ids TEXT,offense_ids TEXT,map_name TEXT,server_name TEXT,mode TEXT,rng_multiplier REAL,bonus_elo TEXT,winner TEXT,status TEXT,processed_at INTEGER,hampalyzer_url TEXT,tfcstats_url TEXT)");
+ const blue=["b1","b2","b3","b4"],red=["r1","r2","r3","r4"];
+ s.store.startCountdown(m.id,1000);time(30000);
+ s.observeOfficialResult({matchId:"MATCH1",outcome:"blue"});
+ s.onHldsEvent({type:"map",name:"shutdown2",serverKey:"east",logInstance:"logs/L1020000.log"});
+ s.onHldsEvent({type:"prediction_live_start",serverKey:"east",logInstance:"logs/L1020000.log"});
+ time(130000);db.prepare("INSERT INTO matches VALUES ('MATCH1',?,?,NULL,'shutdown2','east','STANDARD',1,NULL,'BLUE','completed',30,NULL,NULL)").run(JSON.stringify(blue),JSON.stringify(red));
+ s.onMatchReported({matchId:"MATCH1"});
+ assert.equal(s.store.market(m.id).state,"settled");
+});
 function recapHarness(t,s,db,{failFetch=false}={}) {
  const {state}=require("../lib/state"),{attachAutoRecap,armed}=require("../services/autoRecap");
  const oldPred=state.predictions,oldMatches=state.matches;state.predictions=s;state.matches=[{id:"MATCH1",team1Starts:"offense"}];
