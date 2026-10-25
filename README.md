@@ -46,8 +46,12 @@ also works). Full-time offense players:
 - are stored in `matches.offense_ids`, never in `blue_ids`/`red_ids`, so they
   gain or lose no Elo and do not affect team averages, odds, or streaks.
 
-Set `OFFENSE_ROLE_ID` to limit the command to members with that Discord role
-(admins are always allowed). Without it, anyone can add as full-time offense.
+Full-time offense requires current Elo strictly below 1000, including for admins.
+The bot checks Elo when adding and again when assigning offense players to a match.
+Console `[addoff]` entries record each accepted/blocked attempt with the player's
+Discord ID, name, current Elo, and reason. An unavailable Elo blocks the add.
+Set `OFFENSE_ROLE_ID` to additionally require that Discord role (the admin role
+bypasses only the role requirement). Without it, only the Elo requirement applies.
 Change the per-team cap with `!set offense:max_per_team <0-4>`.
 
 - Match reporting and history

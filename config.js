@@ -34,7 +34,7 @@ module.exports = {
     permaban: process.env.PERMABAN_ROLE_ID,
     tempban: process.env.TEMPBAN_ROLE_ID,
     jail: process.env.JAIL_ROLE_ID,
-    // Optional: restricts !addoff to this role (admins always allowed).
+    // Optional additional !addoff role gate; all players must also have Elo < 1000.
     offense: process.env.OFFENSE_ROLE_ID,
   },
 

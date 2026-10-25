@@ -63,7 +63,18 @@ test("offense role restriction applies only when configured", () => {
   assert.equal(canAddAsOffense(null, config), false);
 });
 
-function setupQueue({ config: configOverrides = {}, settings } = {}) {
+test("offense assignment rechecks current Elo and drops old ineligible entries", () => {
+  const ratings = { high: 2300, boundary: 1000, low: 999, unknown: NaN };
+  const result = assignOffensePlayers(Object.keys(ratings).map(player), {
+    maxPerTeam: 1, random: () => 0, ratingForPlayer: p => ratings[p.id],
+  });
+  assert.deepEqual(result.blue.map(p => p.id), ["low"]);
+  assert.deepEqual(result.red, []);
+  assert.deepEqual(result.remaining, []);
+  assert.deepEqual(result.ineligible.map(p => p.id), ["high", "boundary", "unknown"]);
+});
+
+function setupQueue({ config: configOverrides = {}, settings, rating = 900 } = {}) {
   const registry = new Map();
   const state = { queue: [], offenseQueue: [], MAX_PLAYERS: 8, lockedPlayers: new Map() };
   const posted = [];
@@ -75,7 +86,7 @@ function setupQueue({ config: configOverrides = {}, settings } = {}) {
     client: null,
     config: { channels: { pickup: "pickup" }, roles: {}, ...configOverrides },
     state,
-    elo: { getRating: () => 1941 },
+    elo: { getRating: () => { if (rating instanceof Error) throw rating; return rating; } },
     banStore: { getBan: () => null },
     settings: settings || { getNumber: (_key, fallback) => fallback },
     privacy: { isHidden: () => false },
@@ -92,6 +103,50 @@ function setupQueue({ config: configOverrides = {}, settings } = {}) {
   });
   return { registry, state, message, posted, replies };
 }
+
+test("all addoff aliases block Elo 1000 and above even for admins and log the Elo", async () => {
+  const logs = [];
+  const previousLog = console.log;
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    for (const rating of [1000, 2300]) {
+      for (const command of ["addoff", "addoffense", "++off"]) {
+        const h = setupQueue({ rating, config: { roles: { offense: "off-role", admin: "admin-role" } } });
+        h.state.queue.push(player("high"));
+        await h.registry.get(command)(h.message("high", ["off-role", "admin-role"]));
+        assert.deepEqual(h.state.offenseQueue, []);
+        assert.equal(h.state.queue.length, 1);
+        assert.match(h.replies.at(-1).text, /below 1000/);
+        assert.match(h.replies.at(-1).text, new RegExp(String(rating)));
+        assert.ok(logs.some(line => line.includes(`[addoff]`) && line.includes(`"elo":${rating}`) && line.includes('"outcome":"blocked"')));
+      }
+    }
+  } finally { console.log = previousLog; }
+});
+
+test("addoff accepts and logs Elo 999 while a regular 2300-Elo add remains allowed", async () => {
+  const logs = [];
+  const previousLog = console.log;
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    const low = setupQueue({ rating: 999 });
+    await low.registry.get("addoff")(low.message("low"));
+    assert.deepEqual(low.state.offenseQueue.map(p => p.id), ["low"]);
+    assert.ok(logs.some(line => line.includes('"elo":999') && line.includes('"outcome":"accepted"')));
+    const high = setupQueue({ rating: 2300 });
+    await high.registry.get("add")(high.message("high"));
+    assert.deepEqual(high.state.queue.map(p => p.id), ["high"]);
+  } finally { console.log = previousLog; }
+});
+
+test("addoff blocks unavailable or invalid Elo instead of accepting it as zero", async () => {
+  for (const rating of [null, undefined, NaN, Infinity, new Error("database unavailable")]) {
+    const h = setupQueue({ rating: rating === undefined ? NaN : rating });
+    await h.registry.get("addoff")(h.message("unknown"));
+    assert.deepEqual(h.state.offenseQueue, []);
+    assert.match(h.replies.at(-1).text, /verify.*Elo/i);
+  }
+});
 
 test("full-time offense does not count toward filling the queue", async t => {
   const runs = [];
@@ -174,7 +229,7 @@ test("finalized matches keep offense players out of the rated roster", async t =
 
   const inserts = [];
   const elo = {
-    getRating: () => 2000,
+    getRating: id => String(id).startsWith("o") ? 900 : 2000,
     db: {
       transaction: fn => fn,
       exec: () => {},

@@ -730,6 +730,7 @@ async function finalizeMatch(
     excludeIds: canonicalPlayers.map(p => p.id),
     lockedPlayers: state.lockedPlayers,
     maxPerTeam: offenseMaxPerTeam(settings),
+    ratingForPlayer: p => elo.getRating(p.id, p.name, { createIfMissing: false }),
   });
   const toOffensePlayer = p => ({ id: String(p.id), name: getStoredPlayerName(elo, p.id, p.name) });
   const offense = {
@@ -1045,6 +1046,7 @@ const record = {
   // this function awaited Discord.
   const leavingOffense = new Set([
     ...canonicalPlayers.map(p => String(p.id)),
+    ...offenseAssignment.ineligible.map(p => String(p.id)),
     ...offense.blue.map(p => p.id),
     ...offense.red.map(p => p.id),
   ]);

@@ -13,6 +13,8 @@ const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
 const {
   offenseCapacity,
+  OFFENSE_ELO_LIMIT,
+  isOffenseRatingEligible,
   canAddAsOffense,
   ensureOffenseQueue,
   isOffensePlayer,
@@ -350,8 +352,27 @@ function register(reg, {
   const addOffense = async (message) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
+    const discordName = message.member?.displayName || message.author.username;
+    let currentRating = null;
+    try { currentRating = elo.getRating(id, discordName, { createIfMissing: false }); } catch {}
+    const logOffense = (outcome, reason) => console.log(`[addoff] ${JSON.stringify({
+      playerId: String(id), playerName: discordName,
+      elo: Number.isFinite(currentRating) ? currentRating : null,
+      outcome, reason, limit: OFFENSE_ELO_LIMIT,
+    })}`);
+    if (!isOffenseRatingEligible(currentRating)) {
+      const knownRating = Number.isFinite(currentRating);
+      logOffense("blocked", knownRating ? "elo_at_or_above_limit" : "elo_unavailable");
+      try {
+        await message.reply(knownRating
+          ? `🚫 Full-time offense requires current Elo below ${OFFENSE_ELO_LIMIT}. Your current Elo is ${currentRating}.`
+          : "⚠️ Could not verify your current Elo. Please try !addoff again shortly.");
+      } catch {}
+      return;
+    }
 
     if (!canAddAsOffense(message.member, config)) {
+      logOffense("blocked", "missing_role");
       try {
         await message.reply("🚫 You don’t have the role required to add as full-time offense.");
       } catch {}
@@ -360,17 +381,19 @@ function register(reg, {
 
     const capacity = offenseCapacity(settings);
     if (capacity <= 0) {
+      logOffense("blocked", "disabled");
       try { await message.reply("⚠️ Full-time offense is currently disabled."); } catch {}
       return;
     }
 
-    if (await rejectLocked(message, id)) return;
-    if (await rejectBanned(message, id)) return;
+    if (await rejectLocked(message, id)) { logOffense("blocked", "active_match"); return; }
+    if (await rejectBanned(message, id)) { logOffense("blocked", "banned"); return; }
 
     const offense = ensureOffenseQueue(state);
     let entry = offense.find(p => String(p.id) === String(id));
 
     if (!entry && offense.length >= capacity) {
+      logOffense("blocked", "full");
       try {
         await message.reply(`🚨 Full-time offense spots are full (${offense.length}/${capacity}).`);
       } catch {}
@@ -380,6 +403,7 @@ function register(reg, {
     const regular = state.queue.find(p => String(p.id) === String(id));
     if (regular) {
       if (flowActive()) {
+        logOffense("blocked", "active_vote");
         try {
           await message.reply("⚠️ You’re part of the current vote. Wait for it to finish before switching to full-time offense.");
         } catch {}
@@ -389,7 +413,6 @@ function register(reg, {
       state.queue = state.queue.filter(p => String(p.id) !== String(id));
     }
 
-    const discordName = message.member?.displayName || message.author.username;
     const nameSeed = entry?.name || regular?.name || discordName;
     try { elo.getRating(id, nameSeed, { createIfMissing: true }); } catch {}
     const name = getStoredPlayerName(elo, id, nameSeed);
@@ -401,6 +424,7 @@ function register(reg, {
       entry.lastSeenAt = Date.now();
     }
 
+    logOffense("accepted", "queued");
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}
