@@ -48,8 +48,8 @@ also works). Full-time offense players:
 
 Full-time offense requires current Elo strictly below 1000, including for admins.
 The bot checks Elo when adding and again when assigning offense players to a match.
-Console `[addoff]` entries record each accepted/blocked attempt with the player's
-Discord ID, name, current Elo, and reason. An unavailable Elo blocks the add.
+Denial replies do not disclose the player's rating and are limited to once per
+player every 60 seconds across all addoff aliases. An unavailable Elo blocks the add.
 Set `OFFENSE_ROLE_ID` to additionally require that Discord role (the admin role
 bypasses only the role requirement). Without it, only the Elo requirement applies.
 Change the per-team cap with `!set offense:max_per_team <0-4>`.

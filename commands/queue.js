@@ -233,7 +233,7 @@ function register(reg, {
   runRconCommand,
 }) {
   // Prevent players currently in an active match from joining another queue
-  const rejectLocked = async (message, id) => {
+  const rejectLocked = async (message, id, reply = text => message.reply(text)) => {
     if (!state.lockedPlayers || !state.lockedPlayers.has(String(id))) return false;
     const matchId = state.lockedPlayers.get(String(id));
     const now = Date.now();
@@ -247,7 +247,7 @@ function register(reg, {
         `[playerLock] ${id} tried to add but is locked in match ${matchId}`
       );
       try {
-        await message.reply(
+        await reply(
           `🚫 You’re currently locked in **Match ${matchId}**. Wait until it finishes before re-adding.`
         );
       } catch {}
@@ -255,14 +255,14 @@ function register(reg, {
     return true;
   };
 
-  const rejectBanned = async (message, id) => {
+  const rejectBanned = async (message, id, notify = text => message.author.send(text)) => {
     // If player is already ghost-banned, notify them again and block add
     if (state.ghostBans && state.ghostBans[id]) {
       const gb = state.ghostBans[id];
       console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
 
       try {
-        await message.author.send(
+        await notify(
           `🚫 You are still ghost-banned and must sit out **${gb.gamesRemaining} more game${gb.gamesRemaining === 1 ? "" : "s"}**.\n` +
           `📝 Reason: ${gb.reason || "unspecified"}`
         );
@@ -281,7 +281,7 @@ function register(reg, {
       console.log(`[ghost-ban] ${id} attempted to add but is ghosted`);
 
       try {
-        await message.author.send(
+        await notify(
           `⏳ You are still banned for **${ban.gamesRemaining} more game(s)**.\nReason: ${ban.reason || "unspecified"}`
         );
       } catch {}
@@ -349,64 +349,58 @@ function register(reg, {
 
   // Full-time offense: joins the next pickup as an extra attacker without
   // filling the queue, voting, or affecting anyone's Elo.
+  const offenseReplyCooldown = new Map();
+  const replyOffense = async (message, text, send = value => message.reply(value)) => {
+    const timestamp = Date.now();
+    for (const [playerId, repliedAt] of offenseReplyCooldown) {
+      if (timestamp - repliedAt >= 60_000) offenseReplyCooldown.delete(playerId);
+    }
+    const id = String(message.author.id);
+    if (offenseReplyCooldown.has(id)) return;
+    // Reserve before awaiting Discord so concurrent aliases cannot spam replies.
+    offenseReplyCooldown.set(id, timestamp);
+    try { await send(text); } catch {}
+  };
   const addOffense = async (message) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
     const discordName = message.member?.displayName || message.author.username;
     let currentRating = null;
     try { currentRating = elo.getRating(id, discordName, { createIfMissing: false }); } catch {}
-    const logOffense = (outcome, reason) => console.log(`[addoff] ${JSON.stringify({
-      playerId: String(id), playerName: discordName,
-      elo: Number.isFinite(currentRating) ? currentRating : null,
-      outcome, reason, limit: OFFENSE_ELO_LIMIT,
-    })}`);
     if (!isOffenseRatingEligible(currentRating)) {
       const knownRating = Number.isFinite(currentRating);
-      logOffense("blocked", knownRating ? "elo_at_or_above_limit" : "elo_unavailable");
-      try {
-        await message.reply(knownRating
-          ? `🚫 Full-time offense requires current Elo below ${OFFENSE_ELO_LIMIT}. Your current Elo is ${currentRating}.`
+      await replyOffense(message, knownRating
+          ? `🚫 Full-time offense requires current Elo below ${OFFENSE_ELO_LIMIT}.`
           : "⚠️ Could not verify your current Elo. Please try !addoff again shortly.");
-      } catch {}
       return;
     }
 
     if (!canAddAsOffense(message.member, config)) {
-      logOffense("blocked", "missing_role");
-      try {
-        await message.reply("🚫 You don’t have the role required to add as full-time offense.");
-      } catch {}
+      await replyOffense(message, "🚫 You don’t have the role required to add as full-time offense.");
       return;
     }
 
     const capacity = offenseCapacity(settings);
     if (capacity <= 0) {
-      logOffense("blocked", "disabled");
-      try { await message.reply("⚠️ Full-time offense is currently disabled."); } catch {}
+      await replyOffense(message, "⚠️ Full-time offense is currently disabled.");
       return;
     }
 
-    if (await rejectLocked(message, id)) { logOffense("blocked", "active_match"); return; }
-    if (await rejectBanned(message, id)) { logOffense("blocked", "banned"); return; }
+    if (await rejectLocked(message, id, text => replyOffense(message, text))) return;
+    if (await rejectBanned(message, id, text => replyOffense(message, text, value => message.author.send(value)))) return;
 
     const offense = ensureOffenseQueue(state);
     let entry = offense.find(p => String(p.id) === String(id));
 
     if (!entry && offense.length >= capacity) {
-      logOffense("blocked", "full");
-      try {
-        await message.reply(`🚨 Full-time offense spots are full (${offense.length}/${capacity}).`);
-      } catch {}
+      await replyOffense(message, `🚨 Full-time offense spots are full (${offense.length}/${capacity}).`);
       return;
     }
 
     const regular = state.queue.find(p => String(p.id) === String(id));
     if (regular) {
       if (flowActive()) {
-        logOffense("blocked", "active_vote");
-        try {
-          await message.reply("⚠️ You’re part of the current vote. Wait for it to finish before switching to full-time offense.");
-        } catch {}
+        await replyOffense(message, "⚠️ You’re part of the current vote. Wait for it to finish before switching to full-time offense.");
         return;
       }
       try { adl.unvote(String(id)); } catch {}
@@ -424,7 +418,6 @@ function register(reg, {
       entry.lastSeenAt = Date.now();
     }
 
-    logOffense("accepted", "queued");
     await postQueueBoard(message.channel, state, elo, privacy);
     try { await refreshBotName(message.client, state); } catch {}
     try { reg.persistQueueSoon?.(); } catch {}

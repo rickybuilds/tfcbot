@@ -74,7 +74,7 @@ test("offense assignment rechecks current Elo and drops old ineligible entries",
   assert.deepEqual(result.ineligible.map(p => p.id), ["high", "boundary", "unknown"]);
 });
 
-function setupQueue({ config: configOverrides = {}, settings, rating = 900 } = {}) {
+function setupQueue({ config: configOverrides = {}, settings, rating = 900, ban = null } = {}) {
   const registry = new Map();
   const state = { queue: [], offenseQueue: [], MAX_PLAYERS: 8, lockedPlayers: new Map() };
   const posted = [];
@@ -86,25 +86,26 @@ function setupQueue({ config: configOverrides = {}, settings, rating = 900 } = {
     client: null,
     config: { channels: { pickup: "pickup" }, roles: {}, ...configOverrides },
     state,
-    elo: { getRating: () => { if (rating instanceof Error) throw rating; return rating; } },
-    banStore: { getBan: () => null },
+    elo: { getRating: () => { if (rating instanceof Error) throw rating; return typeof rating === "function" ? rating() : rating; } },
+    banStore: { getBan: () => ban },
     settings: settings || { getNumber: (_key, fallback) => fallback },
     privacy: { isHidden: () => false },
     steamLinks: null,
     runRconCommand: null,
   });
   const replies = [];
+  const directMessages = [];
   const message = (id, roles = []) => ({
     channel,
     client: null,
-    author: { id: String(id), username: `user${id}`, send: async () => {} },
+    author: { id: String(id), username: `user${id}`, send: async text => directMessages.push(text) },
     member: { displayName: `Player ${id}`, roles: { cache: new Set(roles) } },
     reply: async text => { replies.push({ id: String(id), text }); },
   });
-  return { registry, state, message, posted, replies };
+  return { registry, state, message, posted, replies, directMessages };
 }
 
-test("all addoff aliases block Elo 1000 and above even for admins and log the Elo", async () => {
+test("all addoff aliases block high Elo without publishing or logging the player's Elo", async () => {
   const logs = [];
   const previousLog = console.log;
   console.log = (...args) => logs.push(args.join(" "));
@@ -117,14 +118,14 @@ test("all addoff aliases block Elo 1000 and above even for admins and log the El
         assert.deepEqual(h.state.offenseQueue, []);
         assert.equal(h.state.queue.length, 1);
         assert.match(h.replies.at(-1).text, /below 1000/);
-        assert.match(h.replies.at(-1).text, new RegExp(String(rating)));
-        assert.ok(logs.some(line => line.includes(`[addoff]`) && line.includes(`"elo":${rating}`) && line.includes('"outcome":"blocked"')));
+        assert.doesNotMatch(h.replies.at(-1).text, /Your current Elo|2300/);
+        assert.ok(!logs.some(line => line.includes("[addoff]")));
       }
     }
   } finally { console.log = previousLog; }
 });
 
-test("addoff accepts and logs Elo 999 while a regular 2300-Elo add remains allowed", async () => {
+test("addoff accepts Elo 999 silently while a regular 2300-Elo add remains allowed", async () => {
   const logs = [];
   const previousLog = console.log;
   console.log = (...args) => logs.push(args.join(" "));
@@ -132,11 +133,51 @@ test("addoff accepts and logs Elo 999 while a regular 2300-Elo add remains allow
     const low = setupQueue({ rating: 999 });
     await low.registry.get("addoff")(low.message("low"));
     assert.deepEqual(low.state.offenseQueue.map(p => p.id), ["low"]);
-    assert.ok(logs.some(line => line.includes('"elo":999') && line.includes('"outcome":"accepted"')));
+    assert.ok(!logs.some(line => line.includes("[addoff]")));
     const high = setupQueue({ rating: 2300 });
     await high.registry.get("add")(high.message("high"));
     assert.deepEqual(high.state.queue.map(p => p.id), ["high"]);
   } finally { console.log = previousLog; }
+});
+
+test("addoff denial replies share a per-player 60-second cooldown across aliases", async t => {
+  let clock = 1000;
+  t.mock.method(Date, "now", () => clock);
+  const h = setupQueue({ rating: 2352 });
+  await Promise.all(Array.from({ length: 12 }, (_, i) => h.registry.get(["addoff", "addoffense", "++off"][i % 3])(h.message("spam"))));
+  assert.equal(h.replies.length, 1);
+  assert.doesNotMatch(h.replies[0].text, /2352/);
+  clock += 59999;
+  await h.registry.get("addoff")(h.message("spam"));
+  assert.equal(h.replies.length, 1);
+  await h.registry.get("addoff")(h.message("another-player"));
+  assert.equal(h.replies.length, 2);
+  clock += 1;
+  await h.registry.get("++off")(h.message("spam"));
+  assert.equal(h.replies.length, 3);
+  assert.deepEqual(h.state.offenseQueue, []);
+});
+
+test("reply cooldown does not prevent a player who becomes eligible from adding", async () => {
+  let rating = 2352;
+  const h = setupQueue({ rating: () => rating });
+  await h.registry.get("addoff")(h.message("changed"));
+  rating = 999;
+  await h.registry.get("addoff")(h.message("changed"));
+  assert.deepEqual(h.state.offenseQueue.map(p => p.id), ["changed"]);
+  assert.equal(h.replies.length, 1);
+});
+
+test("addoff ban DMs share the denial cooldown with public replies", async () => {
+  let rating = 900;
+  const h = setupQueue({ rating: () => rating, ban: { gamesRemaining: 3 } });
+  await h.registry.get("addoff")(h.message("banned"));
+  await h.registry.get("++off")(h.message("banned"));
+  assert.equal(h.directMessages.length, 1);
+  rating = 2352;
+  await h.registry.get("addoffense")(h.message("banned"));
+  assert.equal(h.replies.length, 0);
+  assert.deepEqual(h.state.offenseQueue, []);
 });
 
 test("addoff blocks unavailable or invalid Elo instead of accepting it as zero", async () => {
