@@ -425,7 +425,7 @@ class EloShadowService {
 
   _loadMatch(matchId) {
     const match = this.db.prepare(`
-      SELECT match_id, winner, status, blue_ids, red_ids, mode, rng_multiplier
+      SELECT *
       FROM matches WHERE match_id=?
     `).get(String(matchId));
     if (!match) throw new Error("match_not_found");
@@ -498,10 +498,36 @@ class EloShadowService {
 
   _mapScores(roster, payload) {
     const matchPayload = payload?.match;
-    const performance = matchPayload?.nn_mvp;
     if (!payload?.ok || String(matchPayload?.id) !== String(roster.match.match_id)) {
       return { ready: false, reason: "performance_match_not_ready" };
     }
+    if (String(matchPayload.status || "").toLowerCase() !== "completed") {
+      return { ready: false, reason: "performance_not_available" };
+    }
+    const scoped = matchPayload.elo_performance;
+    let hasOffense = false;
+    try {
+      const offense = JSON.parse(roster.match.offense_ids || "null");
+      hasOffense = Boolean(offense && (offense.blue?.length || offense.red?.length));
+    } catch {
+      hasOffense = true; // Invalid metadata cannot establish safe legacy scores.
+    }
+    const fallback = reason => ({ ready: true, fallbackReason: reason, apiPlayerCount: 0 });
+    // Public MVP scores were normalized across all active players. Dropping
+    // addoff rows here cannot undo their influence on those scores.
+    if (scoped != null || hasOffense) {
+      if (scoped?.available !== true) {
+        return { ready: false, reason: "official_performance_unavailable" };
+      }
+      const ids = Array.isArray(scoped.roster_ids) ? scoped.roster_ids.map(String) : [];
+      const official = new Set(roster.officialIds);
+      if (scoped.scope !== "official-roster" || ids.length !== official.size ||
+          new Set(ids).size !== ids.length || ids.some(id => !official.has(id)) ||
+          !Array.isArray(scoped.players) || scoped.players.length !== official.size) {
+        return fallback("official_performance_roster_mismatch");
+      }
+    }
+    const performance = scoped ?? matchPayload.nn_mvp;
     if (String(matchPayload?.status || "").toLowerCase() !== "completed" || performance?.available !== true) {
       return { ready: false, reason: "performance_not_available" };
     }
