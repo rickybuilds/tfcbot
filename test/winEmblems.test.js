@@ -13,6 +13,25 @@ function fixture() {
     add.run(id, status, winner, JSON.stringify(blue), JSON.stringify(red)) };
 }
 
+test("elderly Pepe overrides only the selected user and works without win storage", async () => {
+  const id = "700890663385956393";
+  const pepe = "<:6849_pepeold:1564391283227631666> ";
+  assert.equal(queueWinEmblems(null, [id, "other"]).get(id), pepe);
+  assert.equal(queueWinEmblems(null, [id, "other"]).has("other"), false);
+  const { db, add } = fixture();
+  try {
+    for (let i = 0; i < 25; i++) add(`win${i}`, "BLUE", [id, "other"], []);
+    const badges = queueWinEmblems({ db }, [id, "other"]);
+    assert.equal(badges.get(id), pepe);
+    assert.equal(badges.get("other"), `${winEmblem(25)} `);
+    let sent;
+    await postQueueBoard({ send: async payload => { sent = payload; } }, {
+      queue: [{ id, name: "Elder" }], offenseQueue: [],
+    }, { db }, null);
+    assert.equal(sent.embeds[0].toJSON().description, `${pepe}Elder`);
+  } finally { db.close(); }
+});
+
 test("class milestones promote at the agreed whole-number boundaries", () => {
   const tiers = [[0, "Civilianold_tfc"], [25, "Scoutold_tfc"], [50, "Pyroold_tfc"],
     [75, "Medicold_tfc"], [100, "Spyold_tfc"], [150, "Sniperold_tfc"],
