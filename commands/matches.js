@@ -159,6 +159,12 @@ function getPlayerLastGames(database, playerId) {
       `SELECT match_id, winner, created_at, map_name, status, blue_ids, red_ids
        FROM matches
        WHERE status = 'completed'
+         AND EXISTS (
+           SELECT 1
+           FROM rating_changes rc
+           WHERE rc.match_id = matches.match_id
+             AND rc.player_id = ?
+         )
          AND (
            EXISTS (SELECT 1 FROM json_each(COALESCE(blue_ids, '[]')) WHERE CAST(value AS TEXT) = ?)
            OR EXISTS (SELECT 1 FROM json_each(COALESCE(red_ids, '[]')) WHERE CAST(value AS TEXT) = ?)
@@ -166,7 +172,7 @@ function getPlayerLastGames(database, playerId) {
        ORDER BY created_at DESC
        LIMIT 10`
     )
-    .all(id, id);
+    .all(id, id, id);
 
   const mvpMatches = new Set();
   try {
