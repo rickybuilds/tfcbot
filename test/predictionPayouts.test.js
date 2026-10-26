@@ -15,7 +15,13 @@ test("tie uses 90/10 and integer remainders conserve every small pot",()=>{
   assert.ok(p.credits.u>=a);
  }
 });
-test("no correct bettors refund stakes and no bets issue no rewards",()=>{
- const p=calculatePayouts({...teams,bets:[{discord_id:"u",pick:"red",stake:250}],outcome:"blue"});
+test("legacy games refund no-correct stakes and no bets issue no rewards",()=>{
+ const p=calculatePayouts({...teams,ruleVersion:2,bets:[{discord_id:"u",pick:"red",stake:250}],outcome:"blue"});
  assert.deepEqual(p.credits,{u:250});assert.deepEqual(calculatePayouts({...teams,bets:[],outcome:"tie"}).credits,{});
+});
+test("house keeps all losing stakes when nobody picked the result under new rules",()=>{
+ for(const outcome of ["blue","red","tie"]){
+  const p=calculatePayouts({...teams,ruleVersion:3,bets:[{discord_id:"u",pick:outcome==="red"?"blue":"red",stake:100}],outcome});
+  assert.deepEqual(p.credits,{});assert.equal(p.houseTake,100);assert.equal(p.totalStaked,100);
+ }
 });

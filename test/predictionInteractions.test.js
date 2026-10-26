@@ -19,7 +19,7 @@ test("earned limits above 250 appear privately and allow larger stakes while for
  for(let n=0;n<16;n++){
   const game=s.store.createMarket({...m.snapshot,matchId:`HISTORY_${n}`},s.context("create"));
   s.store.placeBet({marketRef:{marketId:game.id,revision:1},discordId:"u",pick:"blue",stake:1,context:s.context("history","u")});
-  s.store.closeMarket(game.id,s.context());s.store.settleMarket({marketId:game.id,outcome:"tie",context:s.context()});
+  s.store.closeMarket(game.id,s.context());s.store.settleMarket({marketId:game.id,outcome:"blue",context:s.context()});
  }
  const click=interaction("higher",`pred:pick:${m.id}:1:blue`);await s.handleInteraction(click);assert.equal(click.modal.components[0].components[0].label,"Stake (1–260 points)");
  const excessive=interaction("over",click.modal.custom_id,"u","261");await s.handleInteraction(excessive);assert.match(excessive.response.content,/260/);assert.equal(s.store.bets(m.id).length,0);

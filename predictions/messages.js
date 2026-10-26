@@ -15,5 +15,8 @@ function actionRow(m,now) {
   const buttons=[...["blue","red","tie"].map((pick,i)=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${pick}`).setLabel(labels[i]).setStyle([ButtonStyle.Primary,ButtonStyle.Danger,ButtonStyle.Secondary][i]).setDisabled(!isOpen(m,now))),new ButtonBuilder().setCustomId(`pred:mine:${m.id}:${m.revision}`).setLabel("My Bet").setStyle(ButtonStyle.Secondary)];
   return new ActionRowBuilder().addComponents(buttons);
 }
-function cardUpdate(m,now=Date.now()) {return {content:statusText(m),components:[actionRow(m,now)]};}
+function cardUpdate(m,now=Date.now()) {
+  const rule=m.rule_version>=3?" If nobody picks the official result, the house keeps the pot; losing bets are not refunded.":"";
+  return {content:statusText(m)+rule,components:[actionRow(m,now)]};
+}
 module.exports={cardUpdate,actionRow,statusText,isOpen};

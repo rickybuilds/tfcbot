@@ -39,6 +39,7 @@ async function handleInteraction(service,i) {
       const lines=[`Match ${m.match_id} — ${m.state}.`,b?`Your pick: ${b.pick.toUpperCase()} · stake ${b.stake} · ${b.status}.`:"You have no bet on this game.",`Available balance: ${account.balance.toLocaleString("en-US")}.`];
       const progress=service.store.bettingProgress(user),limit=service.store.stakeLimit(m,user);
       lines.push(`Max bet for this game: ${limit.toLocaleString("en-US")} points${m.rule_version===1?" (earlier rules)":""}.`,`${progress.settledGames.toLocaleString("en-US")} settled games bet on. Personal limit: ${progress.limit.toLocaleString("en-US")} points; +10 per settled game.`);
+      lines.push(m.rule_version>=3?"If nobody picks the official result, the house keeps all stakes. Losing bets receive no refund.":"Earlier rules: stakes return if nobody picks the official result.");
       if(m.settlement_version)lines.push(`Total credited for this match: ${(m.paidCredits[user]||0).toLocaleString("en-US")}.`);
       const components=[];
       if(isOpen(m,ctx.now))components.push(new ActionRowBuilder().addComponents(...["blue","red","tie"].map(p=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${p}`).setLabel(`Change to ${p}`).setStyle(ButtonStyle.Secondary)),new ButtonBuilder().setCustomId(`pred:cancel:${m.id}:${m.revision}`).setLabel("Cancel Bet").setStyle(ButtonStyle.Danger)));

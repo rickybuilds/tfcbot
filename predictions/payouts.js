@@ -8,14 +8,18 @@ function allocate(total, recipients) {
   for (let i=0;i<left;i++) ranked[i].amount++;
   return rows;
 }
-function calculatePayouts({bets,outcome,blueIds,redIds}) {
+function calculatePayouts({bets,outcome,blueIds,redIds,ruleVersion=3}) {
   if (!["blue","red","tie"].includes(outcome)) throw new Error("Invalid outcome");
   const totalStaked=bets.reduce((n,b)=>n+b.stake,0);
   if (!Number.isSafeInteger(totalStaked)) throw new Error("Unsafe total stake");
   const correct=bets.filter(b=>b.pick===outcome), C=correct.reduce((n,b)=>n+b.stake,0);
   const credits={};
   const add=(id,n)=>{if(n)credits[id]=(credits[id]||0)+n;};
-  if (!C) {for(const b of bets)add(b.discord_id,b.stake);return {credits,pools:[],totalStaked};}
+  if (!C) {
+    if(ruleVersion>=3)return {credits,pools:outcome==="tie"?[0,0]:[0,0,0],totalStaked,houseTake:totalStaked};
+    for(const b of bets)add(b.discord_id,b.stake);
+    return {credits,pools:[],totalStaked};
+  }
   for(const b of correct)add(b.discord_id,b.stake);
   const weights=outcome==="tie"?[90,10]:[70,25,5];
   const pools=allocate(totalStaked-C,weights.map((weight,i)=>({id:i,order:i,weight}))).map(r=>r.amount);

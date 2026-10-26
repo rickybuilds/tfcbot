@@ -9,7 +9,7 @@ function bet(s,m,stake=100,user="u"){return s.placeBet({marketRef:{marketId:m.id
 function complete(s,m,outcome="tie"){s.closeMarket(m.id,ctx());s.settleMarket({marketId:m.id,outcome,context:ctx()});}
 
 test("new games start at 100 and only distinct settled games increase the limit, independent of outcome",t=>{
- const s=setup(t),m=s.createMarket(snapshot("FIRST"),ctx());assert.equal(m.rule_version,2);
+ const s=setup(t),m=s.createMarket(snapshot("FIRST"),ctx());assert.equal(m.rule_version,3);
  assert.deepEqual(s.bettingProgress("u"),{settledGames:0,limit:100});
  assert.throws(()=>bet(s,m,101),/100/);assert.equal(s.account("u"),undefined);
  bet(s,m,80);bet(s,m,100);assert.equal(s.bettingProgress("u").limit,100);
@@ -33,7 +33,7 @@ test("cancelled, voided and refunded revisions cannot farm stake progression",t=
  assert.deepEqual(s.bettingProgress("u"),{settledGames:1,limit:110});assert.equal(s.assertAccounting(),true);
 });
 test("progression exceeds the former 250 cap and revalidates edits and insufficient balances",t=>{
- const s=setup(t);for(let i=0;i<91;i++){const game=s.createMarket(snapshot(`HISTORY_${i}`),ctx());bet(s,game,1);complete(s,game);}
+ const s=setup(t);for(let i=0;i<91;i++){const game=s.createMarket(snapshot(`HISTORY_${i}`),ctx());bet(s,game,1);complete(s,game,"blue");}
  assert.equal(s.bettingProgress("u").limit,1010);
  const m=s.createMarket(snapshot("LARGE"),ctx());assert.throws(()=>bet(s,m,1001),/funds/i);
  bet(s,m,500);assert.equal(s.account("u").balance,500);bet(s,m,1000);assert.equal(s.account("u").balance,0);

@@ -54,7 +54,8 @@ test("house corrections retain spent and unspent payouts and pay positive differ
  assert.equal(s.assertAccounting(),true);
 });
 test("no-correct refund is correctable, and duplicate reports never credit twice",t=>{
- const s=setup(t),m=s.createMarket(snapshot(),context());bet(s,m,"u","blue",100);
+ const s=setup(t),m=s.createMarket(snapshot(),context());
+ s.db.prepare("UPDATE prediction_markets SET rule_version=2 WHERE id=?").run(m.id);bet(s,m,"u","blue",100);
  s.closeMarket(m.id,context());s.settleMarket({marketId:m.id,outcome:"tie",context:context()});
  assert.equal(s.account("u").balance,1000);
  s.settleMarket({marketId:m.id,outcome:"tie",context:context()});
@@ -70,3 +71,35 @@ test("failed transaction rolls back accounts, bets and ledger together",t=>{
  assert.equal(s.account("u"),undefined);assert.equal(s.bets(m.id).length,0);assert.equal(s.assertAccounting(),true);
 });
 module.exports={snapshot,context};
+test("house collects unmatched losses once and corrections remain funded and replay safe",t=>{
+ const s=setup(t),m=s.createMarket(snapshot(),context());bet(s,m,"u","blue",100);
+ s.closeMarket(m.id,context());s.settleMarket({marketId:m.id,outcome:"red",context:context()});
+ assert.equal(s.account("u").balance,900);assert.equal(s.bets(m.id)[0].status,"settled");
+ assert.equal(s.assertAccounting(),true);
+ s.settleMarket({marketId:m.id,outcome:"red",context:context()});
+ assert.deepEqual(s.db.prepare("SELECT amount FROM prediction_transactions WHERE kind='house_collection'").all(),[{amount:100}]);
+ s.correctSettlement({marketId:m.id,outcome:"blue",context:context()});
+ assert.equal(s.account("u").balance,1000);assert.equal(s.houseFunding(),100);
+ s.correctSettlement({marketId:m.id,outcome:"red",context:context()});
+ s.correctSettlement({marketId:m.id,outcome:"blue",context:context()});
+ assert.equal(s.houseFunding(),100);assert.equal(s.assertAccounting(),true);
+});
+test("house collection failure rolls back settlement and keeps stakes in escrow",t=>{
+ const s=setup(t),m=s.createMarket(snapshot(),context());bet(s,m,"u","blue",100);
+ s.closeMarket(m.id,context());
+ s.db.exec("CREATE TRIGGER fail_house BEFORE INSERT ON prediction_transactions WHEN NEW.kind='house_collection' BEGIN SELECT RAISE(ABORT,'injected house failure'); END");
+ assert.throws(()=>s.settleMarket({marketId:m.id,outcome:"red",context:context()}),/injected house/);
+ assert.equal(s.market(m.id).state,"closed");assert.equal(s.bets(m.id)[0].status,"active");
+ assert.equal(s.account("u").balance,900);assert.equal(s.assertAccounting(),true);
+});
+test("replacement revisions retain legacy refund rules and new-game voids still refund",t=>{
+ const s=setup(t),m=s.createMarket(snapshot("LEGACY"),context());
+ s.db.prepare("UPDATE prediction_markets SET rule_version=2 WHERE id=?").run(m.id);
+ s.voidMarket({marketId:m.id,context:context()});
+ const replacement=s.createMarket(snapshot("LEGACY"),context());bet(s,replacement,"u","blue",100);
+ s.closeMarket(replacement.id,context());s.settleMarket({marketId:replacement.id,outcome:"red",context:context()});
+ assert.equal(s.account("u").balance,1000);
+ const fresh=s.createMarket(snapshot("FRESH"),context());bet(s,fresh,"u","blue",100);
+ s.voidMarket({marketId:fresh.id,context:context()});assert.equal(s.account("u").balance,1000);
+ assert.equal(s.assertAccounting(),true);
+});

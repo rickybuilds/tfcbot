@@ -62,7 +62,7 @@ class PredictionStore {
         if(JSON.stringify(old.snapshot)===JSON.stringify(s))return old;
         throw new Error("Resolve previous market first");
       }
-      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at,rule_version) VALUES (?,?,'open',?,?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now,old?.rule_version||2);
+      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at,rule_version) VALUES (?,?,'open',?,?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now,old?.rule_version||3);
       return this.market(Number(row.lastInsertRowid));
     });
   }
@@ -130,13 +130,16 @@ class PredictionStore {
       if(correction&&!ctx.reason)throw new Error("Correction reason required");
       if(correction?m.settlement_version<1:m.state!=="closed")throw new Error("Market is not eligible for settlement");
       const bets=this.bets(id).filter(b=>b.status==="active"||b.status==="settled");
-      const allocation=calculatePayouts({bets,outcome,...m.snapshot}),paid={...m.paidCredits};
+      const allocation=calculatePayouts({bets,outcome,...m.snapshot,ruleVersion:m.rule_version}),paid={...m.paidCredits};
       const version=m.settlement_version+1;let house=0;
       for(const [user,entitlement] of Object.entries(allocation.credits)){
         const amount=Math.max(0,entitlement-(paid[user]||0));
         if(amount){this.change(user,amount,ctx,{kind:correction?"correction":"settlement",marketId:id,version,entryKey:`credit:${user}`});paid[user]=(paid[user]||0)+amount;house+=amount;}
       }
       if(correction&&house)this.entry(ctx,{kind:"house_funding",amount:house,marketId:id,version,entryKey:"house"});
+      // Stakes already left bettor balances. Record their destination once;
+      // corrections retain prior distributions and use audited house funding.
+      if(!correction&&allocation.houseTake)this.entry(ctx,{kind:"house_collection",amount:allocation.houseTake,marketId:id,version,entryKey:"house-collection"});
       this.entry(ctx,{kind:"allocation",marketId:id,version,entryKey:"allocation",metadata:{outcome,allocation,paidCredits:paid,houseFunding:correction?house:0}});
       this.db.prepare("UPDATE prediction_bets SET status='settled',updated_at=? WHERE market_id=? AND status='active'").run(ctx.now,id);
       this.db.prepare("UPDATE prediction_markets SET state='settled',result=?,observed_result=?,settlement_version=?,allocation=?,paid_credits=? WHERE id=?").run(outcome,outcome,version,JSON.stringify(allocation),JSON.stringify(paid),id);
@@ -159,6 +162,7 @@ class PredictionStore {
     for(const row of this.db.prepare("SELECT stake FROM prediction_bets WHERE status='active'").safeIntegers(true).iterate())escrow+=row.stake;
     for(const row of this.db.prepare("SELECT account_id,amount,kind FROM prediction_transactions").safeIntegers(true).iterate()){
       if(["grant","adjustment","house_funding"].includes(row.kind))issued+=row.amount;
+      if(row.kind==="house_collection")issued-=row.amount;
       if(accounts.has(row.account_id))histories.set(row.account_id,(histories.get(row.account_id)||0n)+row.amount);
     }
     if(balance+escrow!==issued)throw new Error("Prediction accounting invariant failed");
