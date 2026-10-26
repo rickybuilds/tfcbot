@@ -11,6 +11,7 @@ const {
 } = require("../lib/util");
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
+const { queueWinEmblems } = require("../lib/winEmblems");
 const {
   offenseCapacity,
   OFFENSE_ELO_LIMIT,
@@ -141,7 +142,7 @@ function cleanupQueue(state, settings) {
 }
 
 /* ------------------ rendering helpers ------------------ */
-function queueLines(state, elo, privacy) {
+function queueLines(state, elo, privacy, emblems) {
   if (!state.queue.length) return "_empty_";
 
   const displayQueue = state.queue.slice().sort((a, b) =>
@@ -160,7 +161,7 @@ function queueLines(state, elo, privacy) {
         false
       );
 
-      const name = `${p.captain ? "[CAP] " : ""}${base}${supporterBadge(p.id)}`;
+      const name = `${emblems.get(String(p.id)) || ""}${p.captain ? "[CAP] " : ""}${base}${supporterBadge(p.id)}`;
 
       return p.adlVote ? `${name} (ADL)` : name;
     } catch (e) {
@@ -170,7 +171,7 @@ function queueLines(state, elo, privacy) {
   }).join("\n");
 }
 
-function offenseLines(state, elo, privacy) {
+function offenseLines(state, elo, privacy, emblems) {
   return ensureOffenseQueue(state).map(p => {
     try {
       const registeredName = getStoredPlayerName(elo, p.id, p.name);
@@ -182,7 +183,7 @@ function offenseLines(state, elo, privacy) {
         privacy,
         false
       );
-      return `${base}${supporterBadge(p.id)}`;
+      return `${emblems.get(String(p.id)) || ""}${base}${supporterBadge(p.id)}`;
     } catch (e) {
       console.error("[offenseLines] failed formatting", p, e);
       return mention(p.id);
@@ -199,10 +200,15 @@ function adlProgress(state) {
 }
 
 async function postQueueBoard(channel, state, elo, privacy) {
+  elo = elo || state.elo;
+  const emblems = queueWinEmblems(elo, [
+    ...state.queue,
+    ...ensureOffenseQueue(state),
+  ].map(p => p.id));
   const emb = new EmbedBuilder()
     .setColor(0xed4245)
     .setTitle(`Player Queue — (${state.queue.length}/${state.MAX_PLAYERS || 8})`)
-    .setDescription(queueLines(state, elo, privacy))
+    .setDescription(queueLines(state, elo, privacy, emblems))
     .setTimestamp();
 
   if (state.queue.some(p => p.adlVote)) {
@@ -212,7 +218,7 @@ async function postQueueBoard(channel, state, elo, privacy) {
   if (ensureOffenseQueue(state).length) {
     emb.addFields({
       name: `Full-time Offense (${state.offenseQueue.length}) — no vote, no Elo`,
-      value: offenseLines(state, elo, privacy).slice(0, 1024),
+      value: offenseLines(state, elo, privacy, emblems).slice(0, 1024),
       inline: false,
     });
   }

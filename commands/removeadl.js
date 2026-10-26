@@ -11,7 +11,7 @@ module.exports = {
   description: "Remove your ADL vote.",
   usage: "!removeadl  or  --adl",
 
-  async run(message, { state, config }) {
+  async run(message, { state, config, elo, privacy }) {
     if (String(message.channel?.id) !== String(config.channels.pickup || "")) return;
 
     const id = String(message.author.id);
@@ -30,7 +30,7 @@ module.exports = {
     const { useAdl, votes, required } = adl.shouldUseAdl(frozenIds, process.env);
     const remaining = Math.max(0, required - votes);
 
-    await postQueueBoard(message.channel, state, null, null).catch(() => {});
+    await postQueueBoard(message.channel, state, elo, privacy).catch(() => {});
     try { await refreshBotName(message.client, state); } catch {}
 
     if (useAdl) {
