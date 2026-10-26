@@ -14,7 +14,7 @@ function fixture() {
 }
 
 test("class milestones promote at the agreed whole-number boundaries", () => {
-  const tiers = [[0, "Civilianold_tfc"], [25, "Scoutold_tfc"], [50, "Pyrold_tfc"],
+  const tiers = [[0, "Civilianold_tfc"], [25, "Scoutold_tfc"], [50, "Pyroold_tfc"],
     [75, "Medicold_tfc"], [100, "Spyold_tfc"], [150, "Sniperold_tfc"],
     [375, "Engineerold_tfc"], [750, "Soldierold_tfc"], [1125, "Demomanold_tfc"], [1500, "Heavyold_tfc"]];
   tiers.forEach(([wins, name], index) => {
@@ -75,6 +75,6 @@ test("removing an ADL vote retains the player's earned emblem on the refreshed b
       state: { queue: [{ id: "p", name: "Example", adlVote: true }] },
       config: { channels: { pickup: "pickup" } }, elo: { db },
     });
-    assert.equal(boards[0].description, "<:Scoutold_tfc:1564265032873672744> Example");
+    assert.equal(boards[0].description, "<:Scoutold_tfc:1564293700115234856> Example");
   } finally { db.close(); }
 });
