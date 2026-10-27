@@ -263,10 +263,9 @@ function register(reg, deps = {}) {
     }
   };
 
-  const showLast = async (message, args) => {
-    const target = message.mentions?.users?.first?.();
-    if (target) return showPlayerLastGames(message, target);
-    return showLastMatches(message, args);
+  const showLast = async (message) => {
+    const target = message.mentions?.users?.first?.() || message.author;
+    return showPlayerLastGames(message, target);
   };
 
   reg.set("lastmatches", showLastMatches);
