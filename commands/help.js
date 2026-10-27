@@ -47,7 +47,7 @@ function register(reg, { config }) {
 
     if (config.predictionsEnabled) emb.addFields({
       name: "Private Match Predictions",
-      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. New games start your maximum at 100 points, increasing by 10 per settled game you bet on. My Bet privately shows your pick, points and applicable limit. Edit/cancel before closure. All eight confirmed starts the full two-minute window. Participants cannot bet.",
+      value: "Use Blue / Team 1, Red / Team 2 or Tie on the match card. New games start your maximum at 100 points, increasing by 10 per settled game you bet on, up to 500. My Bet privately shows your pick, points and applicable limit. Edit/cancel before closure. All eight confirmed starts the full two-minute window. Participants cannot bet.",
     });
     emb.addFields({name:"Your Prediction Bank",value:"`!bank` or `!points` — privately DM your points, betting limit, last five bets and player rewards from your last five settled prediction games. The bot deletes the command in servers when permitted. Available even with predictions disabled."});
     if(config.predictionsOwnerId&&String(message.author.id)===config.predictionsOwnerId)emb.addFields({

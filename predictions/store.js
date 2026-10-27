@@ -18,7 +18,7 @@ class PredictionStore {
   bettingProgress(id) {
     const {games}=this.db.prepare(`SELECT COUNT(DISTINCT m.match_id) AS games FROM prediction_bets b
       JOIN prediction_markets m ON m.id=b.market_id WHERE b.discord_id=? AND b.status='settled' AND m.settlement_version>0`).get(String(id));
-    const limit=100+10*games;
+    const limit=100+10*Math.min(games,40);
     if(!Number.isSafeInteger(limit))throw new Error("Unsafe stake limit");
     return {settledGames:games,limit};
   }
