@@ -264,7 +264,8 @@ function register(reg, deps = {}) {
   };
 
   const showLast = async (message) => {
-    const target = message.mentions?.users?.first?.() || message.author;
+    const explicitMention = message.content?.match(/<@!?(\d+)>/);
+    const target = explicitMention ? { id: explicitMention[1] } : message.author;
     return showPlayerLastGames(message, target);
   };
 
