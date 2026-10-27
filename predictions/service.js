@@ -52,7 +52,7 @@ class PredictionsService {
       // Stop any stale controls while its independent result retry catches up.
       if(["open","countdown"].includes(previous.state))this.store.markReview(previous.id,"completed official report awaiting settlement");
     }
-    const market=this.store.createMarket(this.snapshotWithOdds(snapshot),context);
+    const market=this.store.createMarket(this.snapshotWithOdds(snapshot),context,4);
     this.rosterSchedules.delete(snapshot.serverKey);
     return market;
   }

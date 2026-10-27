@@ -53,7 +53,7 @@ class PredictionStore {
     if(!n.changes)throw new Error("Insufficient funds or unsafe balance");
     this.entry(ctx,{...details,accountId:String(id),amount});
   }
-  createMarket(snapshot,ctx) {
+  createMarket(snapshot,ctx,ruleVersion=3) {
     const s=validSnapshot(snapshot);
     return this.atomic(()=>{
       const old=this.latest(s.matchId);
@@ -62,7 +62,8 @@ class PredictionStore {
         if(JSON.stringify(old.snapshot)===JSON.stringify(s))return old;
         throw new Error("Resolve previous market first");
       }
-      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at,rule_version) VALUES (?,?,'open',?,?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now,old?.rule_version||3);
+      if(!old&&ruleVersion>=4)require("./payouts").multipliers(s.eloOdds);
+      const row=this.db.prepare("INSERT INTO prediction_markets (match_id,revision,state,snapshot,opened_at,rule_version) VALUES (?,?,'open',?,?,?)").run(String(s.matchId),(old?.revision||0)+1,JSON.stringify(s),ctx.now,old?.rule_version||ruleVersion);
       return this.market(Number(row.lastInsertRowid));
     });
   }
@@ -136,14 +137,15 @@ class PredictionStore {
         const amount=Math.max(0,entitlement-(paid[user]||0));
         if(amount){this.change(user,amount,ctx,{kind:correction?"correction":"settlement",marketId:id,version,entryKey:`credit:${user}`});paid[user]=(paid[user]||0)+amount;house+=amount;}
       }
-      if(correction&&house)this.entry(ctx,{kind:"house_funding",amount:house,marketId:id,version,entryKey:"house"});
+      const funding=correction?house:(allocation.houseFunding||0);
+      if(funding)this.entry(ctx,{kind:"house_funding",amount:funding,marketId:id,version,entryKey:"house"});
       // Stakes already left bettor balances. Record their destination once;
       // corrections retain prior distributions and use audited house funding.
       if(!correction&&allocation.houseTake)this.entry(ctx,{kind:"house_collection",amount:allocation.houseTake,marketId:id,version,entryKey:"house-collection"});
-      this.entry(ctx,{kind:"allocation",marketId:id,version,entryKey:"allocation",metadata:{outcome,allocation,paidCredits:paid,houseFunding:correction?house:0}});
+      this.entry(ctx,{kind:"allocation",marketId:id,version,entryKey:"allocation",metadata:{outcome,allocation,paidCredits:paid,houseFunding:funding}});
       this.db.prepare("UPDATE prediction_bets SET status='settled',updated_at=? WHERE market_id=? AND status='active'").run(ctx.now,id);
       this.db.prepare("UPDATE prediction_markets SET state='settled',result=?,observed_result=?,settlement_version=?,allocation=?,paid_credits=? WHERE id=?").run(outcome,outcome,version,JSON.stringify(allocation),JSON.stringify(paid),id);
-      return {version,houseFunding:correction?house:0};
+      return {version,houseFunding:funding};
     });
   }
   adjust(id,amount,ctx) {

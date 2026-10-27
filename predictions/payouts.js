@@ -8,13 +8,26 @@ function allocate(total, recipients) {
   for (let i=0;i<left;i++) ranked[i].amount++;
   return rows;
 }
-function calculatePayouts({bets,outcome,blueIds,redIds,ruleVersion=3}) {
+function multipliers(odds) {
+  if(!odds||![odds.blue,odds.red].every(n=>Number.isInteger(n)&&n>=0&&n<=100)||odds.blue+odds.red!==100)throw new Error("Invalid prediction odds");
+  const value=p=>p===0?300:Math.max(125,Math.min(300,Math.floor((15000+p)/(2*p))));
+  return {blue:value(odds.blue),red:value(odds.red),tie:200};
+}
+function calculatePayouts({bets,outcome,blueIds,redIds,eloOdds,ruleVersion=3}) {
   if (!["blue","red","tie"].includes(outcome)) throw new Error("Invalid outcome");
   const totalStaked=bets.reduce((n,b)=>n+b.stake,0);
   if (!Number.isSafeInteger(totalStaked)) throw new Error("Unsafe total stake");
   const correct=bets.filter(b=>b.pick===outcome), C=correct.reduce((n,b)=>n+b.stake,0);
   const credits={};
-  const add=(id,n)=>{if(n)credits[id]=(credits[id]||0)+n;};
+  const add=(id,n)=>{if(n){const value=(credits[id]||0)+n;if(!Number.isSafeInteger(value))throw new Error("Unsafe payout");credits[id]=value;}};
+  if(ruleVersion>=4){
+    const rates=multipliers(eloOdds),bettorCredits={},playerCredits={};
+    for(const b of correct){const amount=BigInt(b.stake)*BigInt(rates[outcome])/100n;if(amount>BigInt(Number.MAX_SAFE_INTEGER))throw new Error("Unsafe payout");bettorCredits[b.discord_id]=Number(amount);add(b.discord_id,Number(amount));}
+    for(const id of [...blueIds,...redIds]){const amount=outcome==="tie"?10:(outcome==="blue"?blueIds:redIds).includes(id)?20:5;playerCredits[id]=amount;add(id,amount);}
+    const distributed=Object.values(credits).reduce((n,v)=>n+BigInt(v),0n),difference=distributed-BigInt(totalStaked);
+    if(difference>BigInt(Number.MAX_SAFE_INTEGER)||difference< -BigInt(Number.MAX_SAFE_INTEGER))throw new Error("Unsafe house amount");
+    return {credits,bettorCredits,playerCredits,multipliers:rates,totalStaked,houseFunding:Number(difference>0n?difference:0n),houseTake:Number(difference<0n?-difference:0n)};
+  }
   if (!C) {
     if(ruleVersion>=3)return {credits,pools:outcome==="tie"?[0,0]:[0,0,0],totalStaked,houseTake:totalStaked};
     for(const b of bets)add(b.discord_id,b.stake);
@@ -28,4 +41,4 @@ function calculatePayouts({bets,outcome,blueIds,redIds,ruleVersion=3}) {
   groups.forEach((ids,i)=>{for(const r of allocate(pools[i+1],ids.map(id=>({id,weight:1}))))add(r.id,r.amount);});
   return {credits,pools,totalStaked};
 }
-module.exports={calculatePayouts};
+module.exports={calculatePayouts,multipliers};

@@ -12,7 +12,7 @@ test("report persists prediction observation before Discord failure; changed ord
  require("../commands/admin").register(reg,{state,predictions:s,config:{channels:{pickup:"pickup",eloAdmin:"admin"}},elo:{db,unreportMatch:()=>{},applyTeamResult:()=>{}},matchesStore:{}});
  const message={internalAutoReport:true,author:{id:"bot"},channel:{id:"pickup",send:async()=>{throw new Error("Discord down");}}};
  await assert.rejects(reg.get("report")(message,["MATCH1","blue","--auto"]),/Discord down/);
- assert.equal(s.store.market(m.id).observed_result,"blue");assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("u").balance,1000);
+ assert.equal(s.store.market(m.id).observed_result,"blue");assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("u").balance,1050);
  await assert.rejects(reg.get("report")(message,["MATCH1","red","--auto"]),/Discord down/);assert.equal(s.store.market(m.id).state,"review_required");
 });
 test("deleting unresolved bets refunds atomically and settled history blocks all database connections",t=>{
@@ -45,8 +45,8 @@ test("the automatic score report settles Red after readiness retries and a later
  await assert.rejects(reg.get("report")(message,["REPORT1","red","--auto"]),/Discord down/);
  assert.equal(db.prepare("SELECT winner FROM matches").get().winner,"RED");
  assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).result,"red");
- assert.equal(s.store.account("red-bettor").balance,1070);assert.equal(s.store.account("blue-bettor").balance,900);
+ assert.equal(s.store.account("red-bettor").balance,1050);assert.equal(s.store.account("blue-bettor").balance,900);
  await assert.rejects(reg.get("report")(message,["REPORT1","red","--auto"]),/Discord down/);
- assert.equal(s.store.market(m.id).settlement_version,1);assert.equal(s.store.account("red-bettor").balance,1070);
+ assert.equal(s.store.market(m.id).settlement_version,1);assert.equal(s.store.account("red-bettor").balance,1050);
  assert.equal(s.store.assertAccounting(),true);
 });

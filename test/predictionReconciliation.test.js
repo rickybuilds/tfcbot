@@ -14,17 +14,17 @@ function setup(t){
 }
 test("periodic reconciliation settles a committed completed match after its immediate callback was missed",t=>{
  const {s,m,report,bet,ready,time}=setup(t);bet();ready();time(121000);s.tick();report();s.reconcileCompletedMatches();
- assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).result,"blue");assert.equal(s.store.account("spectator").balance,1000);assert.equal(s.store.assertAccounting(),true);
+ assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).result,"blue");assert.equal(s.store.account("spectator").balance,1050);assert.equal(s.store.assertAccounting(),true);
 });
 test("one failed payout does not prevent other completed games settling and the failed game retries once",t=>{
  const {s,db,m,snapshot,report,bet,ready,time}=setup(t);bet();ready();const other=s.store.createMarket({...snapshot,matchId:"RECON2",serverKey:"east"},s.context("create"));bet(other,"other");s.store.startCountdown(other.id,1000);time(121000);s.tick();report();report("BLUE","RECON2");
  db.exec(`CREATE TRIGGER fail_first BEFORE INSERT ON prediction_transactions WHEN NEW.kind='settlement' AND NEW.market_id=${m.id} BEGIN SELECT RAISE(ABORT,'injected payout failure'); END`);
  s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"closed");assert.equal(s.store.market(other.id).state,"settled");assert.equal(s.store.account("spectator").balance,900);
- db.exec("DROP TRIGGER fail_first");s.reconcileCompletedMatches();s.reconcileCompletedMatches();assert.equal(s.store.account("spectator").balance,1000);assert.equal(s.store.account("other").balance,1000);assert.equal(s.store.market(m.id).settlement_version,1);
+ db.exec("DROP TRIGGER fail_first");s.reconcileCompletedMatches();s.reconcileCompletedMatches();assert.equal(s.store.account("spectator").balance,1050);assert.equal(s.store.account("other").balance,1000);assert.equal(s.store.market(m.id).settlement_version,1);
 });
 test("reconciliation detects a corrected DB winner after restart without granting unconfirmed correction credits",async t=>{
  const {s,db,m,report,bet,ready,time}=setup(t);bet();ready();time(121000);s.tick();report();s.onMatchReported({matchId:"RECON1"});report("RED");await s.initialize();
- assert.equal(s.store.market(m.id).state,"review_required");assert.equal(s.store.market(m.id).observed_result,"red");assert.equal(s.store.market(m.id).result,"blue");assert.equal(s.store.market(m.id).settlement_version,1);assert.equal(s.store.account("spectator").balance,1000);assert.equal(db.prepare("SELECT COUNT(*) n FROM prediction_transactions WHERE kind='correction'").get().n,0);
+ assert.equal(s.store.market(m.id).state,"review_required");assert.equal(s.store.market(m.id).observed_result,"red");assert.equal(s.store.market(m.id).result,"blue");assert.equal(s.store.market(m.id).settlement_version,1);assert.equal(s.store.account("spectator").balance,1050);assert.equal(db.prepare("SELECT COUNT(*) n FROM prediction_transactions WHERE kind='correction'").get().n,0);
 });
 for(const change of ["teams","map","server"]){test(`ordinary closed settlement validates official ${change} before crediting`,t=>{
  const {s,db,m,report,bet,ready,time}=setup(t);bet();ready();time(121000);s.tick();report();
@@ -33,10 +33,10 @@ for(const change of ["teams","map","server"]){test(`ordinary closed settlement v
 });}
 test("restart preserves a verified future deadline and later completed-report settlement",async t=>{
  const {s,m,report,bet,ready,time}=setup(t);bet();ready();time(50000);await s.initialize();assert.equal(s.store.market(m.id).state,"countdown");assert.equal(s.store.market(m.id).closes_at,121000);
- time(121000);report();s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).closes_at,121000);assert.equal(s.store.account("spectator").balance,1000);
+ time(121000);report();s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.market(m.id).closes_at,121000);assert.equal(s.store.account("spectator").balance,1050);
 });
 test("an older restart-review with a verified expired deadline recovers from the completed official report",t=>{
- const {s,m,report,bet,ready,time}=setup(t);bet();ready();s.store.markReview(m.id,"restart: connection/terms history requires owner review");time(121000);report();s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("spectator").balance,1000);
+ const {s,m,report,bet,ready,time}=setup(t);bet();ready();s.store.markReview(m.id,"restart: connection/terms history requires owner review");time(121000);report();s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("spectator").balance,1050);
 });
 test("missing deadlines and results recorded before a future deadline remain owner-reviewed",t=>{
  const {s,m,report,bet,time}=setup(t);bet();report();s.reconcileCompletedMatches();assert.equal(s.store.market(m.id).state,"review_required");assert.equal(s.store.market(m.id).closes_at,null);assert.equal(s.store.account("spectator").balance,900);
@@ -63,7 +63,7 @@ test("refreshing Steam links never treats a shared ambiguous identity as all eig
  const {s,db,m,snapshot}=setup(t);db.exec("CREATE TABLE player_steam_ids(discord_id TEXT,steam_id TEXT)");const insert=db.prepare("INSERT INTO player_steam_ids VALUES (?,?)");for(const [id,steam] of Object.entries(snapshot.steamIdsByDiscordId))insert.run(id,id==="r4"?snapshot.steamIdsByDiscordId.b1[0]:steam[0]);await s.reconcileServer("east");assert.equal(s.store.market(m.id).closes_at,null);
 });
 test("the recurring maintenance callback reconciles completed reports without a restart or report callback",async t=>{
- const {s,m,report,bet,ready,time}=setup(t);let heartbeat;t.mock.method(global,"setInterval",fn=>{heartbeat=fn;return {unref(){}};});s.pollRosters=async()=>{};bet();ready();time(50000);await s.initialize();time(121000);report();for(let i=0;i<15;i++)heartbeat();await Promise.resolve();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("spectator").balance,1000);
+ const {s,m,report,bet,ready,time}=setup(t);let heartbeat;t.mock.method(global,"setInterval",fn=>{heartbeat=fn;return {unref(){}};});s.pollRosters=async()=>{};bet();ready();time(50000);await s.initialize();time(121000);report();for(let i=0;i<15;i++)heartbeat();await Promise.resolve();assert.equal(s.store.market(m.id).state,"settled");assert.equal(s.store.account("spectator").balance,1050);
 });
 test("background checks retain an explicitly accepted owner map change and allow its later audited correction",async t=>{
  const {s,db,m,report,bet,ready,time}=setup(t);bet();bet(m,"red-bettor","red");ready();time(121000);report();db.prepare("UPDATE matches SET map_name='openfire'").run();s.store.markReview(m.id,"unexpected server map");

@@ -113,12 +113,12 @@ for (const outcome of ["red", "blue", "tie"]) {
     report(outcome); s.onMatchReported({ matchId: "READY1" });
     assert.equal(s.store.market(m.id).state, "settled");
     assert.equal(s.store.market(m.id).result, outcome);
-    assert.equal(s.store.account("correct").balance, outcome === "tie" ? 1090 : 1070);
+    assert.equal(s.store.account("correct").balance, outcome === "tie" ? 1100 : 1050);
     assert.equal(s.store.account("wrong").balance, 900);
     s.onMatchReported({ matchId: "READY1" }); await s.initialize();
     assert.equal(s.store.market(m.id).settlement_version, 1);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM prediction_transactions WHERE kind='allocation'").get().n, 1);
-    assert.equal(s.store.account("correct").balance, outcome === "tie" ? 1090 : 1070);
+    assert.equal(s.store.account("correct").balance, outcome === "tie" ? 1100 : 1050);
     assert.equal(s.store.assertAccounting(), true);
   });
 }
@@ -182,6 +182,6 @@ test("failed automatic recovery rolls back the state, audit and payout and can b
   assert.equal(db.prepare("SELECT COUNT(*) n FROM prediction_transactions WHERE kind='automatic_recovery'").get().n, 0);
   db.exec("DROP TRIGGER fail_payout"); s.onMatchReported({ matchId: "READY1" });
   assert.equal(s.store.market(m.id).state, "settled");
-  assert.equal(s.store.account("u").balance, 1000);
+  assert.equal(s.store.account("u").balance, 1050);
   assert.equal(s.store.assertAccounting(), true);
 });

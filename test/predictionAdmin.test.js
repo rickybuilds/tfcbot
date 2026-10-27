@@ -43,7 +43,7 @@ test("result correction requires official outcome and funds all extra credits th
  const {s,db,m,message,privateMessages}=setup(t);db.exec("CREATE TABLE matches(match_id TEXT PRIMARY KEY,winner TEXT,status TEXT,blue_ids TEXT,red_ids TEXT,map_name TEXT,server_name TEXT)");db.prepare("INSERT INTO matches VALUES (?,?,?,?,?,?,?)").run("MATCH1","RED","in_progress",JSON.stringify(m.snapshot.blueIds),JSON.stringify(m.snapshot.redIds),m.snapshot.mapName,"TFC East US Server");
  s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"u",pick:"blue",stake:100,context:s.context("bet","u")});s.store.placeBet({marketRef:{marketId:m.id,revision:1},discordId:"v",pick:"red",stake:100,context:s.context("bet","v")});db.prepare("UPDATE matches SET status='completed'").run();s.store.closeMarket(m.id,s.context());s.store.settleMarket({marketId:m.id,outcome:"blue",context:s.context()});
  await s.handleAdminCommand(message,["correct","MATCH1","blue","wrong"]);assert.match(privateMessages[0].content,/official/i);
- message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1070);assert.equal(s.store.account("v").balance,1070);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
+ message.id="correct";await s.handleAdminCommand(message,["correct","MATCH1","red","official correction"]);await s.handleInteraction(confirmation(privateMessages[1]));assert.equal(s.store.account("u").balance,1050);assert.equal(s.store.account("v").balance,1050);assert.ok(s.store.houseFunding()>0);assert.equal(s.store.assertAccounting(),true);
 });
 
 
@@ -87,5 +87,5 @@ test('repeated owner corrections pay only extra entitlements and stay private',a
   await s.handleAdminCommand(message,['correct','MATCH1',outcome,'verified official correction']);const p=privateMessages.at(-1);assert.ok(p.components);
   await s.handleInteraction(confirmation(p,`correct:${index}`));await s.handleInteraction(confirmation(p,`repeat:${index}`));
  }
- assert.equal(s.store.account('u').balance,1070);assert.equal(s.store.account('v').balance,1070);assert.equal(s.store.houseFunding(),190);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
+ assert.equal(s.store.account('u').balance,1050);assert.equal(s.store.account('v').balance,1050);assert.equal(s.store.houseFunding(),260);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
 });

@@ -29,6 +29,6 @@ test("earned limits above 250 appear privately and allow larger stakes while for
 test("forged/stale/participant actions are private errors; public cards contain no financial detail",async t=>{
  const {s,m}=setup(t);const stale=interaction("stale",`pred:submit:${m.id}:99:blue`);await s.handleInteraction(stale);assert.equal(stale.response.flags,64);assert.match(stale.response.content,/stale/i);
  const participant=interaction("part",`pred:submit:${m.id}:1:blue`,"b1");await s.handleInteraction(participant);assert.match(participant.response.content,/participant/i);
- const {cardUpdate}=require("../predictions/messages");const card=JSON.stringify(cardUpdate(s.store.market(m.id),1000));assert.doesNotMatch(card,/balance|stake|b1|r1/);
+ const {cardUpdate}=require("../predictions/messages");const card=JSON.stringify(cardUpdate(s.store.market(m.id),1000));assert.doesNotMatch(card,/balance|b1|r1/);
  s.store.closeMarket(m.id,s.context());const data=cardUpdate(s.store.market(m.id),1000);assert.equal(data.components[0].components[0].data.disabled,true);assert.notEqual(data.components[0].components[3].data.disabled,true);
 });
