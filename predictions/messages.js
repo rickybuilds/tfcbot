@@ -11,12 +11,13 @@ function statusText(m) {
 function actionRow(m,now) {
   const odds=m.snapshot?.eloOdds;
   const validOdds=odds&&[odds.blue,odds.red].every(n=>Number.isInteger(n)&&n>=0&&n<=100)&&odds.blue+odds.red===100;
-  const labels=[`Blue / Team 1${validOdds?` · ${odds.blue}%`:""}`,`Red / Team 2${validOdds?` · ${odds.red}%`:""}`,"Tie"];
+  const rates=m.rule_version>=4?require("./payouts").multipliers(odds):null;
+  const labels=[`Blue / Team 1${validOdds?` · ${odds.blue}%`:""}${rates?` · ${(rates.blue/100).toFixed(2)}x`:""}`,`Red / Team 2${validOdds?` · ${odds.red}%`:""}${rates?` · ${(rates.red/100).toFixed(2)}x`:""}`,`Tie${rates?" · 2.00x":""}`];
   const buttons=[...["blue","red","tie"].map((pick,i)=>new ButtonBuilder().setCustomId(`pred:pick:${m.id}:${m.revision}:${pick}`).setLabel(labels[i]).setStyle([ButtonStyle.Primary,ButtonStyle.Danger,ButtonStyle.Secondary][i]).setDisabled(!isOpen(m,now))),new ButtonBuilder().setCustomId(`pred:mine:${m.id}:${m.revision}`).setLabel("My Bet").setStyle(ButtonStyle.Secondary)];
   return new ActionRowBuilder().addComponents(buttons);
 }
 function cardUpdate(m,now=Date.now()) {
-  const rule=m.rule_version>=3?" If nobody picks the official result, the house keeps the pot; losing bets are not refunded.":"";
+  const rule=m.rule_version>=4?" Returns include your stake; losing bets are not refunded. Players receive fixed rewards.":m.rule_version>=3?" If nobody picks the official result, the house keeps the pot; losing bets are not refunded.":"";
   return {content:statusText(m)+rule,components:[actionRow(m,now)]};
 }
 module.exports={cardUpdate,actionRow,statusText,isOpen};
