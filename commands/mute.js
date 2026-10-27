@@ -65,17 +65,20 @@ module.exports = {
       }
     }
 
-    const user = message.mentions.users.first();
+    const isUnmute = cmd === "!unmute" || cmd === "!punmute";
+    const mentionedUser = message.mentions.users.first();
+    const userId = isUnmute && /^\d{1,20}$/.test(args[0] || "") ? args[0] : null;
+    const user = mentionedUser || (userId ? { id: userId, toString: () => `<@${userId}>` } : null);
 
     if (!user) {
-      return message.reply("Usage: `!mute @user [reason]` or `!unmute @user`");
+      return message.reply("Usage: `!mute @user [reason]` or `!unmute @user/discord_id`");
     }
 
     if (user.bot) {
       return message.reply("❌ I am not pickup-muting bots.");
     }
 
-    if (cmd === "!unmute" || cmd === "!punmute") {
+    if (isUnmute) {
       try {
         db.prepare(`DELETE FROM pickup_mutes WHERE discord_id = ?`).run(user.id);
 
