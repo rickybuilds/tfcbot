@@ -35,6 +35,7 @@ if (process.env.TFC_RCON_CENTRAL_HOST) {
     logDir: process.env.HL_REMOTE_LOG_DIR_CENTRAL || process.env.HL_REMOTE_LOG_DIR,
     hltvDir: process.env.HL_REMOTE_HLTV_DIR_CENTRAL || process.env.HL_REMOTE_HLTV_DIR,
   };
+}
 
 if (process.env.TFC_RCON_WEST_HOST) {
   servers.west = {
@@ -52,7 +53,6 @@ if (process.env.TFC_RCON_WEST_HOST) {
     logDir: process.env.HL_REMOTE_LOG_DIR_WEST || process.env.HL_REMOTE_LOG_DIR,
     hltvDir: process.env.HL_REMOTE_HLTV_DIR_WEST || process.env.HL_REMOTE_HLTV_DIR,
   };
-}
 }
 
 // Skill servers share the same host as their competitive counterpart but run
