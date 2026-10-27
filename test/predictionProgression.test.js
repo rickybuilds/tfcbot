@@ -32,13 +32,20 @@ test("cancelled, voided and refunded revisions cannot farm stake progression",t=
  s.cancelBet({marketRef:{marketId:cancelled.id,revision:1},discordId:"u",context:ctx()});complete(s,cancelled);
  assert.deepEqual(s.bettingProgress("u"),{settledGames:1,limit:110});assert.equal(s.assertAccounting(),true);
 });
-test("progression exceeds the former 250 cap and revalidates edits and insufficient balances",t=>{
+test("progression stops at 500 and enforces the cap for new bets and edits",t=>{
  const s=setup(t);for(let i=0;i<91;i++){const game=s.createMarket(snapshot(`HISTORY_${i}`),ctx());bet(s,game,1);complete(s,game,"blue");}
- assert.equal(s.bettingProgress("u").limit,1010);
- const m=s.createMarket(snapshot("LARGE"),ctx());assert.throws(()=>bet(s,m,1001),/funds/i);
- bet(s,m,500);assert.equal(s.account("u").balance,500);bet(s,m,1000);assert.equal(s.account("u").balance,0);
- assert.throws(()=>bet(s,m,1011),/1,010/);assert.equal(s.bets(m.id)[0].stake,1000);
+ assert.equal(s.bettingProgress("u").limit,500);
+ const m=s.createMarket(snapshot("LARGE"),ctx());assert.throws(()=>bet(s,m,501),/500/);
+ bet(s,m,500);assert.equal(s.account("u").balance,500);
+ assert.throws(()=>bet(s,m,501),/500/);assert.equal(s.bets(m.id)[0].stake,500);
  assert.throws(()=>bet(s,m,Number.MAX_SAFE_INTEGER+1),/Stake/);assert.equal(s.assertAccounting(),true);
+});
+test("an existing stake above the cap remains settled without alteration",t=>{
+ const s=setup(t),m=s.createMarket(snapshot("EXISTING"),ctx());
+ const progress=s.bettingProgress.bind(s);s.bettingProgress=()=>({settledGames:50,limit:600});
+ bet(s,m,600);s.bettingProgress=progress;
+ assert.throws(()=>bet(s,m,601),/Stake/);assert.equal(s.bets(m.id)[0].stake,600);
+ complete(s,m,"blue");assert.equal(s.account("u").balance,1000);assert.equal(s.assertAccounting(),true);
 });
 test("prediction schema upgrade preserves old bets and immutable history, and keeps existing games on their original rules",t=>{
  const s=setup(t),db=s.db,m=s.createMarket(snapshot("OLD"),ctx());db.prepare("UPDATE prediction_markets SET rule_version=1 WHERE id=?").run(m.id);
