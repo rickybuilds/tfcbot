@@ -103,7 +103,7 @@ const PLAYER_GAME_INDICATORS = Object.freeze({
   win: { emoji: "🟢" },
   win_mvp: { emoji: "<a:475612greencrown:1565016552082903101>" },
   tie: { emoji: "🟡" },
-  tie_mvp: { emoji: "😐" },
+  tie_mvp: { emoji: "<a:neutralfacediscord:1565023418301026354>" },
   loss: { emoji: "🔴" },
   loss_mvp: { emoji: "<a:angryfacediscord:1565019962437804132>" },
 });
