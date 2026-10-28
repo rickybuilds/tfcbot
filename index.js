@@ -238,6 +238,7 @@ registry.set("tfcadmins", (m, a) => tfcAdmin.list(m, a, deps));
 
 // Jail commands
 require("./commands/jail").register(registry, deps);
+require("./commands/reducejail").register(registry, deps);
 require("./commands/unjail").register(registry, deps);
 require("./commands/jaillist").register(registry, deps);
 require("./commands/rule8").register(registry, deps);

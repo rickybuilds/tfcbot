@@ -90,6 +90,7 @@ function register(reg, { config }) {
             "`!rule8 @user` — Transfer 1 Elo and record a Rule 8 infraction\n" +
             "`!rule8clear @user` — Clear the most recent Rule 8 infraction\n" +
             "`!unban @user` — Remove active ban / restore permissions\n" +
+            "`!reducejail @user <duration> <reason>` — Reduce remaining jail time (e.g. 6h good behaviour)\n" +
             "`!unjail @user` — Restore roles to a jailed player\n" +
             "`!listbans` — Show active game bans",
         },
