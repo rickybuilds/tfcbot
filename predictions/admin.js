@@ -2,7 +2,7 @@
 const {randomUUID}=require("node:crypto");
 const {ActionRowBuilder,ButtonBuilder,ButtonStyle}=require("discord.js");
 const {privateReply}=require("./interactions");
-const {sameMap,officialTermsMismatch,acceptedMapChange}=require("./official");
+const {sameMap,officialTermsMismatch,acceptedMapChange,acceptedTeamChange,roster}=require("./official");
 function assertOwner(service,id) {if(!service.config.predictionsOwnerId||String(id)!==service.config.predictionsOwnerId)throw new Error("Only the configured prediction owner can use financial controls");}
 function official(service,matchId) {
   const row=service.db.prepare("SELECT winner,status FROM matches WHERE match_id=?").get(String(matchId));
@@ -15,7 +15,7 @@ function reviewedSettlement(service,p) {
   if(m.state!=="review_required")throw new Error("Only an unsettled game frozen for review can use !pred settle");
   const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
   if(!["blue","red","tie"].includes(p.outcome)||!row||String(row.status).toLowerCase()!=="completed"||String(row.winner).toLowerCase()!==p.outcome)throw new Error("Settlement must match the completed official result");
-  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:!!p.acceptMapChange});
+  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:!!p.acceptMapChange,allowTeamChange:!!p.acceptTeamChange});
   if(mismatch==='teams')throw new Error("Official teams differ from the frozen prediction teams; review the roster before settlement");
   if(mismatch==='server')throw new Error("Official server differs from the frozen assigned server; verify the match report first");
   if(mismatch==='map'){
@@ -23,7 +23,8 @@ function reviewedSettlement(service,p) {
     throw new Error("Official map differs from the frozen prediction map; use --accept-map-change after the outcome only if you verified the actual game and accept the frozen bets");
   }
   const mapChanged=!sameMap(row.map_name,m.snapshot.mapName);
-  return {m,row,mapChange:mapChanged?{predictionMap:m.snapshot.mapName,officialMap:row.map_name,accepted:true}:null};
+  const teamChange=p.acceptTeamChange?{blue:roster(row.blue_ids),red:roster(row.red_ids),accepted:true}:null;
+  return {m,row,teamChange,mapChange:mapChanged?{predictionMap:m.snapshot.mapName,officialMap:row.map_name,accepted:true}:null};
 }
 function reviewedCorrection(service,p) {
   const m=service.store.latest(p.target);
@@ -31,7 +32,7 @@ function reviewedCorrection(service,p) {
   if(!m.settlement_version)throw new Error("No previous settlement; use !pred settle for a reviewed completed game");
   const row=service.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(p.target));
   if(!["blue","red","tie"].includes(p.outcome)||!row||String(row.status).toLowerCase()!=="completed"||String(row.winner).toLowerCase()!==p.outcome)throw new Error("Correction must match the completed official result; fix the match report first");
-  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:acceptedMapChange(service.db,m,row)});
+  const mismatch=officialTermsMismatch(row,m.snapshot,{allowMapChange:acceptedMapChange(service.db,m,row),allowTeamChange:acceptedTeamChange(service.db,m,row)});
   if(mismatch)throw new Error(`Official ${mismatch} differ from the frozen prediction terms; review the match report before correction`);
   return {m,row};
 }
@@ -56,7 +57,7 @@ function parse(service,args) {
     p.amount=Number(third);p.reason=rest.join(" ");
   }else if(action==="correct"||action==="settle"){
     p.outcome=third;
-    if(action==="settle"&&rest[0]==="--accept-map-change"){p.acceptMapChange=true;rest.shift();}
+    while(action==="settle"&&["--accept-map-change","--accept-team-change"].includes(rest[0])){if(rest.shift()==="--accept-map-change")p.acceptMapChange=true;else p.acceptTeamChange=true;}
     p.reason=rest.join(" ");
     if(!p.reason.trim())throw new Error("A reason is required");
     if(action==="settle")reviewedSettlement(service,p);
@@ -101,8 +102,8 @@ async function handleAdminCommand(service,message,args=[]) {
     });
     let recovery="";
     if(preview.action==="settle"){
-      const {m,mapChange}=reviewedSettlement(service,preview),bets=service.store.bets(m.id).filter(b=>b.status==="active"),pot=bets.reduce((n,b)=>n+BigInt(b.stake),0n);
-      recovery=`\nFrozen reason: ${m.reason||"unspecified"}.${mapChange?`\nOwner accepts map change: ${mapChange.predictionMap} → ${mapChange.officialMap}. Original prediction record is retained.`:""}\n${bets.length} active bets; ${pot.toLocaleString("en-US")} points locked; revision ${m.revision}.\nOriginal betting deadline: ${m.closes_at==null?"not recorded":`<t:${Math.floor(m.closes_at/1000)}:F>`}.\nBy confirming, you accept the frozen bets despite the unverified closing window and authorize the normal payout. Bets stay closed; ELO is unchanged.`;
+      const {m,mapChange,teamChange}=reviewedSettlement(service,preview),bets=service.store.bets(m.id).filter(b=>b.status==="active"),pot=bets.reduce((n,b)=>n+BigInt(b.stake),0n);
+      recovery=`\nFrozen reason: ${m.reason||"unspecified"}.${mapChange?`\nOwner accepts map change: ${mapChange.predictionMap} → ${mapChange.officialMap}. Original prediction record is retained.`:""}${teamChange?`\nOwner accepts official roster: Blue ${teamChange.blue.join(', ')}; Red ${teamChange.red.join(', ')}. Payout uses the frozen teams and bets.`:""}\n${bets.length} active bets; ${pot.toLocaleString("en-US")} points locked; revision ${m.revision}.\nOriginal betting deadline: ${m.closes_at==null?"not recorded":`<t:${Math.floor(m.closes_at/1000)}:F>`}.\nBy confirming, you accept the frozen bets despite the unverified closing window and authorize the normal payout. Bets stay closed; ELO is unchanged.`;
     }
     await sendPrivate(message,{content:`Confirm ${preview.action} ${preview.target||""}${preview.amount!=null?` ${preview.amount}`:""}${preview.outcome?` → ${preview.outcome}`:""}.\nReason: ${preview.reason}${recovery}\nExpires in 60 seconds.${preview.action==="correct"?" Prior payouts remain untouched; the house funds additional entitlements.":""}`,components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pred:confirm:${preview.token}`).setLabel("Confirm").setStyle(ButtonStyle.Danger))]});
   }catch(error){await sendPrivate(message,{content:error.message});}
@@ -120,8 +121,8 @@ async function confirm(service,i,token) {
     if(p.action==="adjust")service.store.adjust(p.target,p.amount,inner);
     if(p.action==="void")service.store.voidMarket({marketId:m.id,context:inner});
     if(p.action==="settle"){
-      const {mapChange}=reviewedSettlement(service,p);
-      service.store.settleReviewedMarket({marketId:m.id,outcome:p.outcome,context:inner,mapChange});
+      const {mapChange,teamChange}=reviewedSettlement(service,p);
+      service.store.settleReviewedMarket({marketId:m.id,outcome:p.outcome,context:inner,mapChange,teamChange});
     }
     if(p.action==="correct"){
       reviewedCorrection(service,p);

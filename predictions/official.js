@@ -11,14 +11,22 @@ function roster(value) {
     return new Set(normalized).size===4?normalized:null;
   }catch{return null;}
 }
-function officialTermsMismatch(row,snapshot,{allowMapChange=false}={}) {
+function officialTermsMismatch(row,snapshot,{allowMapChange=false,allowTeamChange=false}={}) {
   const blue=roster(row?.blue_ids),red=roster(row?.red_ids),frozenBlue=roster(snapshot?.blueIds),frozenRed=roster(snapshot?.redIds);
-  if(!blue||!red||!frozenBlue||!frozenRed||new Set([...blue,...red]).size!==8||new Set([...frozenBlue,...frozenRed]).size!==8||JSON.stringify(blue)!==JSON.stringify(frozenBlue)||JSON.stringify(red)!==JSON.stringify(frozenRed))return 'teams';
+  if(!blue||!red||!frozenBlue||!frozenRed||new Set([...blue,...red]).size!==8||new Set([...frozenBlue,...frozenRed]).size!==8||(!allowTeamChange&&(JSON.stringify(blue)!==JSON.stringify(frozenBlue)||JSON.stringify(red)!==JSON.stringify(frozenRed))))return 'teams';
   if(!String(row?.map_name||'').trim()||!String(snapshot?.mapName||'').trim()||(!allowMapChange&&!sameMap(row.map_name,snapshot.mapName)))return 'map';
   if(!String(row?.server_name||'').trim()||!String(snapshot?.serverKey||'').trim())return 'server';
   const {determineServerKey}=require('../services/autoRecap');
   const actual=determineServerKey(row.server_name),assigned=determineServerKey(snapshot.serverKey);
   return actual&&assigned&&actual===assigned?null:'server';
+}
+function acceptedTeamChange(db,market,row) {
+  if(!market?.settlement_version||!row)return false;
+  const blue=roster(row.blue_ids),red=roster(row.red_ids);if(!blue||!red)return false;
+  for(const audit of db.prepare("SELECT metadata FROM prediction_transactions WHERE market_id=? AND kind='owner_settlement'").iterate(market.id)){
+    try{const change=JSON.parse(audit.metadata)?.teamChange;if(change?.accepted&&JSON.stringify(blue)===JSON.stringify(change.blue)&&JSON.stringify(red)===JSON.stringify(change.red))return true;}catch{}
+  }
+  return false;
 }
 function acceptedMapChange(db,market,row) {
   if(!market?.settlement_version||!row)return false;
@@ -30,4 +38,4 @@ function acceptedMapChange(db,market,row) {
   }
   return false;
 }
-module.exports={sameMap,officialTermsMismatch,acceptedMapChange};
+module.exports={sameMap,officialTermsMismatch,acceptedMapChange,acceptedTeamChange,roster};
