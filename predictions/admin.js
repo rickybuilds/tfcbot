@@ -137,6 +137,7 @@ async function confirm(service,i,token) {
     }
     return {content:`Owner action completed: ${p.action}.`};
   });
+  if(["settle","correct"].includes(p.action))service.queueSettlementReceipts();
   await privateReply(i,result);
   const m=service.store.latest(p.target);if(m)service.refreshCard(m.id);
 }

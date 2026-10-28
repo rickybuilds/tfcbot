@@ -60,6 +60,8 @@ Current-server credentials were unavailable during development. Unit/fixture tes
 
 Only `PREDICTIONS_OWNER_ID` can use these controls; the Discord admin role alone does not qualify. Missing owner configuration disables financial administration. Commands work in DM as well as the normal command router. Financial output and confirmation are delivered privately; blocked DMs never cause a public fallback. Use raw Discord IDs or mentions for account targets.
 
+When `PREDICTIONS_OWNER_ID` is configured, each new settlement and correction queues a private DM to that owner. It lists the outcome and each bettor's pick, stake, actual cumulative return and net result; corrections also show the new credit. Failed sends are retried after startup and periodically without repeating settlement. Discord's nonce deduplication covers only its recent-message window, so an accepted send whose response is lost can still be delivered twice after that window. The DM never changes payouts and historical settlements are not backfilled.
+
 | Command | Action |
 |---|---|
 | `!pred unresolved` | Privately list open, countdown, closed/awaiting-result and review-required games, with IDs, server, revision, locked points, deadline and review reason. Long lists arrive as a text attachment; an empty list confirms there are none. Works with predictions disabled. |

@@ -8,7 +8,7 @@ function validSnapshot(s) {
   return {...s,blueIds:s.blueIds.map(String),redIds:s.redIds.map(String),offenseIds:(s.offenseIds||[]).map(String)};
 }
 class PredictionStore {
-  constructor(db) { this.db=db;initializeSchema(db); }
+  constructor(db,{receiptOwnerId=null}={}) { this.db=db;this.receiptOwnerId=receiptOwnerId;initializeSchema(db); }
   atomic(fn) {return this.db.inTransaction?fn():this.db.transaction(fn).immediate();}
   account(id) {return this.db.prepare("SELECT * FROM prediction_accounts WHERE discord_id=?").get(String(id));}
   market(id) {return decode(this.db.prepare("SELECT * FROM prediction_markets WHERE id=?").get(id));}
@@ -143,6 +143,7 @@ class PredictionStore {
       // corrections retain prior distributions and use audited house funding.
       if(!correction&&allocation.houseTake)this.entry(ctx,{kind:"house_collection",amount:allocation.houseTake,marketId:id,version,entryKey:"house-collection"});
       this.entry(ctx,{kind:"allocation",marketId:id,version,entryKey:"allocation",metadata:{outcome,allocation,paidCredits:paid,houseFunding:funding}});
+      if(this.receiptOwnerId)this.setMetadata(`settlement_receipt:${id}:${version}`,JSON.stringify({ownerId:String(this.receiptOwnerId),marketId:id,matchId:m.match_id,version,outcome,bets:bets.map(b=>({id:b.discord_id,pick:b.pick,stake:b.stake,paid:paid[b.discord_id]||0,added:Math.max(0,(paid[b.discord_id]||0)-(m.paidCredits[b.discord_id]||0))}))}));
       this.db.prepare("UPDATE prediction_bets SET status='settled',updated_at=? WHERE market_id=? AND status='active'").run(ctx.now,id);
       this.db.prepare("UPDATE prediction_markets SET state='settled',result=?,observed_result=?,settlement_version=?,allocation=?,paid_credits=? WHERE id=?").run(outcome,outcome,version,JSON.stringify(allocation),JSON.stringify(paid),id);
       return {version,houseFunding:funding};

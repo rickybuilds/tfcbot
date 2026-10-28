@@ -17,12 +17,12 @@ function rosterFailureReason(error) {
 }
 class PredictionsService {
   constructor({db,client,config={},clock=Date.now,logger=console,queryServerRoster,queryServerPhase,waitForRosterRetry}) {
-    this.store=new PredictionStore(db);this.db=db;this.client=client;this.config=config;this.clock=clock;this.logger=logger;
+    this.store=new PredictionStore(db,{receiptOwnerId:config.predictionsOwnerId});this.db=db;this.client=client;this.config=config;this.clock=clock;this.logger=logger;
     this.presence=new PresenceTracker();this.knownServers=new Set();this.inflight=new Map();this.cardJobs=new Map();this.timer=null;
     this.queryServerRoster=queryServerRoster|| (async serverKey=>parseStatus(await require("../services/rconClient").runRawRconCommand(serverKey,"status")));
     this.queryServerPhase=queryServerPhase||require("./phase").queryServerPhase;
     this.waitForRosterRetry=waitForRosterRetry||(()=>new Promise(resolve=>setTimeout(resolve,2000)));
-    this.rosterSchedules=new Map();
+    this.rosterSchedules=new Map();this.receiptJob=null;
   }
   context(prefix="system",actorId="system",reason) {return {operationKey:`${prefix}:${randomUUID()}`,actorId,reason,now:this.clock()};}
   snapshotWithOdds(snapshot) {
@@ -239,6 +239,7 @@ class PredictionsService {
       const payout=this.store.settleMarket({marketId:m.id,outcome,context:this.context("settle")});changed=true;return payout;
     });
     if(marketId&&changed)this.refreshCard(marketId);
+    if(result&&!result.duplicate)this.queueSettlementReceipts();
     return result;
   }
   reconcileCompletedMatches() {
@@ -261,10 +262,11 @@ class PredictionsService {
     this.reconcileCompletedMatches();
     this.store.assertAccounting();
     await this.retryPendingCards();
+    this.queueSettlementReceipts();
     if(!this.timer){let cycle=0;this.timer=setInterval(()=>{
       try{this.tick();}catch{this.logger.warn?.("[predictions] deadline maintenance unavailable; will retry");}
       Promise.resolve().then(()=>this.pollRosters()).catch(()=>this.logger.warn?.("[predictions] roster scan unavailable; will retry"));
-      if(++cycle%15===0){this.reconcileCompletedMatches();Promise.resolve().then(()=>this.retryPendingCards()).catch(()=>this.logger.warn?.("[predictions] card retry unavailable"));}
+      if(++cycle%15===0){this.reconcileCompletedMatches();this.queueSettlementReceipts();Promise.resolve().then(()=>this.retryPendingCards()).catch(()=>this.logger.warn?.("[predictions] card retry unavailable"));}
     },1000);this.timer.unref?.();}
   }
   assertCanDeleteMatch(matchId) {
@@ -336,6 +338,23 @@ class PredictionsService {
         await this.publishCard(m.id,channel);
       }catch{this.logger.warn?.(`[predictions] pending card still unavailable for ${m.id}`);}
     }
+  }
+  queueSettlementReceipts() {queueMicrotask(()=>this.deliverSettlementReceipts().catch(()=>this.logger.warn?.("[predictions] owner receipt delivery unavailable")));}
+  async deliverSettlementReceipts() {
+    if(!this.client?.users||this.receiptJob)return this.receiptJob;
+    this.receiptJob=(async()=>{
+      for(const row of this.db.prepare("SELECT key,value FROM prediction_meta WHERE key GLOB 'settlement_receipt:*' ORDER BY key").all()){
+        try{
+          const r=JSON.parse(row.value),lines=r.bets.map(b=>{const net=BigInt(b.paid)-BigInt(b.stake);return `<@${b.id}> · ${b.pick.toUpperCase()} · ${b.pick===r.outcome?'correct':'incorrect'} · stake ${b.stake} · returned ${b.paid} · net ${net>=0n?'+':''}${net}${r.version>1?` · new credit +${b.added}`:''}`;});
+          const body=[`Prediction ${r.matchId} ${r.version>1?`correction #${r.version}`:'settled'} — ${r.outcome.toUpperCase()}`,...(lines.length?lines:['No bets.'])].join('\n');
+          const nonce=createHash('sha256').update(row.key).digest('hex').slice(0,24),user=await this.client.users.fetch(r.ownerId);
+          const payload=body.length<=1900?{content:body}:{content:`Prediction ${r.matchId}: settlement details attached.`,files:[{attachment:Buffer.from(body),name:'prediction-settlement.txt'}]};
+          await user.send({...payload,allowedMentions:{parse:[]},nonce,enforceNonce:true});
+          this.db.prepare("DELETE FROM prediction_meta WHERE key=? AND value=?").run(row.key,row.value);
+        }catch{this.logger.warn?.("[predictions] owner settlement receipt failed; will retry");}
+      }
+    })();
+    try{await this.receiptJob;}finally{this.receiptJob=null;}
   }
   async refreshCard(id) {
     try {
