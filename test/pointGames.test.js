@@ -90,3 +90,24 @@ test('give command sends points to a mentioned player',async t=>{
  await registry.get('give')(msg,['<@2>','50']);assert.equal(store.account('1').balance,950);assert.equal(store.account('2').balance,1050);
  assert.match(messages[0].content,/50 points/i);assert.doesNotMatch(messages[0].content,/balance/i);
 });
+
+test('duel challenge presents an accept button and only the intended player can use it',async t=>{
+ const {store,games}=setup(t,()=>0),{register}=require('../predictions/gameCommands');
+ const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>1000});
+ const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}};
+ await registry.get('duel')(msg,['<@2>','10']);
+ const button=messages[0].components[0].components[0];assert.equal(button.label,'Accept Duel');
+ let reply,update;
+ const interaction={id:'200',customId:button.custom_id,guildId:'g',user:{id:'3'},isButton:()=>true,reply:async p=>{reply=p},update:async p=>{update=p}};
+ await handleInteraction(interaction);assert.match(reply.content,/opponent/i);assert.equal(reply.ephemeral,true);assert.equal(store.account('1').balance,1000);
+ interaction.id='201';interaction.user.id='2';reply=undefined;
+ await handleInteraction(interaction);assert.match(update.content,/won 10 points/i);assert.deepEqual(update.components,[]);
+ assert.equal(store.account('1').balance,1010);assert.equal(store.account('2').balance,990);assert.equal(store.assertAccounting(),true);
+});
+test('expired duel button cannot settle a challenge',async t=>{
+ const {store,games}=setup(t),{register}=require('../predictions/gameCommands');let now=1000,reply;
+ const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>now});
+ await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}},['<@2>','10']);
+ now=121000;await handleInteraction({id:'202',customId:messages[0].components[0].components[0].custom_id,guildId:'g',user:{id:'2'},isButton:()=>true,reply:async p=>{reply=p}});
+ assert.match(reply.content,/no longer pending/i);assert.equal(store.account('1').balance,1000);assert.equal(store.assertAccounting(),true);
+});
