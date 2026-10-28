@@ -167,3 +167,8 @@ docs/elo-monthly-bonus-audit-2026-10-20.md
 
 # Local tests
 /test/
+
+# Point games regression tests
+!/test/
+/test/*
+!/test/pointGames.test.js

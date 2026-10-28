@@ -42,6 +42,8 @@ module.exports = {
   MAX_BUTTONS: 9,
   MAX_PLAYERS: Number(process.env.MAX_PLAYERS) || 8,
   predictionsEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.PREDICTIONS_ENABLED || "0")),
+  pointGamesEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.POINT_GAMES_ENABLED ?? process.env.PREDICTIONS_ENABLED ?? "0")),
+  rouletteCooldownSeconds: (() => { const n = Number(process.env.ROULETTE_COOLDOWN_SECONDS ?? 120); return Number.isSafeInteger(n) && n >= 0 && n <= 86400 ? n : 120; })(),
   predictionsOwnerId: String(process.env.PREDICTIONS_OWNER_ID || "").trim(),
   pickupRecordingEnabled: /^(?:1|true|yes|on)$/i.test(
     String(process.env.PICKUP_RECORDING_ENABLED || "")

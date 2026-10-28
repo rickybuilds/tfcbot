@@ -378,6 +378,10 @@ state.predictions = predictions;
 matchesStore.predictions = predictions;
 registry.set("pred", (message, args) => predictions.handleAdminCommand(message, args));
 require("./predictions/bank").register(registry,predictions);
+if (config.pointGamesEnabled) {
+  const { PointGames } = require("./predictions/games");
+  require("./predictions/gameCommands").register(registry, new PointGames(predictions.store, { cooldownMs: config.rouletteCooldownSeconds * 1000 }));
+}
 client.on("interactionCreate", interaction => {
   if (String(interaction.customId || "").startsWith("pred:")) {
     predictions.handleInteraction(interaction).catch(() => console.error("[predictions] interaction failure"));

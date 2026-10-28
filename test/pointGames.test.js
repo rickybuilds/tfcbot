@@ -1,0 +1,68 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),Database=require("better-sqlite3");
+const {PredictionStore}=require("../predictions/store");
+const {PointGames}=require("../predictions/games");
+function setup(t,number=()=>0){const db=new Database(":memory:");t.after(()=>db.close());const store=new PredictionStore(db);return {store,games:new PointGames(store,{randomInt:number})};}
+const ctx=(id,now=1000,actorId="a")=>({operationKey:id,actorId,now});
+test("roulette pays standard single-zero bets and enforces persisted server-wide cooldown",t=>{
+ const {store,games}=setup(t,()=>1);
+ const first=games.roulette({guildId:"g",userId:"a",pick:"red",stake:100,context:ctx("one")});
+ assert.equal(first.number,1);assert.equal(first.returned,200);assert.equal(store.account("a").balance,1100);
+ assert.deepEqual(games.roulette({guildId:"g",userId:"a",pick:"red",stake:100,context:ctx("one")}),first);
+ assert.throws(()=>games.roulette({guildId:"g",userId:"b",pick:"black",stake:10,context:ctx("two",120999,"b")}),/cooldown/i);
+ games.roulette({guildId:"g",userId:"b",pick:"1",stake:10,context:ctx("three",121000,"b")});
+ assert.equal(store.account("b").balance,1350);assert.equal(store.assertAccounting(),true);
+});
+test("coin flip loss and invalid stakes do not corrupt accounts",t=>{
+ const {store,games}=setup(t,()=>1);
+ assert.throws(()=>games.coinflip({userId:"a",pick:"heads",stake:101,context:ctx("bad")}),/stake/i);
+ const result=games.coinflip({userId:"a",pick:"heads",stake:50,context:ctx("flip")});
+ assert.equal(result.returned,0);assert.equal(store.account("a").balance,950);assert.equal(store.assertAccounting(),true);
+});
+test("duel requires targeted acceptance, checks both balances and pays only once",t=>{
+ const {store,games}=setup(t,()=>0);
+ games.challenge({guildId:"g",userId:"a",opponentId:"b",stake:100,context:ctx("challenge")});
+ assert.throws(()=>games.accept({guildId:"g",userId:"c",challengeId:"challenge",context:ctx("wrong",1001,"c")}),/opponent/i);
+ const result=games.accept({guildId:"g",userId:"b",challengeId:"challenge",context:ctx("accept",1002,"b")});
+ assert.equal(result.winner,"a");assert.equal(store.account("a").balance,1100);assert.equal(store.account("b").balance,900);
+ assert.deepEqual(games.accept({guildId:"g",userId:"b",challengeId:"challenge",context:ctx("accept",1002,"b")}),result);
+ assert.throws(()=>games.accept({guildId:"g",userId:"b",challengeId:"challenge",context:ctx("again",1003,"b")}),/pending/i);
+ assert.equal(store.assertAccounting(),true);
+});
+
+test("Discord games accept commands and display roulette result without exposing bank balance",async t=>{
+ const {store,games}=setup(t,()=>0),{register}=require('../predictions/gameCommands');
+ const registry=new Map(),messages=[];register(registry,games,{clock:()=>1000});
+ const msg={id:'1',guild:{id:'g'},author:{id:'a'},channel:{send:async p=>messages.push(p)}};
+ await registry.get('roulette')(msg,['red','10']);
+ assert.match(messages[0].content,/green/i);assert.match(messages[0].content,/0 points returned/i);
+ assert.doesNotMatch(messages[0].content,/balance/i);assert.equal(store.account('a').balance,990);
+});
+test("expired duels do not transfer points",t=>{
+ const {store,games}=setup(t);games.challenge({guildId:'g',userId:'a',opponentId:'b',stake:10,context:ctx('d')});
+ assert.throws(()=>games.accept({guildId:'g',userId:'b',challengeId:'d',context:ctx('late',121000,'b')}),/pending/i);
+ assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+});
+
+test('financial pause blocks new point games',t=>{
+ const {store,games}=setup(t);store.setMetadata('paused','1');
+ assert.throws(()=>games.coinflip({userId:'a',pick:'heads',stake:10,context:ctx('pause')}),/paused/i);
+ assert.equal(store.account('a'),undefined);
+});
+
+test('roulette cooldown survives a new service and is isolated per server',t=>{
+ const {store,games}=setup(t,()=>0);
+ games.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('first')});
+ const restarted=new PointGames(store,{randomInt:()=>0});
+ assert.throws(()=>restarted.roulette({guildId:'g',userId:'b',pick:'red',stake:1,context:ctx('second',1001,'b')}),/cooldown/i);
+ assert.equal(restarted.roulette({guildId:'other',userId:'b',pick:'0',stake:1,context:ctx('third',1001,'b')}).returned,36);
+ assert.equal(store.assertAccounting(),true);
+});
+test('a failed roulette wager does not start the cooldown',t=>{
+ const {store,games}=setup(t,()=>1);
+ store.adjust('a',-1000,{...ctx('empty'),reason:'test'});
+ assert.throws(()=>games.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('fail')}),/funds/i);
+ assert.equal(games.roulette({guildId:'g',userId:'b',pick:'red',stake:1,context:ctx('works',1000,'b')}).returned,2);
+ assert.equal(store.assertAccounting(),true);
+});
+
