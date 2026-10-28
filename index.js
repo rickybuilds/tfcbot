@@ -380,7 +380,7 @@ registry.set("pred", (message, args) => predictions.handleAdminCommand(message, 
 require("./predictions/bank").register(registry,predictions);
 if (config.pointGamesEnabled) {
   const { PointGames } = require("./predictions/games");
-  require("./predictions/gameCommands").register(registry, new PointGames(predictions.store, { cooldownMs: config.rouletteCooldownSeconds * 1000 }));
+  require("./predictions/gameCommands").register(registry, new PointGames(predictions.store));
 }
 client.on("interactionCreate", interaction => {
   if (String(interaction.customId || "").startsWith("pred:")) {

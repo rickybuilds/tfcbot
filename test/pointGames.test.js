@@ -4,12 +4,12 @@ const {PredictionStore}=require("../predictions/store");
 const {PointGames}=require("../predictions/games");
 function setup(t,number=()=>0){const db=new Database(":memory:");t.after(()=>db.close());const store=new PredictionStore(db);return {store,games:new PointGames(store,{randomInt:number})};}
 const ctx=(id,now=1000,actorId="a")=>({operationKey:id,actorId,now});
-test("roulette pays standard single-zero bets and applies cooldown per player",t=>{
+test("roulette pays standard single-zero bets and allows immediate repeat spins",t=>{
  const {store,games}=setup(t,()=>1);
  const first=games.roulette({guildId:"g",userId:"a",pick:"red",stake:100,context:ctx("one")});
  assert.equal(first.number,1);assert.equal(first.returned,200);assert.equal(store.account("a").balance,1100);
  assert.deepEqual(games.roulette({guildId:"g",userId:"a",pick:"red",stake:100,context:ctx("one")}),first);
- assert.throws(()=>games.roulette({guildId:"g",userId:"a",pick:"black",stake:10,context:ctx("two",120999)}),/cooldown/i);
+ assert.equal(games.roulette({guildId:"g",userId:"a",pick:"black",stake:10,context:ctx("two",1000)}).returned,0);
  games.roulette({guildId:"g",userId:"b",pick:"1",stake:10,context:ctx("three",1001,"b")});
  assert.equal(store.account("b").balance,1350);
  assert.equal(games.roulette({guildId:"g",userId:"a",pick:"1",stake:1,context:ctx("four",121000)}).returned,36);
@@ -52,15 +52,15 @@ test('financial pause blocks new point games',t=>{
  assert.equal(store.account('a'),undefined);
 });
 
-test('roulette cooldown survives a new service and is isolated per server',t=>{
+test('roulette remains available after restarting the service',t=>{
  const {store,games}=setup(t,()=>0);
  games.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('first')});
  const restarted=new PointGames(store,{randomInt:()=>0});
- assert.throws(()=>restarted.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('second',1001)}),/cooldown/i);
+ assert.equal(restarted.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('second',1001)}).returned,0);
  assert.equal(restarted.roulette({guildId:'other',userId:'a',pick:'0',stake:1,context:ctx('third',1001)}).returned,36);
  assert.equal(store.assertAccounting(),true);
 });
-test('a failed roulette wager does not start the cooldown',t=>{
+test('a failed roulette wager does not block another player',t=>{
  const {store,games}=setup(t,()=>1);
  store.adjust('a',-1000,{...ctx('empty'),reason:'test'});
  assert.throws(()=>games.roulette({guildId:'g',userId:'a',pick:'red',stake:1,context:ctx('fail')}),/funds/i);

@@ -6,7 +6,7 @@ function register(registry,games,{clock=Date.now}={}){
   if(!m.guild)return;
   try{await fn(m,args,{operationKey:`game:${m.id}`,actorId:String(m.author.id),now:clock()});}
   catch(e){
-   const known=/^(Stake must|Points must|Choose |Roulette cooldown:|Insufficient funds|Only the challenged opponent|Duel is no longer pending|Both players need|Point games are paused)/.test(e.message || '');
+   const known=/^(Stake must|Points must|Choose |Insufficient funds|Only the challenged opponent|Duel is no longer pending|Both players need|Point games are paused)/.test(e.message || '');
    await respond(m,known?`Unable to play: ${e.message}`:'Unable to play right now. Please try again later.');
   }
  };
