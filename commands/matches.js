@@ -105,7 +105,7 @@ const PLAYER_GAME_INDICATORS = Object.freeze({
   tie: { emoji: "🟡" },
   tie_mvp: { emoji: "😐" },
   loss: { emoji: "🔴" },
-  loss_mvp: { emoji: "😢" },
+  loss_mvp: { emoji: "😡" },
 });
 
 function parseIds(value) {
