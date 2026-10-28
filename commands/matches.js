@@ -101,7 +101,7 @@ function getLastMatchesLimit(args) {
 
 const PLAYER_GAME_INDICATORS = Object.freeze({
   win: { emoji: "🟢" },
-  win_mvp: { emoji: "<:693061greencrown:1565015896441884782>" },
+  win_mvp: { emoji: "<a:475612greencrown:1565016552082903101>" },
   tie: { emoji: "🟡" },
   tie_mvp: { emoji: "😐" },
   loss: { emoji: "🔴" },
