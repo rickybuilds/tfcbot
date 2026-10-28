@@ -10,6 +10,15 @@ class PointGames {
  }
  stake(n){if(!Number.isSafeInteger(n)||n<1||n>this.maxStake)throw new Error(`Stake must be a whole number from 1 to ${this.maxStake}`);}
  checkPause(){if(this.store.metadata('paused','0')==='1')throw new Error('Point games are paused');}
+ give({userId,recipientId,points,context:ctx}){
+  if(!Number.isSafeInteger(points)||points<1)throw new Error('Points must be a positive whole number');
+  if(String(userId)===String(recipientId))throw new Error('Choose another player');
+  return this.store.operation(ctx,`give:${userId}:${recipientId}:${points}`,()=>{
+   this.store.change(userId,-points,ctx,{kind:'gift_sent',entryKey:'gift-sent',metadata:{recipientId:String(recipientId)}});
+   this.store.change(recipientId,points,ctx,{kind:'gift_received',entryKey:'gift-received',metadata:{senderId:String(userId)}});
+   return {senderId:String(userId),recipientId:String(recipientId),points};
+  });
+ }
  play(user,stake,returned,ctx,game,metadata){
   this.store.change(user,-stake,ctx,{kind:"game_stake",entryKey:"stake",metadata:{game,...metadata}});
   if(returned)this.store.change(user,returned,ctx,{kind:"game_payout",entryKey:"payout",metadata:{game,...metadata}});

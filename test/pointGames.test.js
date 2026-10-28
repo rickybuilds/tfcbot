@@ -66,3 +66,25 @@ test('a failed roulette wager does not start the cooldown',t=>{
  assert.equal(store.assertAccounting(),true);
 });
 
+
+test('point gifts transfer available funds exactly once and preserve accounting',t=>{
+ const {store,games}=setup(t);store.ensureAccount('b',ctx('setup'));
+ const input={userId:'a',recipientId:'b',points:300,context:ctx('gift')};
+ const result=games.give(input);assert.equal(result.points,300);
+ assert.deepEqual(games.give(input),result);
+ assert.equal(store.account('a').balance,700);assert.equal(store.account('b').balance,1300);
+ assert.equal(store.assertAccounting(),true);
+});
+test('point gifts reject invalid amounts, self transfers, and insufficient funds without changes',t=>{
+ const {store,games}=setup(t);store.ensureAccount('a',ctx('setup'));
+ for(const points of [0,-1,1.5,Number.MAX_SAFE_INTEGER+1,1001])assert.throws(()=>games.give({userId:'a',recipientId:'b',points,context:ctx(`gift:${points}`)}));
+ assert.throws(()=>games.give({userId:'a',recipientId:'a',points:1,context:ctx('self')}),/another player/i);
+ assert.equal(store.account('a').balance,1000);assert.equal(store.account('b'),undefined);assert.equal(store.assertAccounting(),true);
+});
+test('give command sends points to a mentioned player',async t=>{
+ const {store,games}=setup(t),{register}=require('../predictions/gameCommands');const registry=new Map(),messages=[];
+ register(registry,games,{clock:()=>1000});
+ const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}};
+ await registry.get('give')(msg,['<@2>','50']);assert.equal(store.account('1').balance,950);assert.equal(store.account('2').balance,1050);
+ assert.match(messages[0].content,/50 points/i);assert.doesNotMatch(messages[0].content,/balance/i);
+});

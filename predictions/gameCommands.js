@@ -6,10 +6,17 @@ function register(registry,games,{clock=Date.now}={}){
   if(!m.guild)return;
   try{await fn(m,args,{operationKey:`game:${m.id}`,actorId:String(m.author.id),now:clock()});}
   catch(e){
-   const known=/^(Stake must|Choose |Roulette cooldown:|Insufficient funds|Only the challenged opponent|Duel is no longer pending|Both players need|Point games are paused)/.test(e.message || '');
+   const known=/^(Stake must|Points must|Choose |Roulette cooldown:|Insufficient funds|Only the challenged opponent|Duel is no longer pending|Both players need|Point games are paused)/.test(e.message || '');
    await respond(m,known?`Unable to play: ${e.message}`:'Unable to play right now. Please try again later.');
   }
  };
+ registry.set('give',wrap(async(m,args,context)=>{
+  const recipient=m.mentions?.users?.first();
+  const mention=/^<@!?(\d+)>$/.exec(args[0]||'');
+  if(args.length!==2||!recipient||recipient.bot||!mention||mention[1]!==String(recipient.id))return respond(m,'Usage: !give @player <points>');
+  const r=games.give({userId:m.author.id,recipientId:recipient.id,points:amount(args[1]),context});
+  await respond(m,`🎁 <@${r.senderId}> gave <@${r.recipientId}> **${r.points} points**.`);
+ }));
  registry.set('roulette',wrap(async(m,args,context)=>{
   if(args.length!==2)return respond(m,'Usage: !roulette <red|black|odd|even|low|high|0-36> <points>');
   const r=games.roulette({guildId:m.guild.id,userId:m.author.id,pick:args[0],stake:amount(args[1]),context});
