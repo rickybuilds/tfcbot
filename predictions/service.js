@@ -2,7 +2,7 @@
 const {randomUUID,createHash}=require("node:crypto");
 const {PredictionStore,validSnapshot}=require("./store");
 const {PresenceTracker,rosterPresence,parseStatus,normalizeSteamId}=require("./presence");
-const {sameMap,officialTermsMismatch,acceptedMapChange}=require("./official");
+const {sameMap,officialTermsMismatch,acceptedMapChange,acceptedTeamChange}=require("./official");
 const recoverableReviews=new Set(["unexpected server map","server monitoring unavailable","restart: connection/terms history requires owner review","completed official report awaiting settlement"]);
 function termsKey(s) {
   return JSON.stringify([s.blueIds.slice().sort(),s.redIds.slice().sort(),(s.offenseIds||[]).slice().sort(),s.serverKey,s.mapName,s.team1Starts]);
@@ -217,7 +217,7 @@ class PredictionsService {
       this.observeOfficialResult({matchId,outcome,context:observed});
       const current=this.store.market(m.id),now=this.clock();
       changed=current.state!==m.state||current.reason!==m.reason||current.observed_result!==m.observed_result;
-      const mismatch=officialTermsMismatch(row,current.snapshot,{allowMapChange:current.settlement_version>0&&acceptedMapChange(this.db,current,row)});
+      const mismatch=officialTermsMismatch(row,current.snapshot,{allowMapChange:current.settlement_version>0&&acceptedMapChange(this.db,current,row),allowTeamChange:acceptedTeamChange(this.db,current,row)});
       if(mismatch){
         const reason=`official ${mismatch} differ from frozen prediction terms`;
         if(current.state!=="review_required"||current.reason!==reason){this.store.markReview(m.id,reason);changed=true;}

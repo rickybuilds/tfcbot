@@ -114,11 +114,11 @@ class PredictionStore {
     });
   }
   settleMarket({marketId,outcome,context:ctx}) {return this.settle(marketId,outcome,ctx,false);}
-  settleReviewedMarket({marketId,outcome,context:ctx,mapChange=null}) {
+  settleReviewedMarket({marketId,outcome,context:ctx,mapChange=null,teamChange=null}) {
     return this.operation(ctx,`owner-settle:${marketId}:${outcome}`,()=>{
       const m=this.market(marketId);
       if(!ctx.reason||!m||m.state!=="review_required"||m.settlement_version)throw new Error("Owner settlement requires a reason and an unsettled reviewed game");
-      this.entry(ctx,{kind:"owner_settlement",marketId,entryKey:"owner-settlement",metadata:{outcome,previousState:m.state,reviewReason:m.reason,originalDeadline:m.closes_at,revision:m.revision,snapshot:m.snapshot,mapChange}});
+      this.entry(ctx,{kind:"owner_settlement",marketId,entryKey:"owner-settlement",metadata:{outcome,previousState:m.state,reviewReason:m.reason,originalDeadline:m.closes_at,revision:m.revision,snapshot:m.snapshot,mapChange,teamChange}});
       this.db.prepare("UPDATE prediction_markets SET state='closed',closed_at=COALESCE(closed_at,?),reason=NULL WHERE id=?").run(ctx.now,marketId);
       return this.settleMarket({marketId,outcome,context:{...ctx,operationKey:`${ctx.operationKey}:payout`}});
     });

@@ -16,6 +16,16 @@ function setup(t){
  const confirm=async(payload,user='owner')=>{const i={id:`click:${++id}`,customId:payload.components[0].components[0].data.custom_id,user:{id:user},reply:async function(p){this.response=p;}};await s.handleInteraction(i);return i.response;};
  return {s,db,m,message,messages,publicMessages,preview,confirm,time:n=>now=n};
 }
+test('owner can accept a specific roster mismatch once and reconciliation keeps settlement',async t=>{
+ const {s,db,m,message,messages,confirm}=setup(t);
+ db.prepare('UPDATE matches SET blue_ids=?,red_ids=?').run(JSON.stringify(['r1','b2','b3','b4']),JSON.stringify(['b1','r2','r3','r4']));
+ await s.handleAdminCommand(message,['settle','DH96AX','red','--accept-team-change','Owner accepts frozen bets']);
+ const p=messages.at(-1);assert.ok(p.components);assert.match(p.content,/team|roster/i);
+ await confirm(p);assert.equal(s.store.market(m.id).state,'settled');assert.equal(s.store.account('a').balance,1070);
+ s.onMatchReported({matchId:'DH96AX'});assert.equal(s.store.market(m.id).state,'settled');assert.equal(s.store.market(m.id).settlement_version,1);
+ db.prepare('UPDATE matches SET blue_ids=?').run(JSON.stringify(['other','b2','b3','b4']));s.onMatchReported({matchId:'DH96AX'});
+ assert.equal(s.store.market(m.id).state,'review_required');assert.equal(s.store.assertAccounting(),true);
+});
 test('owner settles a reviewed completed game with missing deadline once, preserving payouts and audit',async t=>{
  const {s,db,m,preview,confirm,publicMessages}=setup(t);const p=await preview();assert.ok(p.components);assert.match(p.content,/400/);assert.match(p.content,/unexpected server map/);assert.match(p.content,/deadline|window/i);
  assert.equal(s.store.account('a').balance,900);await confirm(p);assert.equal(s.store.latest('DH96AX').state,'settled');assert.equal(s.store.latest('DH96AX').result,'red');assert.equal(s.store.latest('DH96AX').closes_at,null);
