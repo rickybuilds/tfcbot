@@ -5,7 +5,7 @@ class PointGames {
  constructor(store,{randomInt=crypto.randomInt,cooldownMs=120000,maxStake=100}={}){
   if(!Number.isSafeInteger(cooldownMs)||cooldownMs<0||!Number.isSafeInteger(maxStake)||maxStake<1)throw new Error("Invalid games configuration");
   this.store=store;this.randomInt=randomInt;this.cooldownMs=cooldownMs;this.maxStake=maxStake;
-  store.db.exec(`CREATE TABLE IF NOT EXISTS point_game_cooldowns (guild_id TEXT PRIMARY KEY, played_at INTEGER NOT NULL);
+  store.db.exec(`CREATE TABLE IF NOT EXISTS point_game_player_cooldowns (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, played_at INTEGER NOT NULL, PRIMARY KEY (guild_id,user_id));
    CREATE TABLE IF NOT EXISTS point_game_duels (id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,challenger TEXT NOT NULL,opponent TEXT NOT NULL,stake INTEGER NOT NULL,expires_at INTEGER NOT NULL,status TEXT NOT NULL);`);
  }
  stake(n){if(!Number.isSafeInteger(n)||n<1||n>this.maxStake)throw new Error(`Stake must be a whole number from 1 to ${this.maxStake}`);}
@@ -32,13 +32,13 @@ class PointGames {
   if(!numberPick&&!['red','black','odd','even','low','high'].includes(pick))throw new Error("Choose red, black, odd, even, low, high, or a number from 0 to 36");
   return this.store.operation(ctx,`roulette:${guildId}:${userId}:${pick}:${stake}`,()=>{
    this.checkPause();
-   const row=this.store.db.prepare("SELECT played_at FROM point_game_cooldowns WHERE guild_id=?").get(String(guildId));
+   const row=this.store.db.prepare("SELECT played_at FROM point_game_player_cooldowns WHERE guild_id=? AND user_id=?").get(String(guildId),String(userId));
    if(row&&ctx.now<row.played_at+this.cooldownMs)throw new Error(`Roulette cooldown: try again in ${Math.ceil((row.played_at+this.cooldownMs-ctx.now)/1000)} seconds`);
    const number=this.randomInt(37),color=number===0?'green':RED.has(number)?'red':'black';
    const won=numberPick?number===Number(pick):number!==0&&(pick===color||(pick==='odd'&&number%2===1)||(pick==='even'&&number%2===0)||(pick==='low'&&number<=18)||(pick==='high'&&number>=19));
    const returned=won?stake*(numberPick?36:2):0;
    this.play(userId,stake,returned,ctx,'roulette',{pick,number,color});
-   this.store.db.prepare("INSERT INTO point_game_cooldowns VALUES (?,?) ON CONFLICT(guild_id) DO UPDATE SET played_at=excluded.played_at").run(String(guildId),ctx.now);
+   this.store.db.prepare("INSERT INTO point_game_player_cooldowns VALUES (?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET played_at=excluded.played_at").run(String(guildId),String(userId),ctx.now);
    return {number,color,pick,stake,returned};
   });
  }
