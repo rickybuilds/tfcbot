@@ -70,5 +70,14 @@ class PointGames {
    return {winner,loser,stake:d.stake};
   });
  }
+ decline({guildId,userId,challengeId,context:ctx}){
+  return this.store.operation(ctx,`duel-decline:${guildId}:${userId}:${challengeId}`,()=>{
+   const d=this.store.db.prepare('SELECT * FROM point_game_duels WHERE id=?').get(challengeId);
+   if(!d||d.guild_id!==String(guildId)||d.status!=='pending'||ctx.now>=d.expires_at)throw new Error('Duel is no longer pending');
+   if(d.opponent!==String(userId))throw new Error('Only the challenged opponent can decline');
+   this.store.db.prepare("UPDATE point_game_duels SET status='declined' WHERE id=?").run(challengeId);
+   return {challenger:d.challenger,opponent:d.opponent};
+  });
+ }
 }
 module.exports={PointGames};

@@ -36,20 +36,21 @@ function register(registry,games,{clock=Date.now}={}){
   const opponent=m.mentions?.users?.first();
   if(args.length!==2||!opponent||opponent.bot)return respond(m,'Usage: !duel @player <points>');
   const r=games.challenge({guildId:m.guild.id,userId:m.author.id,opponentId:opponent.id,stake:amount(args[1]),context});
-  await m.channel.send({content:`⚔️ <@${m.author.id}> challenged <@${opponent.id}> for ${amount(args[1])} points. The challenge expires <t:${Math.floor(r.expiresAt/1000)}:R>. Both players need enough points when accepted.`,allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:3,label:'Accept Duel',custom_id:`point-duel:accept:${m.id}`}]}]});
+  await m.channel.send({content:`⚔️ <@${m.author.id}> challenged <@${opponent.id}> for ${amount(args[1])} points. The challenge expires <t:${Math.floor(r.expiresAt/1000)}:R>. Both players need enough points when accepted.`,allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:3,label:'Accept Duel',custom_id:`point-duel:accept:${m.id}`},{type:2,style:4,label:'Decline Duel',custom_id:`point-duel:decline:${m.id}`}]}]});
  }));
  return async function handleInteraction(i){
-  const match=/^point-duel:accept:(\d+)$/.exec(String(i.customId||''));
+  const match=/^point-duel:(accept|decline):(\d+)$/.exec(String(i.customId||''));
   if(!match||!i.isButton()||!i.guildId)return false;
   let result;
   try{
-   result=games.accept({guildId:i.guildId,userId:i.user.id,challengeId:`game:${match[1]}`,context:{operationKey:`duel-button:${i.id}`,actorId:String(i.user.id),now:clock()}});
+   result=games[match[1]]({guildId:i.guildId,userId:i.user.id,challengeId:`game:${match[2]}`,context:{operationKey:`duel-button:${i.id}`,actorId:String(i.user.id),now:clock()}});
   }catch(e){
    const known=/^(Only the challenged opponent|Duel is no longer pending|Both players need|Point games are paused)/.test(e.message||'');
-   await i.reply({content:known?e.message:'Unable to accept this duel right now. Please try again later.',ephemeral:true});
+   await i.reply({content:known?e.message:'Unable to respond to this duel right now. Please try again later.',ephemeral:true});
    return true;
   }
-  await i.update({content:`⚔️ <@${result.winner}> won ${result.stake} points from <@${result.loser}>!`,components:[],allowedMentions:{parse:[]}});
+  const content=match[1]==='decline'?`⚔️ <@${result.opponent}> declined <@${result.challenger}>'s duel.`:`⚔️ <@${result.winner}> won ${result.stake} points from <@${result.loser}>!`;
+  await i.update({content,components:[],allowedMentions:{parse:[]}});
   return true;
  };
 }

@@ -111,3 +111,16 @@ test('expired duel button cannot settle a challenge',async t=>{
  now=121000;await handleInteraction({id:'202',customId:messages[0].components[0].components[0].custom_id,guildId:'g',user:{id:'2'},isButton:()=>true,reply:async p=>{reply=p}});
  assert.match(reply.content,/no longer pending/i);assert.equal(store.account('1').balance,1000);assert.equal(store.assertAccounting(),true);
 });
+
+test('only challenged player can decline a duel without changing points',async t=>{
+ const {store,games}=setup(t),{register}=require('../predictions/gameCommands');const registry=new Map(),messages=[];
+ const handle=register(registry,games,{clock:()=>1000});
+ await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}},['<@2>','10']);
+ const button=messages[0].components[0].components.find(b=>b.label==='Decline Duel');assert.ok(button);
+ let reply,update;const i={id:'201',customId:button.custom_id,guildId:'g',user:{id:'3'},isButton:()=>true,reply:async p=>{reply=p},update:async p=>{update=p}};
+ await handle(i);assert.match(reply.content,/opponent/i);assert.equal(reply.ephemeral,true);
+ i.id='202';i.user.id='2';await handle(i);assert.match(update.content,/declined/i);assert.deepEqual(update.components,[]);
+ assert.equal(store.account('1').balance,1000);assert.equal(store.account('2'),undefined);
+ assert.throws(()=>games.accept({guildId:'g',userId:'2',challengeId:'game:123',context:ctx('later',1001,'2')}),/no longer pending/i);
+ assert.equal(store.assertAccounting(),true);
+});
