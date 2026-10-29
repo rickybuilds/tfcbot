@@ -89,3 +89,14 @@ test('repeated owner corrections pay only extra entitlements and stay private',a
  }
  assert.equal(s.store.account('u').balance,1050);assert.equal(s.store.account('v').balance,1050);assert.equal(s.store.houseFunding(),260);assert.equal(publicMessages.length,0);assert.equal(s.store.assertAccounting(),true);
 });
+
+test('house report is private, owner-only, and totals prediction ledger entries without point games',async t=>{
+ const {s,m,message,privateMessages,publicMessages,db}=setup(t);
+ const add=(kind,amount,marketId,key)=>s.store.entry({...s.context('test'),operationKey:key},{kind,amount,marketId,entryKey:'house'});
+ add('house_collection',300,m.id,'collection');add('house_funding',125,m.id,'funding');add('house_funding',25,m.id,'correction');add('house_collection',999,null,'game');
+ const before=db.prepare('SELECT COUNT(*) n FROM prediction_transactions').get().n;
+ message.author.id='other';await s.handleAdminCommand(message,['house']);assert.match(privateMessages.pop().content,/owner/i);
+ message.author.id='owner';s.config.predictionsEnabled=false;await s.handleAdminCommand(message,['house']);
+ const output=privateMessages.pop().content;assert.match(output,/collected.*300/i);assert.match(output,/funded.*150/i);assert.match(output,/net.*\+150/i);assert.doesNotMatch(output,/999/);
+ assert.equal(publicMessages.length,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM prediction_transactions').get().n,before);
+});

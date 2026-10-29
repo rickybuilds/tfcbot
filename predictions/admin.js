@@ -49,7 +49,7 @@ function signature(service,p) {
 function officialIfAvailable(service,id) {return service.db.prepare("SELECT 1 FROM sqlite_master WHERE name='matches'").get()?official(service,id):null;}
 function parse(service,args) {
   const [action,target,third,...rest]=args;
-  if(!["void","settle","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred unresolved/status/audit/void/settle/correct/adjust/pause/resume/retain");
+  if(!["void","settle","correct","adjust","pause","resume","retain"].includes(action))throw new Error("Use !pred house/unresolved/status/audit/void/settle/correct/adjust/pause/resume/retain");
   const p={action,target};
   if(action==="adjust"){
     p.target=String(target||"").replace(/^<@!?(\d+)>$/,"$1");
@@ -75,6 +75,14 @@ async function handleAdminCommand(service,message,args=[]) {
   try{
     assertOwner(service,message.author.id);
     const [action,target]=args;
+    if(action==="house"){
+      let collected=0n,funded=0n;
+      for(const row of service.db.prepare("SELECT kind,amount FROM prediction_transactions WHERE market_id IS NOT NULL AND kind IN ('house_collection','house_funding')").safeIntegers().iterate()){
+        if(row.kind==="house_collection")collected+=row.amount;else funded+=row.amount;
+      }
+      const net=collected-funded,format=n=>n.toLocaleString("en-US");
+      await sendPrivate(message,{content:`Prediction house results (points)\nCollected: ${format(collected)}\nFunded: ${format(funded)}\nNet: ${net>=0n?"+":""}${format(net)}\nIncludes player rewards and corrections; excludes point games. This is a ledger total, not a spendable balance.`});return;
+    }
     if(action==="unresolved"){
       const games=service.store.markets().filter(m=>!["settled","void"].includes(m.state));
       if(!games.length){await sendPrivate(message,{content:"No unresolved prediction games."});return;}

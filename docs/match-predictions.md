@@ -67,6 +67,7 @@ When `PREDICTIONS_OWNER_ID` is configured, each new settlement and correction qu
 | `!pred unresolved` | Privately list open, countdown, closed/awaiting-result and review-required games, with IDs, server, revision, locked points, deadline and review reason. Long lists arrive as a text attachment; an empty list confirms there are none. Works with predictions disabled. |
 | `!pred status <matchId>` | Inspect current state, revision, phase, deadline and review reason. |
 | `!pred audit <matchId\|userId>` | Download private transaction history and market details. |
+| `!pred house` | Privately show all-time prediction house collections, funding and net points. Includes player rewards and corrections; excludes point games. This is a ledger total, not a spendable balance. |
 | `!pred void <matchId> <reason>` | Refund and void an unsettled or reviewed market. |
 | `!pred settle <matchId> <blue\|red\|tie> <reason>` | Settle an initially unpaid reviewed game matching its completed official result, teams and map. Private confirmation explicitly accepts the frozen bets despite uncertain closure history. |
 | `!pred correct <matchId> <blue\|red\|tie> <reason>` | Apply a house-funded correction matching the completed official report. Fix the report first. |
