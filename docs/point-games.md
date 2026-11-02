@@ -2,6 +2,8 @@
 
 Point games use the same available points as match predictions; they do not affect Elo or prediction stake progression. Commands and results are public in the server, including wager and player names; account balances remain private through `!bank`. Stakes are whole numbers from 1 to 100 points.
 
+Set `CASINO_CHANNEL_ID` to the Discord channel ID where `!roulette`, `!coinflip` and `!duel` should work. These commands are silently ignored in other channels and when the setting is missing. `!give`, `!bank`, and match prediction bets are unaffected. Duel buttons on already-posted challenges continue working until they expire.
+
 - `!roulette <red|black|odd|even|low|high|0-36> <points>` spins a single-zero wheel. Even-money selections return twice the stake on a win; an exact number returns 36 times the stake. Zero is green and loses every even-money bet. Players can spin again immediately.
 - `!coinflip <heads|tails> <points>` returns twice the stake for a correct choice.
 - `!duel @player <points>` offers an equal-stake challenge. Only the named player can use the **Accept Duel** or **Decline Duel** buttons. Declining closes the challenge without moving points. Challenges expire after two minutes, do not reserve points, and require both players to have sufficient available points on acceptance. The winner is selected at random and gains the opponent's stake. Older challenges can still be accepted with `!duel accept <challenge message ID>` until they expire.

@@ -34,8 +34,8 @@ test("duel requires targeted acceptance, checks both balances and pays only once
 
 test("Discord games accept commands and display roulette result without exposing bank balance",async t=>{
  const {store,games}=setup(t,()=>0),{register}=require('../predictions/gameCommands');
- const registry=new Map(),messages=[];register(registry,games,{clock:()=>1000});
- const msg={id:'1',guild:{id:'g'},author:{id:'a'},channel:{send:async p=>messages.push(p)}};
+ const registry=new Map(),messages=[];register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
+ const msg={id:'1',guild:{id:'g'},author:{id:'a'},channel:{id:'casino',send:async p=>messages.push(p)}};
  await registry.get('roulette')(msg,['red','10']);
  assert.match(messages[0].content,/green/i);assert.match(messages[0].content,/0 points returned/i);
  assert.doesNotMatch(messages[0].content,/balance/i);assert.equal(store.account('a').balance,990);
@@ -85,16 +85,16 @@ test('point gifts reject invalid amounts, self transfers, and insufficient funds
 });
 test('give command sends points to a mentioned player',async t=>{
  const {store,games}=setup(t),{register}=require('../predictions/gameCommands');const registry=new Map(),messages=[];
- register(registry,games,{clock:()=>1000});
- const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}};
+ register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
+ const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{id:'casino',send:async p=>messages.push(p)}};
  await registry.get('give')(msg,['<@2>','50']);assert.equal(store.account('1').balance,950);assert.equal(store.account('2').balance,1050);
  assert.match(messages[0].content,/50 points/i);assert.doesNotMatch(messages[0].content,/balance/i);
 });
 
 test('duel challenge presents an accept button and only the intended player can use it',async t=>{
  const {store,games}=setup(t,()=>0),{register}=require('../predictions/gameCommands');
- const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>1000});
- const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}};
+ const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
+ const msg={id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{id:'casino',send:async p=>messages.push(p)}};
  await registry.get('duel')(msg,['<@2>','10']);
  const button=messages[0].components[0].components[0];assert.equal(button.label,'Accept Duel');
  let reply,update;
@@ -106,21 +106,46 @@ test('duel challenge presents an accept button and only the intended player can 
 });
 test('expired duel button cannot settle a challenge',async t=>{
  const {store,games}=setup(t),{register}=require('../predictions/gameCommands');let now=1000,reply;
- const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>now});
- await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}},['<@2>','10']);
+ const registry=new Map(),messages=[];const handleInteraction=register(registry,games,{clock:()=>now,casinoChannelId:'casino'});
+ await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{id:'casino',send:async p=>messages.push(p)}},['<@2>','10']);
  now=121000;await handleInteraction({id:'202',customId:messages[0].components[0].components[0].custom_id,guildId:'g',user:{id:'2'},isButton:()=>true,reply:async p=>{reply=p}});
  assert.match(reply.content,/no longer pending/i);assert.equal(store.account('1').balance,1000);assert.equal(store.assertAccounting(),true);
 });
 
 test('only challenged player can decline a duel without changing points',async t=>{
  const {store,games}=setup(t),{register}=require('../predictions/gameCommands');const registry=new Map(),messages=[];
- const handle=register(registry,games,{clock:()=>1000});
- await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{send:async p=>messages.push(p)}},['<@2>','10']);
+ const handle=register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
+ await registry.get('duel')({id:'123',guild:{id:'g'},author:{id:'1'},mentions:{users:{first:()=>({id:'2',bot:false})}},channel:{id:'casino',send:async p=>messages.push(p)}},['<@2>','10']);
  const button=messages[0].components[0].components.find(b=>b.label==='Decline Duel');assert.ok(button);
  let reply,update;const i={id:'201',customId:button.custom_id,guildId:'g',user:{id:'3'},isButton:()=>true,reply:async p=>{reply=p},update:async p=>{update=p}};
  await handle(i);assert.match(reply.content,/opponent/i);assert.equal(reply.ephemeral,true);
  i.id='202';i.user.id='2';await handle(i);assert.match(update.content,/declined/i);assert.deepEqual(update.components,[]);
  assert.equal(store.account('1').balance,1000);assert.equal(store.account('2'),undefined);
  assert.throws(()=>games.accept({guildId:'g',userId:'2',challengeId:'game:123',context:ctx('later',1001,'2')}),/no longer pending/i);
+ assert.equal(store.assertAccounting(),true);
+});
+
+test('casino commands are ignored outside the configured channel and when configuration is missing',async t=>{
+ const {store,games}=setup(t),{register}=require('../predictions/gameCommands');
+ const outputs=[],registry=new Map();register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
+ const msg={id:'801',guild:{id:'g'},author:{id:'1'},channel:{id:'elsewhere',send:async p=>outputs.push(p)},mentions:{users:{first:()=>({id:'2',bot:false})}}};
+ for(const [name,args] of [['roulette',['red','10']],['coinflip',['heads','10']],['duel',['<@2>','10']],['duel',['accept','123']]])await registry.get(name)(msg,args);
+ assert.equal(outputs.length,0);assert.equal(store.account('1'),undefined);
+ msg.channel.id='casino';await registry.get('roulette')(msg,['red','10']);assert.equal(outputs.length,1);assert.equal(store.account('1').balance,990);
+ const unconfigured=new Map();register(unconfigured,games,{clock:()=>1000});msg.id='802';await unconfigured.get('coinflip')(msg,['heads','10']);assert.equal(outputs.length,1);assert.equal(store.account('1').balance,990);
+});
+test('give remains available outside the casino channel',async t=>{
+ const {store,games}=setup(t),{register}=require('../predictions/gameCommands');const registry=new Map(),outputs=[];
+ register(registry,games,{casinoChannelId:'casino',clock:()=>1000});
+ const msg={id:'803',guild:{id:'g'},author:{id:'1'},channel:{id:'elsewhere',send:async p=>outputs.push(p)},mentions:{users:{first:()=>({id:'2',bot:false})}}};
+ await registry.get('give')(msg,['<@2>','10']);assert.equal(outputs.length,1);assert.equal(store.account('1').balance,990);assert.equal(store.account('2').balance,1010);
+});
+
+test('each casino game works in the configured channel',async t=>{
+ const {store,games}=setup(t,()=>0),{register}=require('../predictions/gameCommands');const registry=new Map(),outputs=[];
+ register(registry,games,{casinoChannelId:'casino',clock:()=>1000});
+ const msg={id:'901',guild:{id:'g'},author:{id:'1'},channel:{id:'casino',send:async p=>outputs.push(p)},mentions:{users:{first:()=>({id:'2',bot:false})}}};
+ await registry.get('roulette')(msg,['0','10']);msg.id='902';await registry.get('coinflip')(msg,['heads','10']);msg.id='903';await registry.get('duel')(msg,['<@2>','10']);
+ assert.equal(outputs.length,3);assert.match(outputs[0].content,/wheel/i);assert.match(outputs[1].content,/heads/i);assert.equal(outputs[2].components[0].components.length,2);
  assert.equal(store.assertAccounting(),true);
 });

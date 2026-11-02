@@ -7,6 +7,7 @@ module.exports = {
 
   // Channels
   channels: {
+    casino: String(process.env.CASINO_CHANNEL_ID || "").trim(),
     odds: process.env.ODDS_CHANNEL_ID,
     pickup: process.env.PICKUP_CHANNEL_ID,
     clips: process.env.PICKUP_CLIPS_CHANNEL_ID,

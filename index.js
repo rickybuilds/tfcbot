@@ -380,7 +380,7 @@ registry.set("pred", (message, args) => predictions.handleAdminCommand(message, 
 require("./predictions/bank").register(registry,predictions);
 if (config.pointGamesEnabled) {
   const { PointGames } = require("./predictions/games");
-  const handlePointGameInteraction = require("./predictions/gameCommands").register(registry, new PointGames(predictions.store));
+  const handlePointGameInteraction = require("./predictions/gameCommands").register(registry, new PointGames(predictions.store), { casinoChannelId: config.channels.casino });
   client.on("interactionCreate", interaction => {
     handlePointGameInteraction(interaction).catch(() => console.error("[point games] interaction failure"));
   });
