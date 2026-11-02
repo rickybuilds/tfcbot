@@ -10,3 +10,5 @@ Set `CASINO_CHANNEL_ID` to the Discord channel ID where `!roulette`, `!coinflip`
 - `!give @player <points>` transfers a positive whole number of available points to another player. There is no 100-point game stake limit for gifts; the sender must have enough available points. The transfer is public, but balances remain private. A new recipient receives the usual one-time 1,000-point account grant as well as the gift.
 
 Set `POINT_GAMES_ENABLED=1` to enable games independently, or `POINT_GAMES_ENABLED=0` to disable them. If unset, it follows `PREDICTIONS_ENABLED` (which defaults off). The existing `!pred pause` also stops new game plays and duel acceptances until resumed. Point transfers, payouts, house funding and collections are recorded atomically in the prediction ledger. Operation IDs prevent repeat processing of the same Discord message.
+
+The prediction owner can use `!pred house` for a private all-time breakdown of roulette and coin-flip house collections, funding and net points. Duels and gifts are excluded because their points move between players rather than to or from the house.
