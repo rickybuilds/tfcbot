@@ -41,6 +41,7 @@ class PredictionsService {
   }
   onMatchFinalized(snapshot,context=this.context("finalize")) {
     if(!this.config.predictionsEnabled)return null;
+    if(this.db.prepare("SELECT 1 FROM match_deletion_audit WHERE match_id=?").get(String(snapshot.matchId)))throw new Error("Deleted match ID cannot be reused");
     validSnapshot(snapshot);
     if(this.store.latest(snapshot.matchId)?.state==="void")throw new Error("Historical match ID cannot be reused after a void");
     const active=this.store.markets().filter(m=>m.snapshot.serverKey===snapshot.serverKey&&m.match_id!==String(snapshot.matchId)&&!["void","settled"].includes(m.state));
@@ -204,6 +205,7 @@ class PredictionsService {
   onMatchReported({matchId}) {
     let marketId,changed=false;
     const result=this.store.atomic(()=>{
+      if(this.db.prepare("SELECT 1 FROM match_deletion_audit WHERE match_id=?").get(String(matchId)))return;
       const m=this.store.latest(matchId);if(!m||m.state==="void")return;
       const row=this.db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(matchId));
       if(!row||String(row.status).toLowerCase()!=="completed")return;
@@ -273,13 +275,17 @@ class PredictionsService {
     const all=this.store.markets().filter(m=>m.match_id===String(matchId));
     if(all.some(m=>m.settlement_version>0&&!m.deletion_authorized))throw new Error("Owner must authorize retaining settled prediction history before deletion");
   }
-  applyMatchDeletion({matchId,applyMatchWrites,context=this.context("delete","system","match deleted")}) {
+  applyMatchDeletion({matchId,applyMatchWrites,retainSettledHistory=false,context=this.context("delete","system","match deleted")}) {
     const dirty=[];
     const result=this.store.atomic(()=>{
-      this.assertCanDeleteMatch(matchId);
-      for(const m of this.store.markets().filter(m=>m.match_id===String(matchId)&&m.state!=="void"&&!m.settlement_version)){
-        this.store.voidMarket({marketId:m.id,context:{...context,operationKey:`${context.operationKey}:${m.id}`}});
-        if(m.channel_id){this.store.setMetadata(`card_refresh:${m.id}`,randomUUID());dirty.push(m.id);}
+      if(!retainSettledHistory)this.assertCanDeleteMatch(matchId);
+      for(const m of this.store.markets().filter(m=>m.match_id===String(matchId))){
+        if(m.settlement_version>0){
+          this.db.prepare("UPDATE prediction_markets SET deletion_authorized=1 WHERE id=?").run(m.id);
+        }else if(m.state!=="void"){
+          this.store.voidMarket({marketId:m.id,context:{...context,operationKey:context.operationKey+":"+m.id}});
+          if(m.channel_id){this.store.setMetadata("card_refresh:"+m.id,randomUUID());dirty.push(m.id);}
+        }
       }
       return applyMatchWrites();
     });

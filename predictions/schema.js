@@ -1,6 +1,7 @@
 "use strict";
 function initializeSchema(db) {
  const initialize=()=>{
+  require("../lib/matchDeletionAudit").initializeMatchDeletionAudit(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS prediction_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     INSERT OR IGNORE INTO prediction_meta VALUES ('schema_version','2');

@@ -73,7 +73,7 @@ When `PREDICTIONS_OWNER_ID` is configured, each new settlement and correction qu
 | `!pred correct <matchId> <blue\|red\|tie> <reason>` | Apply a house-funded correction matching the completed official report. Fix the report first. |
 | `!pred adjust <userId> <signedPoints> <reason>` | Audited grant/deduction. Deductions cannot create a negative balance. |
 | `!pred pause <reason>` / `!pred resume <reason>` | Persistently stop/resume new and edited bets. Deadlines, pre-lock cancellation, refunds and settlement continue. |
-| `!pred retain <matchId> <reason>` | Explicitly allow deleting a settled match while preserving all financial snapshots and history. |
+| `!pred retain <matchId> <reason>` | Owner authorization for legacy deletion paths; ordinary `!delmatch` no longer requires it. |
 
 Mutations require an owner-bound confirmation expiring after 60 seconds. Changed relevant state invalidates the preview. Repeating the same confirmation returns its stored result. There is no manual early-close command or selective owner refund in V1.
 
@@ -106,3 +106,10 @@ The first completed report time in `matches.processed_at` is preserved across re
 Before the first countdown, readiness rereads validated roster Steam links from the configured database, allowing a missing link repaired while players wait to take effect. Changes are audited and the mappings used are retained once the countdown starts. Duplicate/ambiguous identities cannot satisfy all eight. Stale live-start events receive the same rejection guard as stale map events. An authorized `!setmap` also updates the matching in-memory `!rs` target while preserving its timing and used state.
 
 Point accounting totals use exact integer sums across accounts and ledger entries, including totals above JavaScript's safe-number and SQLite aggregate ranges. Individual balance/stake limits and all payout percentages remain unchanged. No new schema upgrade or environment variable is needed for these reliability changes.
+
+
+### Admin match deletion
+
+An authorized admin in the pickup or Elo admin channel can use `!delmatch <matchId> [reason]`; the default reason is `Admin requested match deletion`. All associated unresolved prediction revisions are voided and active stakes refunded once. Already-voided revisions are retained without another refund. Settled and corrected payouts, balances, outcomes and ledger entries remain intact; deleting a match never reverses a completed payout. Any financial correction is a separate owner-only action.
+
+The match, Elo rollback, refunds and append-only deletion audit commit together on the shared Elo database. The audit records the actor, time, reason, previous market states, refund references and Elo result. Deleted IDs cannot start new prediction markets or undergo automatic reconciliation. Cards for refunded markets are refreshed after commit and retried if Discord is unavailable; pending settlement receipts remain available. If a player has a later Elo change, deletion is refused: the existing Elo rollback would overwrite that later rating, and a rating replay is required. A failure rolls back the deletion and reports the failed stage. Restart the bot after updating so it creates the audit table and runs the new workflow.
