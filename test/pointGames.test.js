@@ -124,3 +124,46 @@ test('only challenged player can decline a duel without changing points',async t
  assert.throws(()=>games.accept({guildId:'g',userId:'2',challengeId:'game:123',context:ctx('later',1001,'2')}),/no longer pending/i);
  assert.equal(store.assertAccounting(),true);
 });
+
+function baccaratDraws(ranks){
+ const shoe=Array.from({length:416},(_,i)=>Math.floor(i/32)+1);let pos=0;
+ return max=>{assert.equal(max,shoe.length);const index=shoe.indexOf(ranks[pos++]);assert.notEqual(index,-1);shoe.splice(index,1);return index;};
+}
+test('baccarat settles player, banker and tie bets and preserves accounting on replay',t=>{
+ for(const [pick,ranks,stake,expected,outcome] of [
+  ['player',[4,2,4,3],100,200,'player'],['banker',[3,4,3,5],99,193,'banker'],
+  ['tie',[4,4,4,4],10,90,'tie'],['player',[4,4,4,4],10,10,'tie'],['tie',[4,2,4,3],10,0,'player']]){
+  const {games,store}=setup(t,baccaratDraws(ranks));const input={userId:pick,pick,stake,context:ctx(`b:${pick}:${stake}`)};
+  const result=games.baccarat(input);assert.equal(result.outcome,outcome);assert.equal(result.returned,expected);assert.deepEqual(games.baccarat(input),result);assert.equal(store.account(pick).balance,1000-stake+expected);assert.equal(store.assertAccounting(),true);
+ }
+});
+test('baccarat draws the player and banker third cards according to the tableau',t=>{
+ const {games}=setup(t,baccaratDraws([2,2,3,1,8,4]));
+ const r=games.baccarat({userId:'a',pick:'player',stake:10,context:ctx('draw')});
+ assert.equal(r.player.length,3);assert.equal(r.banker.length,2);assert.equal(r.playerTotal,3);assert.equal(r.bankerTotal,3);assert.equal(r.outcome,'tie');
+ const next=setup(t,baccaratDraws([2,2,3,1,7,4])).games.baccarat({userId:'a',pick:'banker',stake:10,context:ctx('draw2')});
+ assert.equal(next.banker.length,3);assert.equal(next.bankerTotal,7);
+});
+test('baccarat command displays hands and outcome, and respects pause',async t=>{
+ const {games,store}=setup(t,baccaratDraws([4,2,4,3])),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{clock:()=>1000});
+ const msg={id:'b1',guild:{id:'g'},author:{id:'a'},channel:{send:async p=>messages.push(p)}};
+ await registry.get('baccarat')(msg,['player','100']);assert.match(messages[0].content,/player.*8/i);assert.match(messages[0].content,/banker.*5/i);assert.match(messages[0].content,/200 points returned/i);assert.doesNotMatch(messages[0].content,/balance/i);
+ store.setMetadata('paused','1');msg.id='b2';await registry.get('baccarat')(msg,['player','10']);assert.match(messages[1].content,/paused/i);assert.equal(store.assertAccounting(),true);
+});
+
+test('baccarat banker third-card decisions follow the complete tableau',t=>{
+ for(let banker=0;banker<=7;banker++)for(let third=0;third<=9;third++){
+  const draws=banker<=2||(banker===3&&third!==8)||(banker===4&&third>=2&&third<=7)||(banker===5&&third>=4&&third<=7)||(banker===6&&(third===6||third===7));
+  const {games}=setup(t,baccaratDraws([2,banker||10,3,10,third||10,1]));
+  const result=games.baccarat({userId:'a',pick:'player',stake:1,context:ctx(`tableau:${banker}:${third}`)});
+  assert.equal(result.banker.length,draws?3:2,`banker ${banker}, player third ${third}`);
+ }
+});
+test('baccarat rejects invalid bets and insufficient funds without ledger changes',t=>{
+ const {games,store}=setup(t,baccaratDraws([4,2,4,3]));
+ assert.throws(()=>games.baccarat({userId:'a',pick:'invalid',stake:10,context:ctx('bad')}),/choose/i);
+ assert.throws(()=>games.baccarat({userId:'a',pick:'player',stake:101,context:ctx('limit')}),/stake/i);
+ store.adjust('a',-1000,{...ctx('empty'),reason:'test'});
+ assert.throws(()=>games.baccarat({userId:'a',pick:'player',stake:10,context:ctx('funds')}),/funds/i);
+ assert.equal(store.account('a').balance,0);assert.equal(store.assertAccounting(),true);
+});

@@ -38,6 +38,29 @@ class PointGames {
    return {number,color,pick,stake,returned};
   });
  }
+ baccarat({userId,pick,stake,context:ctx}){
+  pick=String(pick).toLowerCase();this.stake(stake);
+  if(!['player','banker','tie'].includes(pick))throw new Error('Choose player, banker, or tie');
+  return this.store.operation(ctx,`baccarat:${userId}:${pick}:${stake}`,()=>{
+   this.checkPause();
+   const shoe=Array.from({length:416},(_,i)=>Math.floor(i/32)+1);
+   const draw=()=>shoe.splice(this.randomInt(shoe.length),1)[0];
+   const value=card=>card>=10?0:card;
+   const total=cards=>cards.reduce((sum,card)=>sum+value(card),0)%10;
+   const player=[draw()],banker=[draw()];player.push(draw());banker.push(draw());
+   const p=total(player),b=total(banker);
+   if(p<8&&b<8){
+    if(p<=5)player.push(draw());
+    const third=player.length===3?value(player[2]):null;
+    const bankerDraw=third===null?b<=5:b<=2||(b===3&&third!==8)||(b===4&&third>=2&&third<=7)||(b===5&&third>=4&&third<=7)||(b===6&&(third===6||third===7));
+    if(bankerDraw)banker.push(draw());
+   }
+   const playerTotal=total(player),bankerTotal=total(banker),outcome=playerTotal===bankerTotal?'tie':playerTotal>bankerTotal?'player':'banker';
+   const returned=outcome==='tie'&&pick!=='tie'?stake:pick!==outcome?0:pick==='tie'?stake*9:pick==='banker'?stake+Math.floor(stake*95/100):stake*2;
+   this.play(userId,stake,returned,ctx,'baccarat',{pick,player,banker,playerTotal,bankerTotal,outcome});
+   return {pick,stake,player,banker,playerTotal,bankerTotal,outcome,returned};
+  });
+ }
  coinflip({userId,pick,stake,context:ctx}){
   pick=String(pick).toLowerCase();this.stake(stake);if(!['heads','tails'].includes(pick))throw new Error('Choose heads or tails');
   return this.store.operation(ctx,`coinflip:${userId}:${pick}:${stake}`,()=>{

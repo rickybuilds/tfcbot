@@ -27,6 +27,12 @@ function register(registry,games,{clock=Date.now}={}){
   const r=games.coinflip({userId:m.author.id,pick:args[0],stake:amount(args[1]),context});
   await respond(m,`🪙 <@${m.author.id}> bet ${r.stake} on ${r.pick}. It landed **${r.landed}** — **${r.returned} points returned**.`);
  }));
+ registry.set('baccarat',wrap(async(m,args,context)=>{
+  if(args.length!==2)return respond(m,'Usage: !baccarat <player|banker|tie> <points>');
+  const r=games.baccarat({userId:m.author.id,pick:args[0],stake:amount(args[1]),context});
+  const cards=hand=>hand.map(card=>({1:'A',11:'J',12:'Q',13:'K'}[card]||String(card))).join(', ');
+  await respond(m,`🃏 <@${m.author.id}> bet ${r.stake} on ${r.pick}. Player: **${cards(r.player)}** (${r.playerTotal}); Banker: **${cards(r.banker)}** (${r.bankerTotal}). Result: **${r.outcome}** — **${r.returned} points returned**.`);
+ }));
  registry.set('duel',wrap(async(m,args,context)=>{
   if(args[0]?.toLowerCase()==='accept'){
    if(args.length!==2||!/^\d+$/.test(args[1]))return respond(m,'Usage: !duel accept <challenge message ID>');
