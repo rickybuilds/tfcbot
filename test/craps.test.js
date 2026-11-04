@@ -108,3 +108,23 @@ test('shared craps uses one roll card and updates it rather than posting a new r
  let update,replies=0;await handle({id:'102',customId:button.custom_id,guildId:'g',channelId:'c',user:{id:'a'},isButton:()=>true,reply:async()=>{replies++},update:async p=>{update=p}});
  assert.equal(replies,0);assert.match(update.content,/point.*4/i);assert.equal(update.components.length,1);
 });
+
+test('a player can take down only their dont line bet after a point',t=>{
+ const {games,store}=setup(t,[2,3,3,4]);const base={guildId:'g',channelId:'c'};
+ const round=games.crapsJoin({...base,userId:'a',pick:'dont',stake:20,context:ctx('join-a')});
+ games.crapsJoin({...base,userId:'b',pick:'pass',stake:10,context:ctx('join-b','b')});
+ games.crapsRoll({...base,userId:'a',roundId:round.id,context:ctx('point')});
+ assert.throws(()=>games.crapsTakeLine({...base,userId:'b',context:ctx('pass','b')}),/pass/i);
+ games.crapsTakeLine({...base,userId:'a',context:ctx('take')});
+ assert.equal(store.account('a').balance,1000);assert.equal(store.account('b').balance,990);
+ games.crapsRoll({...base,userId:'a',roundId:round.id,context:ctx('seven')});
+ assert.equal(store.account('a').balance,1000);assert.equal(store.account('b').balance,990);assert.equal(store.assertAccounting(),true);
+});
+
+test('Discord players can take down their own dont line wager',async t=>{
+ const {games,store}=setup(t,[2,3]),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};
+ await registry.get('craps')(m,['join','dont','20']);const round=games.crapsStatus({guildId:'g',channelId:'c'});
+ games.crapsRoll({guildId:'g',channelId:'c',userId:'a',roundId:round.id,context:ctx('point')});
+ m.id='2';await registry.get('craps')(m,['take','dont']);assert.match(messages.at(-1).content,/20 points back/i);assert.equal(store.account('a').balance,1000);
+});

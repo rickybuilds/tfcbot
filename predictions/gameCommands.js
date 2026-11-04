@@ -52,6 +52,10 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    return respond(m,`🎲 <@${m.author.id}> placed **${r.stake} points** on **${r.number}**. The wager remains on the table until taken down or lost on a 7.`);
   }
   if(action==='take'&&rest.length===1){
+   if(rest[0].toLowerCase()==='dont'){
+    const r=games.crapsTakeLine(table);
+    return respond(m,`🎲 <@${m.author.id}> took down their don't pass bet and received **${r.stake} points back**.`);
+   }
    const r=games.crapsTake({...table,number:/^(4|5|6|8|9|10)$/.test(rest[0])?Number(rest[0]):NaN});
    return respond(m,`🎲 <@${m.author.id}> took down the **${r.number}** place bet and received **${r.stake} points** back.`);
   }
@@ -61,7 +65,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    const details=places.length?` Place bets${r.state==='open'?' (off until point)':''}: ${places.slice(0,10).map(p=>`<@${p.user_id}> ${p.stake} on ${p.number}`).join('; ')}${places.length>10?'; more bets not shown':''}.`:'';
    return m.channel.send({content:`🎲 Shooter: <@${r.shooter}>. ${r.state==='open'?'Line betting is open.':`Point: **${r.point}**; place bets are open.`}${details} After 10 minutes without a roll, any bettor can roll.`,allowedMentions:{parse:[]},components:crapsButton(r.id)});
   }
-  return respond(m,'Usage: !craps join <pass|dont> <points> | !craps place <4|5|6|8|9|10> <points> | !craps take <number> | !craps status | !craps cancel');
+  return respond(m,'Usage: !craps join <pass|dont> <points> | !craps place <4|5|6|8|9|10> <points> | !craps take <number|dont> | !craps status | !craps cancel');
  },true));
  registry.set('duel',wrap(async(m,args,context)=>{
   if(args[0]?.toLowerCase()==='accept'){

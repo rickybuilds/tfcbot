@@ -31,6 +31,17 @@ class PointGames {
    return {number,stake:bet.stake};
   });
  }
+ crapsTakeLine({guildId,channelId,userId,context:ctx}){
+  return this.store.operation(ctx,`craps-take-line:${guildId}:${channelId}:${userId}`,()=>{
+   const round=this.crapsStatus({guildId,channelId});
+   const bet=round&&this.store.db.prepare("SELECT * FROM point_craps_bets WHERE round_id=? AND user_id=? AND status='active'").get(round.id,String(userId));
+   if(!bet)throw new Error('Craps line bet not found');
+   if(bet.pick!=='dont')throw new Error('Craps pass line bets cannot be taken down; the shooter can cancel before the first roll');
+   this.store.change(userId,bet.stake,ctx,{kind:'game_payout',entryKey:'refund',metadata:{game:'craps',roundId:round.id,refund:true}});
+   this.store.db.prepare("UPDATE point_craps_bets SET status='refunded' WHERE round_id=? AND user_id=?").run(round.id,String(userId));
+   return {stake:bet.stake};
+  });
+ }
  crapsJoin({guildId,channelId,userId,pick,stake,context:ctx}){
   pick=String(pick).toLowerCase();this.stake(stake);if(!['pass','dont'].includes(pick))throw new Error('Choose pass or dont');
   return this.store.operation(ctx,`craps-join:${guildId}:${channelId}:${userId}:${pick}:${stake}`,()=>{
