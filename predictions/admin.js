@@ -81,15 +81,15 @@ async function handleAdminCommand(service,message,args=[]) {
         if(row.kind==="house_collection")collected+=row.amount;else funded+=row.amount;
       }
       const net=collected-funded,format=n=>n.toLocaleString("en-US");
-      const casino={roulette:{collected:0n,funded:0n},coinflip:{collected:0n,funded:0n}};
+      const casino={roulette:{collected:0n,funded:0n},coinflip:{collected:0n,funded:0n},baccarat:{collected:0n,funded:0n},craps:{collected:0n,funded:0n}};
       for(const row of service.db.prepare("SELECT kind,amount,metadata FROM prediction_transactions WHERE market_id IS NULL AND kind IN ('house_collection','house_funding')").safeIntegers().iterate()){
         let game;try{game=JSON.parse(row.metadata||'null')?.game;}catch{continue;}
         if(!Object.hasOwn(casino,game))continue;
         if(row.kind==='house_collection')casino[game].collected+=row.amount;else casino[game].funded+=row.amount;
       }
       const line=(label,entry)=>{const result=entry.collected-entry.funded;return `${label} — Collected: ${format(entry.collected)} · Funded: ${format(entry.funded)} · Net: ${result>=0n?'+':''}${format(result)}`;};
-      const total={collected:casino.roulette.collected+casino.coinflip.collected,funded:casino.roulette.funded+casino.coinflip.funded};
-      await sendPrivate(message,{content:`Prediction house results (points)\nCollected: ${format(collected)}\nFunded: ${format(funded)}\nNet: ${net>=0n?"+":""}${format(net)}\nIncludes player rewards and corrections; excludes point games.\n\nCasino house results (points)\n${line('Roulette',casino.roulette)}\n${line('Coin flip',casino.coinflip)}\n${line('Casino total',total)}\nDuels and gifts transfer points between players and are excluded. These are ledger totals, not spendable balances.`});return;
+      const total=Object.values(casino).reduce((sum,item)=>({collected:sum.collected+item.collected,funded:sum.funded+item.funded}),{collected:0n,funded:0n});
+      await sendPrivate(message,{content:`Prediction house results (points)\nCollected: ${format(collected)}\nFunded: ${format(funded)}\nNet: ${net>=0n?"+":""}${format(net)}\nIncludes player rewards and corrections; excludes point games.\n\nCasino house results (points)\n${line('Roulette',casino.roulette)}\n${line('Coin flip',casino.coinflip)}\n${line('Baccarat',casino.baccarat)}\n${line('Craps',casino.craps)}\n${line('Casino total',total)}\nDuels and gifts transfer points between players and are excluded. These are ledger totals, not spendable balances.`});return;
     }
     if(action==="unresolved"){
       const games=service.store.markets().filter(m=>!["settled","void"].includes(m.state));

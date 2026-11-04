@@ -15,6 +15,13 @@ function setup(t,user="u"){
 }
 const body=payload=>payload.content||payload.files?.[0]?.attachment.toString();
 
+test('bank includes held craps wagers in the total while a round is active',async t=>{
+ const {s,message,privateMessages}=setup(t);const {PointGames}=require('../predictions/games');
+ const games=new PointGames(s.store);games.crapsJoin({guildId:'guild',channelId:'casino',userId:'u',pick:'pass',stake:50,context:{operationKey:'craps-bank',actorId:'u',now:1000}});
+ await s.handleBankCommand(message,'bank');const output=body(privateMessages[0]);
+ assert.match(output,/Available: \*\*950 points/);assert.match(output,/Held in active bets: \*\*50 points/);assert.match(output,/Total points: \*\*1,000/);
+});
+
 test("bank deletes the guild command and privately grants once, with points as an identical self-only alias",async t=>{
  const {s,db,message,events,privateMessages,publicMessages,context}=setup(t);
  const reg=new Map();require("../predictions/bank").register(reg,s);assert.equal(typeof reg.get("bank"),"function");assert.equal(typeof reg.get("points"),"function");

@@ -27,6 +27,16 @@ function initializeSchema(db) {
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(market_id,discord_id)
     );
     CREATE INDEX IF NOT EXISTS prediction_market_bets ON prediction_bets(market_id,status);
+    CREATE TABLE IF NOT EXISTS point_craps_rounds (
+      id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, shooter TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('open','point','settled','cancelled')), point INTEGER, updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS point_craps_active ON point_craps_rounds(guild_id,channel_id) WHERE state IN ('open','point');
+    CREATE TABLE IF NOT EXISTS point_craps_bets (
+      round_id INTEGER NOT NULL, user_id TEXT NOT NULL, pick TEXT NOT NULL CHECK(pick IN ('pass','dont')),
+      stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 100), status TEXT NOT NULL CHECK(status IN ('active','settled','refunded')),
+      PRIMARY KEY(round_id,user_id)
+    );
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,
