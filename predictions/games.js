@@ -53,7 +53,7 @@ class PointGames {
   return this.store.operation(ctx,`craps-join:${guildId}:${channelId}:${userId}:${pick}:${stake}`,()=>{
    this.checkPause();let round=this.crapsStatus({guildId,channelId});
    if(round?.state==='point')throw new Error('Craps betting is closed until the next round');
-   if(!round){const id=this.store.db.prepare("INSERT INTO point_craps_rounds (guild_id,channel_id,shooter,state,updated_at) VALUES (?,?,?,'open',?)").run(String(guildId),String(channelId),String(userId),ctx.now).lastInsertRowid;round=this.store.db.prepare('SELECT * FROM point_craps_rounds WHERE id=?').get(id);}
+   if(!round){const id=this.store.db.prepare("INSERT INTO point_craps_rounds (guild_id,channel_id,shooter,state,updated_at) VALUES (?,?,?,'open',?)").run(String(guildId),String(channelId),String(userId),ctx.now).lastInsertRowid;round=this.store.db.prepare('SELECT * FROM point_craps_rounds WHERE id=?').get(id);require('./crapsFire').ensure(this,round,true);}
    if(this.store.db.prepare("SELECT 1 FROM point_craps_bets WHERE round_id=? AND user_id=? AND status='active'").get(round.id,String(userId)))throw new Error('Choose one bet per craps round');
    this.store.change(userId,-stake,ctx,{kind:'game_stake',entryKey:'stake',metadata:{game:'craps',roundId:round.id,pick}});
    this.store.db.prepare("INSERT INTO point_craps_bets VALUES (?,?,?,?,'active') ON CONFLICT(round_id,user_id) DO UPDATE SET pick=excluded.pick,stake=excluded.stake,status='active'").run(round.id,String(userId),pick,stake);return round;
@@ -83,7 +83,8 @@ class PointGames {
    if(round.state==='open'){
     if(sum===7||sum===11)outcome='pass';else if(sum===2||sum===3)outcome='dont';else if(sum===12)outcome='push';else point=sum;
    }else if(sum===point)outcome='pass';else if(sum===7)outcome='dont';
-   const wagerResults=require('./crapsExtra').settle(this,round,dice,ctx);
+   const fire=require('./crapsFire').settle(this,round,sum,ctx);
+   const wagerResults=[...fire.results,...require('./crapsExtra').settle(this,round,dice,ctx)];
    const placePayouts=[];
    {
     for(const b of this.store.db.prepare("SELECT * FROM point_craps_places WHERE round_id=? AND status='active'").all(round.id)){
@@ -111,7 +112,7 @@ class PointGames {
     this.store.db.prepare("UPDATE point_craps_places SET round_id=? WHERE round_id=? AND status='active'").run(nextRoundId,round.id);
     this.store.db.prepare("UPDATE point_craps_wagers SET round_id=? WHERE round_id=? AND status='active'").run(nextRoundId,round.id);
    }
-   return {id:round.id,dice,sum,point,state,outcome,shooter:String(userId),placePayouts,wagerResults,nextRoundId};
+   return {id:round.id,dice,sum,point,state,outcome,shooter:String(userId),placePayouts,wagerResults,firePoints:fire.made,fireInPlay:fire.inPlay,nextRoundId};
   });
  }
  give({userId,recipientId,points,context:ctx}){

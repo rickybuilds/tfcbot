@@ -4,7 +4,7 @@ const nums=[4,5,6,8,9,10];
 const option=(label,value)=>({label,value});
 const groups=[
  [option('Pass line','pass'),option("Don't pass",'dont'),option('Come','come'),option("Don't come",'dontcome'),...nums.map(n=>option(`Place ${n}`,`place_${n}`))],
- [option('Field','field'),option('Any craps (2, 3, 12)','anycraps'),...[4,6,8,10].map(n=>option(`Hard ${n}`,`hardway_${n}`)),...nums.map(n=>option(`Lay ${n}`,`lay_${n}`)),...[2,3,11,12].map(n=>option(`Roll ${n}`,`prop_${n}`))],
+ [option('Field','field'),option('Any craps (2, 3, 12)','anycraps'),option('Horn (2, 3, 11, 12)','horn'),option('Fire bet','fire'),...[4,6,8,10].map(n=>option(`Hard ${n}`,`hardway_${n}`)),...nums.map(n=>option(`Lay ${n}`,`lay_${n}`)),...[2,3,11,12].map(n=>option(`Roll ${n}`,`prop_${n}`))],
  [option('Pass odds','odds_pass'),option("Don't pass odds",'odds_dont'),...nums.map(n=>option(`Come odds ${n}`,`odds_come_${n}`)),...nums.map(n=>option(`Don't come odds ${n}`,`odds_dontcome_${n}`))]
 ];
 const options=new Map(groups.flat().map(x=>[x.value,x.label]));
@@ -20,7 +20,8 @@ async function handle(i,games,casinoChannelId,clock,rollText){
   if(/^point-craps:choose:[0-2]$/.test(id)&&i.isStringSelectMenu?.()){
    const token=i.values?.[0],group=Number(id.at(-1));if(!groups[group].some(x=>x.value===token))throw new Error('Choose a valid craps wager');
    const r=games.crapsStatus(table);if(!r&&!['pass','dont'].includes(token))throw new Error('Craps table is empty. Start with pass or don’t pass.');
-   const modal=new ModalBuilder().setCustomId(`point-craps:stake:${r?.id||0}:${r?.roll_version||0}:${token}`).setTitle(options.get(token)).addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('stake').setLabel(`Stake (1–${games.maxStake} points)`).setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(3)));
+   const label=token==='horn'?`Stake (multiple of 4, up to ${games.maxStake})`:`Stake (1–${games.maxStake} points)`;
+   const modal=new ModalBuilder().setCustomId(`point-craps:stake:${r?.id||0}:${r?.roll_version||0}:${token}`).setTitle(options.get(token)).addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('stake').setLabel(label).setStyle(TextInputStyle.Short).setRequired(true).setMinLength(1).setMaxLength(3)));
    await i.showModal(modal);return true;
   }
   if(id.startsWith('point-craps:stake:')&&i.isModalSubmit?.()){

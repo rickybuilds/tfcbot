@@ -338,3 +338,67 @@ test('any craps command accepts and refunds a wager before the roll',async t=>{
  m.id='2';await registry.get('craps')(m,['anycraps','5']);assert.match(messages.at(-1).content,/anycraps/);assert.equal(store.account('a').balance,985);
  m.id='3';await registry.get('craps')(m,['take','anycraps']);assert.equal(store.account('a').balance,990);assert.equal(store.assertAccounting(),true);
 });
+
+test('horn splits a stake four ways and pays the correct net return on each number',t=>{
+ for(const [dice,returned] of [[[1,1],31],[[1,2],16],[[5,6],16],[[6,6],31],[[3,3],0]]){
+  const {games,store}=setup(t,[2,3,...dice]),b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+  games.crapsWager({...b,kind:'horn',stake:4,context:ctx('horn')});games.crapsRoll({...b,roundId:r.id,context:ctx('roll')});assert.equal(store.account('a').balance,995+returned);assert.equal(store.assertAccounting(),true);
+ }
+});
+test('horn bets require stakes in multiples of four',t=>{
+ const {games}=setup(t,[]),b={guildId:'g',channelId:'c',userId:'a'};games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});
+ assert.throws(()=>games.crapsWager({...b,kind:'horn',stake:5,context:ctx('horn')}),/multiple of 4/i);
+});
+test('fire bet carries through come-out sevens and four distinct points then pays on seven out',t=>{
+ const dice=[2,2,2,2,3,4,2,3,2,3,3,3,3,3,4,4,4,4,4,5,3,4];
+ const {games,store}=setup(t,dice),b={guildId:'g',channelId:'c',userId:'a'};let round=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});games.crapsWager({...b,kind:'fire',stake:2,context:ctx('fire')});
+ for(let n=0;n<11;n++){const result=games.crapsRoll({...b,roundId:round.id,context:ctx('roll'+n)});if(result.nextRoundId)round={id:result.nextRoundId};}
+ assert.equal(store.account('a').balance,1049);assert.equal(store.assertAccounting(),true);
+});
+
+test('fire pays 24, 249 or 999 to 1 for four, five or six unique points',t=>{
+ const pairs={4:[2,2],5:[2,3],6:[3,3],8:[4,4],9:[4,5],10:[4,6]};
+ for(const [count,returned] of [[4,25],[5,250],[6,1000]]){
+  const made=[4,5,6,8,9,10].slice(0,count),dice=made.flatMap(n=>[...pairs[n],...pairs[n]]);
+  if(count<6)dice.push(...pairs[10],3,4);
+  const {games,store}=setup(t,dice),b={guildId:'g',channelId:'c',userId:'a'};let r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join'+count)});games.crapsWager({...b,kind:'fire',stake:1,context:ctx('fire'+count)});
+  for(let i=0;i<dice.length/2;i++){const result=games.crapsRoll({...b,roundId:r.id,context:ctx(`roll${count}-${i}`)});if(result.nextRoundId)r={id:result.nextRoundId};}
+  assert.equal(store.account('a').balance,1000+returned,`fire ${count}`);assert.equal(store.assertAccounting(),true);
+ }
+});
+test('fire bet is locked after first point, repeated points count once, and loses below four',t=>{
+ const {games,store}=setup(t,[2,2,2,2,2,2,2,2,2,3,3,4]),b={guildId:'g',channelId:'c',userId:'a'};let r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});games.crapsWager({...b,kind:'fire',stake:10,context:ctx('fire')});
+ const roll=id=>{const result=games.crapsRoll({...b,roundId:r.id,context:ctx(id)});if(result.nextRoundId)r={id:result.nextRoundId};return result;};
+ roll('set');assert.throws(()=>games.crapsWager({...b,userId:'b',kind:'fire',stake:10,context:ctx('late','b')}),/before.*first point/i);assert.throws(()=>games.crapsTakeWager({...b,kind:'fire',context:ctx('take')}),/cannot be removed/i);
+ roll('hit');roll('set-again');const repeated=roll('hit-again');assert.deepEqual(repeated.firePoints,[4]);roll('next-point');roll('seven-out');assert.equal(store.account('a').balance,991);assert.equal(store.assertAccounting(),true);
+});
+
+test('old active tables cannot start a fire wager mid-hand when history is unavailable',t=>{
+ const {games,db}=setup(t,[]),b={guildId:'g',channelId:'c',userId:'a'};
+ db.prepare("INSERT INTO point_craps_rounds(guild_id,channel_id,shooter,state,updated_at) VALUES ('g','c','a','open',1000)").run();
+ assert.throws(()=>games.crapsWager({...b,kind:'fire',stake:2,context:ctx('fire')}),/before.*first point/i);
+});
+
+test('multiple fire bettors survive a restart and settle independently',t=>{
+ const dice=[2,2,2,2,2,3,2,3,3,3,3,3,4,4,4,4,4,5,3,4],{games,store,db}=setup(t,dice),a={guildId:'g',channelId:'c',userId:'a'};
+ let round=games.crapsJoin({...a,pick:'pass',stake:1,context:ctx('join')});games.crapsWager({...a,kind:'fire',stake:1,context:ctx('fire-a')});games.crapsWager({...a,userId:'b',kind:'fire',stake:2,context:ctx('fire-b','b')});
+ for(let n=0;n<5;n++){let out=games.crapsRoll({...a,roundId:round.id,context:ctx('before'+n)});if(out.nextRoundId)round={id:out.nextRoundId};}
+ let i=10;const restarted=new PointGames(new PredictionStore(db),{randomInt:()=>dice[i++]-1});
+ for(let n=5;n<10;n++){let out=restarted.crapsRoll({...a,roundId:round.id,context:ctx('after'+n)});if(out.nextRoundId)round={id:out.nextRoundId};}
+ assert.equal(store.account('a').balance,1025);assert.equal(store.account('b').balance,1048);assert.equal(store.assertAccounting(),true);
+});
+test('Discord commands accept horn and fire and the panel offers both',async t=>{
+ const {games,store}=setup(t,[]),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['join','pass','1']);m.id='2';await registry.get('craps')(m,['fire','2']);assert.match(messages.at(-1).content,/fire/);
+ m.id='3';await registry.get('craps')(m,['horn','4']);assert.match(messages.at(-1).content,/horn/);m.id='4';await registry.get('craps')(m,['table']);
+ const choices=messages.at(-1).components.flatMap(row=>row.components.flatMap(component=>component.options||[])).map(o=>o.value);assert.ok(choices.includes('horn'));assert.ok(choices.includes('fire'));assert.equal(store.account('a').balance,993);assert.equal(store.assertAccounting(),true);
+});
+
+test('failed fire payout rolls back the final roll and can be safely retried',t=>{
+ const dice=[2,2,2,2,2,3,2,3,3,3,3,3,4,4,4,4,4,5,3,4],{games,store,db}=setup(t,dice),b={guildId:'g',channelId:'c',userId:'a'};
+ let r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});games.crapsWager({...b,kind:'fire',stake:1,context:ctx('fire')});
+ for(let n=0;n<9;n++){const x=games.crapsRoll({...b,roundId:r.id,context:ctx('r'+n)});if(x.nextRoundId)r={id:x.nextRoundId};}
+ db.exec("CREATE TRIGGER fail_fire BEFORE INSERT ON prediction_transactions WHEN NEW.kind='house_funding' BEGIN SELECT RAISE(ABORT,'fire failure'); END");
+ assert.throws(()=>games.crapsRoll({...b,roundId:r.id,context:ctx('fail')}),/fire failure/);assert.equal(store.account('a').balance,1000);assert.equal(games.crapsStatus(b).point,9);assert.equal(store.assertAccounting(),true);
+ db.exec('DROP TRIGGER fail_fire');const retry=new PointGames(store,{randomInt:(()=>{let i=0;return ()=>[2,3][i++];})()});retry.crapsRoll({...b,roundId:r.id,context:ctx('retry')});assert.equal(store.account('a').balance,1025);assert.equal(store.assertAccounting(),true);
+});

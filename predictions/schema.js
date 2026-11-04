@@ -48,6 +48,11 @@ function initializeSchema(db) {
       status TEXT NOT NULL DEFAULT 'active', phase TEXT NOT NULL DEFAULT 'pending',
       working TEXT NOT NULL DEFAULT 'auto', parent_id INTEGER
     );
+    CREATE TABLE IF NOT EXISTS point_craps_fire_hands (
+      guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, shooter TEXT NOT NULL,
+      made_mask INTEGER NOT NULL DEFAULT 0, started INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(guild_id,channel_id)
+    );
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,
