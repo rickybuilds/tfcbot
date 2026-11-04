@@ -173,3 +173,6 @@ docs/elo-monthly-bonus-audit-2026-10-20.md
 /test/*
 !/test/pointGames.test.js
 !/test/craps.test.js
+
+# Local agent instructions
+/AGENTS.md
