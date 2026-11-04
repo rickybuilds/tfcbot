@@ -56,6 +56,7 @@ class PredictionStore {
   createMarket(snapshot,ctx,ruleVersion=3) {
     const s=validSnapshot(snapshot);
     return this.atomic(()=>{
+      if(this.db.prepare("SELECT 1 FROM match_deletion_audit WHERE match_id=?").get(String(s.matchId)))throw new Error("Deleted match ID cannot be reused");
       const old=this.latest(s.matchId);
       if(old&&old.state!=="void"){
         if(old.state==="settled")throw new Error("Historical match ID cannot be reused");

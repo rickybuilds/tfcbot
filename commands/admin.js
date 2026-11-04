@@ -353,25 +353,57 @@ reg.set("fixscores", async (message, args = []) => {
     if (chId !== PICKUP_CH && chId !== ADMIN_CH) return;
 
     const matchId = (args[0] || "").trim();
-    if (!matchId) return message.channel.send("Usage: `!delmatch <matchId>`");
-
+    if (!matchId) return message.channel.send("Usage: !delmatch <matchId> [reason]");
+    const reason = args.slice(1).join(" ").trim() || "Admin requested match deletion";
+    let failureStage = "database setup", committed = false;
     try {
-      deps.predictions?.assertCanDeleteMatch(matchId);
-      const deleteWrites = () => {
-      try { elo.unreportMatch(matchId); } catch {}
-      elo.db.prepare("DELETE FROM matches WHERE match_id=?").run(String(matchId));
-      elo.db.prepare("DELETE FROM rating_changes WHERE match_id=?").run(String(matchId));
-      };
-      if (deps.predictions) deps.predictions.applyMatchDeletion({ matchId, applyMatchWrites: deleteWrites });
-      else elo.db.transaction(deleteWrites)();
-
-      // 🧩 Disarm autoRecap if still tracking
-      if (reg?.autoRecap) reg.autoRecap.disarmByMatchId(matchId);
-
-      message.channel.send(`🗑️ Match \`${matchId}\` deleted + Elo reverted.`);
+      if (deps.predictions && deps.predictions.db !== elo.db) throw new Error("Prediction and Elo databases differ");
+      const context = deps.predictions?.context("match-delete", String(message.author.id), reason);
+      const result = elo.db.transaction(() => {
+        require("../lib/matchDeletionAudit").initializeMatchDeletionAudit(elo.db);
+        if (!elo.db.prepare("SELECT 1 FROM matches WHERE match_id=?").get(matchId)) return null;
+        if (elo.db.prepare("SELECT 1 FROM match_deletion_audit WHERE match_id=?").get(matchId)) throw new Error("Match ID was already deleted");
+        failureStage = "prediction cleanup";
+        const markets = deps.predictions ? deps.predictions.store.markets().filter(m=>m.match_id===matchId).map(m=>({
+          id:m.id, previousState:m.state, settlementVersion:m.settlement_version,
+          retainedSettlement:m.settlement_version>0,
+          refunds:m.settlement_version||m.state==="void"?[]:deps.predictions.store.bets(m.id).filter(b=>b.status==="active").map(b=>({betId:b.id,amount:b.stake}))
+        })) : [];
+        let eloOutcome;
+        const deleteWrites = () => {
+          failureStage = "Elo rollback or match removal";
+          const count = elo.db.prepare("SELECT COUNT(*) AS n FROM rating_changes WHERE match_id=?").get(matchId).n;
+          if(count){
+            const later=elo.db.prepare("SELECT 1 FROM rating_changes original JOIN rating_changes newer ON newer.player_id=original.player_id AND newer.id>original.id WHERE original.match_id=? AND newer.match_id<>? LIMIT 1").get(matchId,matchId);
+            if(later)throw new Error("Later Elo changes require a rating replay");
+            const mismatch=elo.db.prepare("SELECT 1 FROM rating_changes c LEFT JOIN ratings r ON r.player_id=c.player_id WHERE c.match_id=? AND c.player_id IS NOT NULL AND (r.player_id IS NULL OR r.rating<>c.after) LIMIT 1").get(matchId);
+            const duplicate=elo.db.prepare("SELECT 1 FROM rating_changes WHERE match_id=? AND player_id IS NOT NULL GROUP BY player_id HAVING COUNT(*)>1 LIMIT 1").get(matchId);
+            if(mismatch||duplicate)throw new Error("Elo history requires review before rollback");
+            const reverted=elo.unreportMatch(matchId);
+            if(!reverted || reverted.revertedCount!==count || elo.db.prepare("SELECT 1 FROM rating_changes WHERE match_id=?").get(matchId))throw new Error("Elo rollback incomplete");
+            eloOutcome={status:"reverted",revertedCount:reverted.revertedCount};
+          } else eloOutcome={status:"no rating changes",revertedCount:0};
+          if(elo.db.prepare("DELETE FROM matches WHERE match_id=?").run(matchId).changes!==1)throw new Error("Match deletion incomplete");
+        };
+        if(deps.predictions)deps.predictions.applyMatchDeletion({matchId,applyMatchWrites:deleteWrites,retainSettledHistory:true,context});
+        else deleteWrites();
+        failureStage = "audit recording";
+        elo.db.prepare("INSERT INTO match_deletion_audit VALUES (?,?,?,?,?,?)").run(matchId,String(message.author.id),context?.now ?? Date.now(),reason,JSON.stringify(markets),JSON.stringify(eloOutcome));
+        return {markets,eloOutcome};
+      }).immediate();
+      if(!result)return message.channel.send("❌ No match found for **"+matchId+"**.");
+      committed=true;
+      try { reg?.autoRecap?.disarmByMatchId(matchId); } catch (error) { console.error("[!delmatch] autoRecap disarm failed:",error); }
+      const lines=["🗑️ Match "+matchId+" deleted.","",result.eloOutcome.revertedCount?"✅ Elo reverted":"✅ No Elo changes to revert","✅ Prediction markets processed"];
+      if(result.markets.some(m=>m.refunds.length))lines.push("✅ Unresolved wagers refunded");
+      if(result.markets.some(m=>m.retainedSettlement))lines.push("✅ Settled prediction history preserved");
+      lines.push("✅ Audit history retained");
+      return message.channel.send(lines.join("\n"));
     } catch (e) {
       console.error("[!delmatch] failed:", e);
-      message.channel.send("Failed to delete match.");
+      if(committed)return;
+      const detail=e.message==="Later Elo changes require a rating replay"?" Later Elo changes require a rating replay before this match can be deleted.":e.message==="Elo history requires review before rollback"?" Elo history requires review before this match can be deleted.":" Check the bot logs for details.";
+      return message.channel.send("Failed to delete match during " + failureStage + "; no changes were committed." + detail);
     }
   });
 }

@@ -100,3 +100,23 @@ test('house report is private, owner-only, and totals prediction ledger entries 
  const output=privateMessages.pop().content;assert.match(output,/collected.*300/i);assert.match(output,/funded.*150/i);assert.match(output,/net.*\+150/i);assert.doesNotMatch(output,/999/);
  assert.equal(publicMessages.length,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM prediction_transactions').get().n,before);
 });
+
+test('house report shows separate casino results from actual roulette and coin flips',async t=>{
+ const {s,db,message,privateMessages,publicMessages}=setup(t);
+ const {PointGames}=require('../predictions/games');
+ const games=new PointGames(s.store,{randomInt:()=>1});
+ const context=(id)=>({operationKey:id,actorId:'user',now:1000});
+ games.roulette({guildId:'g',userId:'user',pick:'red',stake:10,context:context('roulette-win')});
+ games.roulette({guildId:'g',userId:'user',pick:'black',stake:20,context:context('roulette-loss')});
+ games.coinflip({userId:'user',pick:'heads',stake:30,context:context('coin-loss')});
+ games.coinflip({userId:'user',pick:'tails',stake:5,context:context('coin-win')});
+ games.give({userId:'user',recipientId:'other',points:5,context:context('gift')});
+ games.challenge({guildId:'g',userId:'user',opponentId:'other',stake:10,context:context('duel')});
+ games.accept({guildId:'g',userId:'other',challengeId:'duel',context:{operationKey:'accept',actorId:'other',now:1001}});
+ const before=db.prepare('SELECT COUNT(*) n FROM prediction_transactions').get().n;
+ await s.handleAdminCommand(message,['house']);const output=privateMessages.pop().content;
+ assert.match(output,/Casino house results/i);assert.match(output,/roulette.*collected.*20.*funded.*10.*net.*\+10/i);
+ assert.match(output,/coin flip.*collected.*30.*funded.*5.*net.*\+25/i);
+ assert.match(output,/casino total.*collected.*50.*funded.*15.*net.*\+35/i);
+ assert.equal(publicMessages.length,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM prediction_transactions').get().n,before);
+});
