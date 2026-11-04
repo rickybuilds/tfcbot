@@ -22,6 +22,17 @@ test('bank includes held craps wagers in the total while a round is active',asyn
  assert.match(output,/Available: \*\*950 points/);assert.match(output,/Held in active bets: \*\*50 points/);assert.match(output,/Total points: \*\*1,000/);
 });
 
+test('bank includes multiple active place bets and retains the original total',async t=>{
+ const {s,message,privateMessages}=setup(t);const {PointGames}=require('../predictions/games');
+ const games=new PointGames(s.store,{randomInt:()=>1});const table={guildId:'guild',channelId:'casino',userId:'u'};
+ const r=games.crapsJoin({...table,pick:'pass',stake:10,context:{operationKey:'line',actorId:'u',now:1000}});
+ games.crapsRoll({...table,roundId:r.id,context:{operationKey:'roll',actorId:'u',now:1001}});
+ games.crapsPlace({...table,number:6,stake:60,context:{operationKey:'place6',actorId:'u',now:1002}});
+ games.crapsPlace({...table,number:8,stake:30,context:{operationKey:'place8',actorId:'u',now:1003}});
+ await s.handleBankCommand(message,'bank');const output=body(privateMessages[0]);
+ assert.match(output,/Available: \*\*900 points/);assert.match(output,/Held in active bets: \*\*100 points/);assert.match(output,/Total points: \*\*1,000/);assert.equal(s.store.assertAccounting(),true);
+});
+
 test("bank deletes the guild command and privately grants once, with points as an identical self-only alias",async t=>{
  const {s,db,message,events,privateMessages,publicMessages,context}=setup(t);
  const reg=new Map();require("../predictions/bank").register(reg,s);assert.equal(typeof reg.get("bank"),"function");assert.equal(typeof reg.get("points"),"function");

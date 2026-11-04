@@ -44,7 +44,7 @@ test('Discord craps buttons enforce casino channel and shooter while completing 
  const message={id:'101',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};
  await registry.get('craps')(message,['join','pass','10']);message.id='102';message.author.id='b';await registry.get('craps')(message,['join','dont','10']);
  const button=messages[0].components[0].components[0];let output;
- const i={id:'103',customId:button.custom_id,guildId:'g',channelId:'c',user:{id:'b'},isButton:()=>true,reply:async p=>{output=p}};
+ const i={id:'103',customId:button.custom_id,guildId:'g',channelId:'c',user:{id:'b'},isButton:()=>true,reply:async p=>{output=p},update:async p=>{output=p}};
  await handle(i);assert.match(output.content,/shooter/i);assert.equal(output.ephemeral,true);
  i.id='104';i.channelId='other';i.user.id='a';await handle(i);assert.equal(output.ephemeral,true);assert.match(output.content,/unavailable/i);
  i.id='105';i.channelId='c';await handle(i);assert.match(output.content,/point.*4/i);assert.ok(output.components.length);
@@ -56,4 +56,55 @@ test('craps failed settlement rolls back all payouts and keeps the round active'
  db.exec("CREATE TRIGGER fail_craps BEFORE INSERT ON prediction_transactions WHEN NEW.kind='house_funding' BEGIN SELECT RAISE(ABORT,'test failure'); END");
  assert.throws(()=>games.crapsRoll({roundId:r.id,guildId:'g',channelId:'c',userId:'a',context:ctx('roll')}),/test failure/);
  assert.equal(store.account('a').balance,990);assert.equal(games.crapsStatus({guildId:'g',channelId:'c'}).state,'open');assert.equal(store.assertAccounting(),true);
+});
+
+test('place bets pay profit on every hit, carry across points and lose on seven',t=>{
+ const {games,store}=setup(t,[2,3,3,3,2,3,3,4,2,2,3,3,3,4]);
+ const round=games.crapsJoin({guildId:'g',channelId:'c',userId:'a',pick:'dont',stake:10,context:ctx('join')});
+ const roll=(id,r=round.id)=>games.crapsRoll({roundId:r,guildId:'g',channelId:'c',userId:'a',context:ctx(id)});
+ roll('point');const bet={guildId:'g',channelId:'c',userId:'a',number:6,stake:60,context:ctx('place')};games.crapsPlace(bet);assert.deepEqual(games.crapsPlace(bet),games.crapsPlace(bet));assert.equal(store.account('a').balance,930);assert.equal(store.assertAccounting(),true);
+ const hit=roll('six');assert.equal(hit.placePayouts[0].profit,70);assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+ const hitPoint=roll('five');assert.equal(hitPoint.outcome,'pass');assert.ok(hitPoint.nextRoundId);assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+ const comeout=roll('comeout-seven',hitPoint.nextRoundId);assert.ok(comeout.nextRoundId);assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+ roll('next-point',comeout.nextRoundId);const hit2=roll('six-again',comeout.nextRoundId);assert.equal(hit2.placePayouts[0].profit,70);
+ const seven=roll('seven-out',comeout.nextRoundId);assert.equal(seven.outcome,'dont');assert.equal(store.account('a').balance,1070);assert.equal(store.assertAccounting(),true);
+});
+test('place bets validate timing, number, stake, duplicates and can be taken down',t=>{
+ const {games,store}=setup(t,[2,3]);const base={guildId:'g',channelId:'c',userId:'a'};
+ games.crapsJoin({...base,pick:'pass',stake:10,context:ctx('join')});assert.throws(()=>games.crapsPlace({...base,number:6,stake:6,context:ctx('early')}),/point/i);
+ const r=games.crapsStatus(base);games.crapsRoll({...base,roundId:r.id,context:ctx('roll')});
+ assert.throws(()=>games.crapsPlace({...base,number:7,stake:6,context:ctx('invalid')}),/Choose/i);
+ games.crapsPlace({...base,number:6,stake:7,context:ctx('place')});assert.throws(()=>games.crapsPlace({...base,number:6,stake:7,context:ctx('dup')}),/already/i);
+ games.crapsPlace({...base,number:8,stake:20,context:ctx('place8')});assert.equal(store.account('a').balance,963);games.crapsTake({...base,number:6,context:ctx('take')});assert.equal(store.account('a').balance,970);assert.equal(store.assertAccounting(),true);
+});
+test('place bet rates round profit down and preserve held stake',t=>{
+ for(const [number,dice,profit] of [[4,[2,2],12],[5,[2,3],9],[6,[3,3],8],[8,[4,4],8],[9,[4,5],9],[10,[4,6],12]]){
+  const {games,store}=setup(t,[1,3,...dice]);const base={guildId:'g',channelId:'c',userId:'a'};
+  const r=games.crapsJoin({...base,pick:'pass',stake:1,context:ctx('join')});games.crapsRoll({...base,roundId:r.id,context:ctx('first')});
+  games.crapsPlace({...base,number,stake:7,context:ctx('place')});const roll=games.crapsRoll({...base,roundId:r.id,context:ctx('hit')});
+  assert.equal(roll.placePayouts[0].profit,profit);assert.equal(store.account('a').balance,992+profit+(number===4?2:0));assert.equal(store.assertAccounting(),true);
+ }
+});
+test('place controls work in the casino channel and carry buttons to the next round',async t=>{
+ const {games,store}=setup(t,[2,3,2,3]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};
+ await registry.get('craps')(m,['join','pass','10']);const button=messages[0].components[0].components[0];let output;
+ const i={id:'2',customId:button.custom_id,guildId:'g',channelId:'c',user:{id:'a'},isButton:()=>true,reply:async p=>{output=p},update:async p=>{output=p}};
+ await handle(i);m.id='3';await registry.get('craps')(m,['place','5','10']);assert.match(messages.at(-1).content,/placed.*10.*5/i);
+ i.id='4';await handle(i);assert.match(output.content,/\+14 points on 5/i);assert.match(output.content,/carry over/i);assert.ok(output.components[0].components[0].custom_id!==button.custom_id);
+ m.id='5';await registry.get('craps')(m,['take','5']);assert.match(messages.at(-1).content,/10 points.*back/i);assert.equal(store.assertAccounting(),true);
+});
+test('existing craps wagers survive schema initialization and a carried place bet is refunded on cancellation',t=>{
+ const {games,store,db}=setup(t,[2,3,2,3]);const base={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...base,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...base,roundId:r.id,context:ctx('first')});games.crapsPlace({...base,number:6,stake:25,context:ctx('place')});
+ new PredictionStore(db);const done=games.crapsRoll({...base,roundId:r.id,context:ctx('point')});assert.ok(done.nextRoundId);games.crapsCancel({...base,context:ctx('cancel')});
+ assert.equal(store.account('a').balance,1010);assert.equal(store.assertAccounting(),true);
+});
+test('shared craps uses one roll card and updates it rather than posting a new reply',async t=>{
+ const {games}=setup(t,[2,2]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'100',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};
+ await registry.get('craps')(m,['join','pass','10']);const button=messages[0].components[0].components[0];
+ m.id='101';m.author.id='b';await registry.get('craps')(m,['join','dont','10']);assert.equal(messages[1].components?.length||0,0);
+ let update,replies=0;await handle({id:'102',customId:button.custom_id,guildId:'g',channelId:'c',user:{id:'a'},isButton:()=>true,reply:async()=>{replies++},update:async p=>{update=p}});
+ assert.equal(replies,0);assert.match(update.content,/point.*4/i);assert.equal(update.components.length,1);
 });

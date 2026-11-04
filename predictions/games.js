@@ -10,6 +10,27 @@ class PointGames {
  stake(n){if(!Number.isSafeInteger(n)||n<1||n>this.maxStake)throw new Error(`Stake must be a whole number from 1 to ${this.maxStake}`);}
  checkPause(){if(this.store.metadata('paused','0')==='1')throw new Error('Point games are paused');}
  crapsStatus({guildId,channelId}){return this.store.db.prepare("SELECT * FROM point_craps_rounds WHERE guild_id=? AND channel_id=? AND state IN ('open','point')").get(String(guildId),String(channelId));}
+ crapsPlace({guildId,channelId,userId,number,stake,context:ctx}){
+  number=Number(number);this.stake(stake);if(![4,5,6,8,9,10].includes(number))throw new Error('Choose a place number: 4, 5, 6, 8, 9, or 10');
+  return this.store.operation(ctx,`craps-place:${guildId}:${channelId}:${userId}:${number}:${stake}`,()=>{
+   this.checkPause();const round=this.crapsStatus({guildId,channelId});if(!round||round.state!=='point')throw new Error('Craps place bets require an established point');
+   const old=this.store.db.prepare('SELECT status FROM point_craps_places WHERE round_id=? AND user_id=? AND number=?').get(round.id,String(userId),number);
+   if(old?.status==='active')throw new Error('Craps place bet already exists on that number');
+   this.store.change(userId,-stake,ctx,{kind:'game_stake',entryKey:'stake',metadata:{game:'craps',roundId:round.id,number}});
+   this.store.db.prepare("INSERT INTO point_craps_places VALUES (?,?,?,?,'active') ON CONFLICT(round_id,user_id,number) DO UPDATE SET stake=excluded.stake,status='active'").run(round.id,String(userId),number,stake);
+   return {roundId:round.id,number,stake};
+  });
+ }
+ crapsTake({guildId,channelId,userId,number,context:ctx}){
+  number=Number(number);if(![4,5,6,8,9,10].includes(number))throw new Error('Choose a place number: 4, 5, 6, 8, 9, or 10');
+  return this.store.operation(ctx,`craps-take:${guildId}:${channelId}:${userId}:${number}`,()=>{
+   const round=this.crapsStatus({guildId,channelId});const bet=round&&this.store.db.prepare("SELECT * FROM point_craps_places WHERE round_id=? AND user_id=? AND number=? AND status='active'").get(round.id,String(userId),number);
+   if(!bet)throw new Error('Craps place bet not found');
+   this.store.change(userId,bet.stake,ctx,{kind:'game_payout',entryKey:'refund',metadata:{game:'craps',roundId:round.id,number,refund:true}});
+   this.store.db.prepare("UPDATE point_craps_places SET status='refunded' WHERE round_id=? AND user_id=? AND number=?").run(round.id,String(userId),number);
+   return {number,stake:bet.stake};
+  });
+ }
  crapsJoin({guildId,channelId,userId,pick,stake,context:ctx}){
   pick=String(pick).toLowerCase();this.stake(stake);if(!['pass','dont'].includes(pick))throw new Error('Choose pass or dont');
   return this.store.operation(ctx,`craps-join:${guildId}:${channelId}:${userId}:${pick}:${stake}`,()=>{
@@ -27,7 +48,9 @@ class PointGames {
    if(round.shooter!==String(userId))throw new Error('Only the shooter can cancel');
    if(round.state!=='open')throw new Error('Craps can only be cancelled before the first roll');
    for(const b of this.store.db.prepare("SELECT * FROM point_craps_bets WHERE round_id=? AND status='active'").all(round.id))this.store.change(b.user_id,b.stake,ctx,{kind:'game_payout',entryKey:`refund:${b.user_id}`,metadata:{game:'craps',roundId:round.id,refund:true}});
+   for(const b of this.store.db.prepare("SELECT * FROM point_craps_places WHERE round_id=? AND status='active'").all(round.id))this.store.change(b.user_id,b.stake,ctx,{kind:'game_payout',entryKey:`place-refund:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number,refund:true}});
    this.store.db.prepare("UPDATE point_craps_bets SET status='refunded' WHERE round_id=? AND status='active'").run(round.id);
+   this.store.db.prepare("UPDATE point_craps_places SET status='refunded' WHERE round_id=? AND status='active'").run(round.id);
    this.store.db.prepare("UPDATE point_craps_rounds SET state='cancelled',updated_at=? WHERE id=?").run(ctx.now,round.id);return {id:round.id};
   });
  }
@@ -35,13 +58,24 @@ class PointGames {
   return this.store.operation(ctx,`craps-roll:${roundId}:${guildId}:${channelId}:${userId}`,()=>{
    const round=this.crapsStatus({guildId,channelId});if(!round||round.id!==Number(roundId))throw new Error('Craps table is no longer active');
    if(round.shooter!==String(userId)){
-    const bettor=this.store.db.prepare("SELECT 1 FROM point_craps_bets WHERE round_id=? AND user_id=? AND status='active'").get(round.id,String(userId));
+    const bettor=this.store.db.prepare("SELECT 1 FROM point_craps_bets WHERE round_id=? AND user_id=? AND status='active' UNION ALL SELECT 1 FROM point_craps_places WHERE round_id=? AND user_id=? AND status='active' LIMIT 1").get(round.id,String(userId),round.id,String(userId));
     if(!bettor||ctx.now-round.updated_at<600000)throw new Error('Only the shooter can roll until the table is idle for 10 minutes');
    }
    const dice=[this.randomInt(6)+1,this.randomInt(6)+1],sum=dice[0]+dice[1];let outcome=null,point=round.point;
    if(round.state==='open'){
     if(sum===7||sum===11)outcome='pass';else if(sum===2||sum===3)outcome='dont';else if(sum===12)outcome='push';else point=sum;
    }else if(sum===point)outcome='pass';else if(sum===7)outcome='dont';
+   const placePayouts=[];
+   if(round.state==='point'){
+    for(const b of this.store.db.prepare("SELECT * FROM point_craps_places WHERE round_id=? AND status='active'").all(round.id)){
+     if(sum===7){this.store.entry(ctx,{kind:'house_collection',amount:b.stake,entryKey:`place-loss:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});}
+     else if(sum===b.number){const numerator=b.number===4||b.number===10?9:7,denominator=b.number===6||b.number===8?6:5,profit=Math.floor(b.stake*numerator/denominator);
+      if(profit){this.store.change(b.user_id,profit,ctx,{kind:'game_payout',entryKey:`place-profit:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});this.store.entry(ctx,{kind:'house_funding',amount:profit,entryKey:`place-funding:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});}
+      placePayouts.push({userId:b.user_id,number:b.number,profit});
+     }
+    }
+    if(sum===7)this.store.db.prepare("UPDATE point_craps_places SET status='lost' WHERE round_id=? AND status='active'").run(round.id);
+   }
    if(outcome){
     for(const b of this.store.db.prepare("SELECT * FROM point_craps_bets WHERE round_id=? AND status='active'").all(round.id)){
      const returned=outcome==='push'&&b.pick==='dont'?b.stake:b.pick===outcome?b.stake*2:0;
@@ -51,7 +85,12 @@ class PointGames {
     this.store.db.prepare("UPDATE point_craps_bets SET status='settled' WHERE round_id=? AND status='active'").run(round.id);
    }
    const state=outcome?'settled':'point';this.store.db.prepare('UPDATE point_craps_rounds SET state=?,point=?,shooter=?,updated_at=? WHERE id=?').run(state,point,String(userId),ctx.now,round.id);
-   return {id:round.id,dice,sum,point,state,outcome,shooter:String(userId)};
+   let nextRoundId=null;
+   if(outcome&&this.store.db.prepare("SELECT 1 FROM point_craps_places WHERE round_id=? AND status='active' LIMIT 1").get(round.id)){
+    nextRoundId=Number(this.store.db.prepare("INSERT INTO point_craps_rounds(guild_id,channel_id,shooter,state,updated_at) VALUES (?,?,?,'open',?)").run(String(guildId),String(channelId),String(userId),ctx.now).lastInsertRowid);
+    this.store.db.prepare("UPDATE point_craps_places SET round_id=? WHERE round_id=? AND status='active'").run(nextRoundId,round.id);
+   }
+   return {id:round.id,dice,sum,point,state,outcome,shooter:String(userId),placePayouts,nextRoundId};
   });
  }
  give({userId,recipientId,points,context:ctx}){

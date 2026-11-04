@@ -37,6 +37,11 @@ function initializeSchema(db) {
       stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 100), status TEXT NOT NULL CHECK(status IN ('active','settled','refunded')),
       PRIMARY KEY(round_id,user_id)
     );
+    CREATE TABLE IF NOT EXISTS point_craps_places (
+      round_id INTEGER NOT NULL, user_id TEXT NOT NULL, number INTEGER NOT NULL CHECK(number IN (4,5,6,8,9,10)),
+      stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 100), status TEXT NOT NULL CHECK(status IN ('active','lost','refunded')),
+      PRIMARY KEY(round_id,user_id,number)
+    );
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,

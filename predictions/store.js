@@ -165,6 +165,7 @@ class PredictionStore {
     }
     for(const row of this.db.prepare("SELECT stake FROM prediction_bets WHERE status='active'").safeIntegers(true).iterate())escrow+=row.stake;
     for(const row of this.db.prepare("SELECT stake FROM point_craps_bets WHERE status='active'").safeIntegers(true).iterate())escrow+=row.stake;
+    for(const row of this.db.prepare("SELECT stake FROM point_craps_places WHERE status='active'").safeIntegers(true).iterate())escrow+=row.stake;
     for(const row of this.db.prepare("SELECT account_id,amount,kind FROM prediction_transactions").safeIntegers(true).iterate()){
       if(["grant","adjustment","house_funding"].includes(row.kind))issued+=row.amount;
       if(row.kind==="house_collection")issued-=row.amount;
