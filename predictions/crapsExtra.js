@@ -2,7 +2,7 @@
 const numbers=[4,5,6,8,9,10];
 function wager(g,{guildId,channelId,userId,kind,number=null,stake,context:ctx}){
  g.stake(stake);number=number==null?null:Number(number);
- if(!['field','prop','come','dontcome','hardway','lay'].includes(kind)||kind==='prop'&&![2,3,11,12].includes(number)||kind==='hardway'&&![4,6,8,10].includes(number)||kind==='lay'&&!numbers.includes(number))throw new Error('Choose a valid craps wager');
+ if(!['field','prop','anycraps','come','dontcome','hardway','lay'].includes(kind)||kind==='prop'&&![2,3,11,12].includes(number)||kind==='hardway'&&![4,6,8,10].includes(number)||kind==='lay'&&!numbers.includes(number))throw new Error('Choose a valid craps wager');
  return g.store.operation(ctx,`craps-wager:${guildId}:${channelId}:${userId}:${kind}:${number}:${stake}`,()=>{
   g.checkPause();const round=g.crapsStatus({guildId,channelId});if(!round)throw new Error('Craps table has no active round');
   if(['come','dontcome'].includes(kind)&&round.state!=='point')throw new Error('Craps come bets require an established point');
@@ -30,6 +30,7 @@ function settle(g,round,dice,ctx){
   }
   if(b.kind==='field')returned=[2,12].includes(sum)?b.stake*3:[3,4,9,10,11].includes(sum)?b.stake*2:0;
   if(b.kind==='prop')returned=sum===b.number?b.stake*(b.number===2||b.number===12?31:16):0;
+  if(b.kind==='anycraps')returned=[2,3,12].includes(sum)?b.stake*8:0;
   if(['hardway','lay'].includes(b.kind)){
    const active=b.working==='on'||b.working==='auto'&&(b.kind==='lay'||round.state==='point');
    if(!active)continue;
@@ -93,7 +94,7 @@ function odds(g,{guildId,channelId,userId,target,number=null,stake,context:ctx})
  });
 }
 function take(g,{guildId,channelId,userId,kind,number=null,context:ctx}){
- if(!['field','prop','hardway','lay','dontcome','odds_pass','odds_dont','odds_come','odds_dontcome'].includes(kind))throw new Error('Craps wager cannot be taken down');
+ if(!['field','prop','anycraps','hardway','lay','dontcome','odds_pass','odds_dont','odds_come','odds_dontcome'].includes(kind))throw new Error('Craps wager cannot be taken down');
  return g.store.operation(ctx,`craps-take-wager:${guildId}:${channelId}:${userId}:${kind}:${number}`,()=>{
   const round=g.crapsStatus({guildId,channelId});
   const bets=round?g.store.db.prepare("SELECT * FROM point_craps_wagers WHERE round_id=? AND user_id=? AND kind=? AND status='active' ORDER BY id").all(round.id,String(userId),kind):[];

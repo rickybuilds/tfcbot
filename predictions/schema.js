@@ -60,6 +60,7 @@ function initializeSchema(db) {
     CREATE TRIGGER IF NOT EXISTS prediction_history_no_delete BEFORE DELETE ON prediction_transactions BEGIN SELECT RAISE(ABORT,'Prediction history is append-only'); END;
   `);
   if(!db.prepare('PRAGMA table_info(point_craps_places)').all().some(c=>c.name==='working'))db.exec("ALTER TABLE point_craps_places ADD COLUMN working TEXT NOT NULL DEFAULT 'auto'");
+  if(!db.prepare('PRAGMA table_info(point_craps_rounds)').all().some(c=>c.name==='roll_version'))db.exec('ALTER TABLE point_craps_rounds ADD COLUMN roll_version INTEGER NOT NULL DEFAULT 0');
   const version=db.prepare("SELECT value FROM prediction_meta WHERE key='schema_version'").get().value;
   if(version==="1"){
     // V1's fixed CHECK prevents earned limits above 250. Keep every bet ID and

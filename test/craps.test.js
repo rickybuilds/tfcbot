@@ -290,3 +290,51 @@ test('pass and dont odds use the correct payout ratios for all six points',t=>{
   }
  }
 });
+
+test('any craps wins on 2, 3 and 12 at 7 to 1 and loses on 11',t=>{
+ for(const [dice,profit] of [[[1,1],70],[[1,2],70],[[6,6],70],[[5,6],-10]]){
+  const {games,store}=setup(t,[2,3,...dice]),b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+  games.crapsWager({...b,kind:'anycraps',stake:10,context:ctx('bet')});games.crapsRoll({...b,roundId:r.id,context:ctx('result')});assert.equal(store.account('a').balance,999+profit);assert.equal(store.assertAccounting(),true);
+ }
+});
+
+test('table menu opens a stake popup and places a multiplayer wager for its user',async t=>{
+ const {games,store}=setup(t,[2,3]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['join','pass','10']);const round=games.crapsStatus({guildId:'g',channelId:'c'});
+ games.crapsRoll({guildId:'g',channelId:'c',userId:'a',roundId:round.id,context:ctx('first')});m.id='table';await registry.get('craps')(m,['table']);
+ const panel=messages.at(-1),menu=panel.components.find(r=>r.components[0].type===3).components[0];let modal,reply;
+ await handle({id:'choose',customId:menu.custom_id,guildId:'g',channelId:'c',user:{id:'b'},values:['place_6'],isStringSelectMenu:()=>true,isButton:()=>false,isModalSubmit:()=>false,showModal:async x=>{modal=x}});
+ assert.ok(modal);const customId=modal.toJSON().custom_id;
+ await handle({id:'submit',customId,guildId:'g',channelId:'c',user:{id:'b'},isStringSelectMenu:()=>false,isButton:()=>false,isModalSubmit:()=>true,fields:{getTextInputValue:()=> '12'},reply:async x=>{reply=x}});
+ assert.equal(store.account('b').balance,988);assert.match(reply.content,/12/);assert.equal(store.assertAccounting(),true);
+});
+
+test('table popup rejects a wager if a roll occurs before submission',async t=>{
+ const {games,store}=setup(t,[2,3,2,2]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['join','pass','10']);const round=games.crapsStatus({guildId:'g',channelId:'c'});
+ let modal,reply;await handle({id:'choose',customId:'point-craps:choose:1',guildId:'g',channelId:'c',user:{id:'b'},values:['field'],isStringSelectMenu:()=>true,showModal:async x=>{modal=x}});
+ games.crapsRoll({guildId:'g',channelId:'c',userId:'a',roundId:round.id,context:ctx('roll')});
+ await handle({id:'submit',customId:modal.toJSON().custom_id,guildId:'g',channelId:'c',user:{id:'b'},isModalSubmit:()=>true,fields:{getTextInputValue:()=> '20'},reply:async x=>{reply=x}});
+ assert.match(reply.content,/changed/i);assert.equal(store.account('b'),undefined);assert.equal(store.assertAccounting(),true);
+});
+
+test('table controls allow an empty table to start and restrict rolling to the shooter',async t=>{
+ const {games,store}=setup(t,[2,3]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'table',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['table']);let modal,reply;
+ await handle({id:'select',customId:'point-craps:choose:0',guildId:'g',channelId:'c',user:{id:'a'},values:['pass'],isStringSelectMenu:()=>true,showModal:async x=>{modal=x}});
+ await handle({id:'submit',customId:modal.toJSON().custom_id,guildId:'g',channelId:'c',user:{id:'a'},isModalSubmit:()=>true,fields:{getTextInputValue:()=> '10'},reply:async x=>{reply=x}});assert.equal(store.account('a').balance,990);
+ await handle({id:'wrong',customId:'point-craps:rolltable',guildId:'g',channelId:'c',user:{id:'b'},isButton:()=>true,reply:async x=>{reply=x}});assert.match(reply.content,/Only the shooter/);assert.equal(reply.ephemeral,true);
+ await handle({id:'roll',customId:'point-craps:rolltable',guildId:'g',channelId:'c',user:{id:'a'},isButton:()=>true,reply:async x=>{reply=x}});assert.match(reply.content,/point.*5/i);assert.equal(store.assertAccounting(),true);
+});
+test('table panel rejects wrong channel and invalid menu selections',async t=>{
+ const {games,store}=setup(t,[]),registry=new Map();const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});let reply;
+ await handle({id:'1',customId:'point-craps:choose:0',guildId:'g',channelId:'elsewhere',user:{id:'a'},isStringSelectMenu:()=>true,values:['pass'],reply:async x=>{reply=x}});assert.match(reply.content,/unavailable/);
+ await handle({id:'2',customId:'point-craps:choose:0',guildId:'g',channelId:'c',user:{id:'a'},isStringSelectMenu:()=>true,values:['anycraps'],reply:async x=>{reply=x}});assert.match(reply.content,/valid/);assert.equal(store.account('a'),undefined);
+});
+
+test('any craps command accepts and refunds a wager before the roll',async t=>{
+ const {games,store}=setup(t,[2,3]),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['join','pass','10']);
+ m.id='2';await registry.get('craps')(m,['anycraps','5']);assert.match(messages.at(-1).content,/anycraps/);assert.equal(store.account('a').balance,985);
+ m.id='3';await registry.get('craps')(m,['take','anycraps']);assert.equal(store.account('a').balance,990);assert.equal(store.assertAccounting(),true);
+});

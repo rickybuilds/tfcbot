@@ -43,6 +43,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
  };
  registry.set('craps',wrap(async(m,args,context)=>{
   const [action,...rest]=args,table={guildId:m.guild.id,channelId:m.channel.id,userId:m.author.id,context};
+  if(action==='table'&&!rest.length)return m.channel.send(require('./crapsPanel').panel());
   if(action==='join'&&rest.length===2){
    const r=games.crapsJoin({...table,pick:rest[0],stake:amount(rest[1])});
    return m.channel.send({content:`🎲 <@${m.author.id}> joined with **${amount(rest[1])} points** on **${rest[0].toLowerCase()}**. Shooter: <@${r.shooter}>. Join with \`!craps join <pass|dont> <points>\`; then the shooter rolls.`,allowedMentions:{parse:[]},components:String(r.shooter)===String(m.author.id)?crapsButton(r.id):[]});
@@ -52,7 +53,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    const r=games.crapsPlace({...table,number:/^(4|5|6|8|9|10)$/.test(rest[0])?Number(rest[0]):NaN,stake:amount(rest[1])});
    return respond(m,`🎲 <@${m.author.id}> placed **${r.stake} points** on **${r.number}**. The wager remains on the table until taken down or lost on a 7.`);
   }
-  if(['field','come','dontcome'].includes(action)&&rest.length===1){
+  if(['field','anycraps','come','dontcome'].includes(action)&&rest.length===1){
    const r=games.crapsWager({...table,kind:action,stake:amount(rest[0])});
    return respond(m,`🎲 <@${m.author.id}> placed **${r.stake} points** on **${r.kind}**.`);
   }
@@ -71,7 +72,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    const r=games.crapsWorking({...table,kind,number,working:action});
    return respond(m,`🎲 <@${m.author.id}> set **${r.kind} ${r.number}** to **${r.working}**.`);
   }
-  if(action==='take'&&rest.length>=1&&rest.length<=3&&['field','prop','hardway','lay','dontcome','odds'].includes(rest[0].toLowerCase())){
+  if(action==='take'&&rest.length>=1&&rest.length<=3&&['field','anycraps','prop','hardway','lay','dontcome','odds'].includes(rest[0].toLowerCase())){
    const type=rest[0].toLowerCase(),kind=type==='odds'?`odds_${(rest[1]||'').toLowerCase()}`:type;
    const number=type==='odds'?(rest[2]===undefined?null:Number(rest[2])):(rest[1]===undefined?null:Number(rest[1]));
    const r=games.crapsTakeWager({...table,kind,number});return respond(m,`🎲 <@${m.author.id}> took down **${r.kind}${r.number?' '+r.number:''}** and received **${r.stake} points back**.`);
@@ -94,7 +95,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    const items=all.slice((page-1)*10,page*10).map(p=>`<@${p.user_id}> ${p.stake} ${p.kind}${p.number?' '+p.number:''}${p.working?` (${p.working}${p.working==='auto'&&p.kind==='place'&&r.state==='open'?': off':''}${['come','dontcome'].includes(p.kind)&&p.phase==='pending'?', awaiting roll':''})`:''}`);
    return m.channel.send({content:`🎲 Shooter: <@${r.shooter}>. ${r.state==='open'?'Line betting is open.':`Point: **${r.point}**.`} Bets (page ${page}/${pages}): ${items.length?items.join('; '):'none'}. Use \`!craps status <page>\` for another page. After 10 minutes without a roll, any bettor can roll.`,allowedMentions:{parse:[]},components:crapsButton(r.id)});
   }
-  return respond(m,'🎲 **Craps commands** (prefix each with `!craps`):\n`join <pass|dont> <points>` · `status [page]` · `cancel`\n`place <number> <points>` · `come <points>` · `dontcome <points>`\n`field <points>` · `hardway <4|6|8|10> <points>` · `lay <number> <points>` · `prop <2|3|11|12> <points>`\n`odds <pass|dont> <points>` · `odds <come|dontcome> <number> <points>`\n`on|off|auto <place|hardway|lay> <number>` · `on|off|auto odds <pass|dont|come|dontcome> <number>`\n`take <number|dont|field>` · `take <hardway|lay|dontcome|prop> <number>` · `take odds <pass|dont> [number]` · `take odds <come|dontcome> <number>`\nPlace, hardway and come odds are off on the come-out by default. Lay bets work by default. Use `auto` to restore defaults. Come and pass flat bets cannot be taken down after their point.');
+  return respond(m,'🎲 **Craps commands** (prefix each with `!craps`):\n`table` opens the betting panel · `status [page]` · `cancel`\n`join <pass|dont> <points>` · `place <number> <points>` · `come <points>` · `dontcome <points>`\n`field <points>` · `anycraps <points>` · `hardway <4|6|8|10> <points>` · `lay <number> <points>` · `prop <2|3|11|12> <points>`\n`odds <pass|dont> <points>` · `odds <come|dontcome> <number> <points>`\n`on|off|auto <place|hardway|lay> <number>` · `on|off|auto odds <pass|dont|come|dontcome> <number>`\n`take <number|dont|field|anycraps>` · `take <hardway|lay|dontcome|prop> <number>` · `take odds <pass|dont> [number]` · `take odds <come|dontcome> <number>`\nPlace, hardway and come odds are off on the come-out by default. Lay bets work by default. Use `auto` to restore defaults. Come and pass flat bets cannot be taken down after their point.');
  },true));
  registry.set('duel',wrap(async(m,args,context)=>{
   if(args[0]?.toLowerCase()==='accept'){
@@ -108,6 +109,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   await m.channel.send({content:`⚔️ <@${m.author.id}> challenged <@${opponent.id}> for ${amount(args[1])} points. The challenge expires <t:${Math.floor(r.expiresAt/1000)}:R>. Both players need enough points when accepted.`,allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:3,label:'Accept Duel',custom_id:`point-duel:accept:${m.id}`},{type:2,style:4,label:'Decline Duel',custom_id:`point-duel:decline:${m.id}`}]}]});
  },true));
  return async function handleInteraction(i){
+  if(await require('./crapsPanel').handle(i,games,casinoChannelId,clock,crapsText))return true;
   const craps=/^point-craps:roll:(\d+)$/.exec(String(i.customId||''));
   if(craps&&i.isButton()&&i.guildId){
    if(!casinoChannelId||String(i.channelId)!==String(casinoChannelId)){await i.reply({content:'This craps table is unavailable in this channel.',ephemeral:true});return true;}

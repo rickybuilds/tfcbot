@@ -104,7 +104,7 @@ class PointGames {
     }
     this.store.db.prepare("UPDATE point_craps_bets SET status='settled' WHERE round_id=? AND status='active'").run(round.id);
    }
-   const state=outcome?'settled':'point';this.store.db.prepare('UPDATE point_craps_rounds SET state=?,point=?,shooter=?,updated_at=? WHERE id=?').run(state,point,String(userId),ctx.now,round.id);
+   const state=outcome?'settled':'point';this.store.db.prepare('UPDATE point_craps_rounds SET state=?,point=?,shooter=?,updated_at=?,roll_version=roll_version+1 WHERE id=?').run(state,point,String(userId),ctx.now,round.id);
    let nextRoundId=null;
    if(outcome&&(this.store.db.prepare("SELECT 1 FROM point_craps_places WHERE round_id=? AND status='active' LIMIT 1").get(round.id)||this.store.db.prepare("SELECT 1 FROM point_craps_wagers WHERE round_id=? AND status='active' LIMIT 1").get(round.id))){
     nextRoundId=Number(this.store.db.prepare("INSERT INTO point_craps_rounds(guild_id,channel_id,shooter,state,updated_at) VALUES (?,?,?,'open',?)").run(String(guildId),String(channelId),String(userId),ctx.now).lastInsertRowid);
