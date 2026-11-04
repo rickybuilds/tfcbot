@@ -42,6 +42,12 @@ function initializeSchema(db) {
       stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 100), status TEXT NOT NULL CHECK(status IN ('active','lost','refunded')),
       PRIMARY KEY(round_id,user_id,number)
     );
+    CREATE TABLE IF NOT EXISTS point_craps_wagers (
+      id INTEGER PRIMARY KEY, round_id INTEGER NOT NULL, user_id TEXT NOT NULL,
+      kind TEXT NOT NULL, number INTEGER, stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 100),
+      status TEXT NOT NULL DEFAULT 'active', phase TEXT NOT NULL DEFAULT 'pending',
+      working TEXT NOT NULL DEFAULT 'auto', parent_id INTEGER
+    );
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,
@@ -53,6 +59,7 @@ function initializeSchema(db) {
     CREATE TRIGGER IF NOT EXISTS prediction_history_no_update BEFORE UPDATE ON prediction_transactions BEGIN SELECT RAISE(ABORT,'Prediction history is append-only'); END;
     CREATE TRIGGER IF NOT EXISTS prediction_history_no_delete BEFORE DELETE ON prediction_transactions BEGIN SELECT RAISE(ABORT,'Prediction history is append-only'); END;
   `);
+  if(!db.prepare('PRAGMA table_info(point_craps_places)').all().some(c=>c.name==='working'))db.exec("ALTER TABLE point_craps_places ADD COLUMN working TEXT NOT NULL DEFAULT 'auto'");
   const version=db.prepare("SELECT value FROM prediction_meta WHERE key='schema_version'").get().value;
   if(version==="1"){
     // V1's fixed CHECK prevents earned limits above 250. Keep every bet ID and

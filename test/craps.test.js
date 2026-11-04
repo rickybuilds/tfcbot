@@ -128,3 +128,165 @@ test('Discord players can take down their own dont line wager',async t=>{
  games.crapsRoll({guildId:'g',channelId:'c',userId:'a',roundId:round.id,context:ctx('point')});
  m.id='2';await registry.get('craps')(m,['take','dont']);assert.match(messages.at(-1).content,/20 points back/i);assert.equal(store.account('a').balance,1000);
 });
+
+test('field and proposition bets settle once with correct payouts',t=>{
+ const {games,store}=setup(t,[2,3,1,1]);const base={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...base,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...base,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...base,kind:'field',stake:10,context:ctx('field')});games.crapsWager({...base,kind:'prop',number:2,stake:2,context:ctx('prop')});
+ games.crapsRoll({...base,roundId:r.id,context:ctx('roll')});assert.equal(store.account('a').balance,1070);assert.equal(store.assertAccounting(),true);
+});
+test('come and dont come move to their own points and settle independently',t=>{
+ const {games,store}=setup(t,[2,3,3,3,1,5]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'come',stake:10,context:ctx('come')});games.crapsWager({...b,kind:'dontcome',stake:10,context:ctx('dontcome')});
+ games.crapsRoll({...b,roundId:r.id,context:ctx('set')});games.crapsRoll({...b,roundId:r.id,context:ctx('hit')});
+ assert.equal(store.account('a').balance,990);assert.equal(store.assertAccounting(),true);
+});
+
+test('hardway pays on doubles, remains up, and loses to an easy roll',t=>{
+ const {games,store}=setup(t,[2,3,3,3,2,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'hardway',number:6,stake:10,context:ctx('hard')});games.crapsRoll({...b,roundId:r.id,context:ctx('hardhit')});assert.equal(store.account('a').balance,1070);
+ games.crapsRoll({...b,roundId:r.id,context:ctx('easy')});assert.equal(store.account('a').balance,1070);assert.equal(store.assertAccounting(),true);
+});
+test('lay wager can be turned off and then wins with commission on seven',t=>{
+ const {games,store}=setup(t,[2,3,3,4,3,3,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'lay',number:4,stake:20,context:ctx('lay')});games.crapsWorking({...b,kind:'lay',number:4,working:'off',context:ctx('off')});
+ const seven=games.crapsRoll({...b,roundId:r.id,context:ctx('seven')});assert.equal(store.account('a').balance,970);
+ games.crapsWorking({...b,kind:'lay',number:4,working:'on',context:ctx('on')});games.crapsRoll({...b,roundId:seven.nextRoundId,context:ctx('six')});
+ games.crapsRoll({...b,roundId:seven.nextRoundId,context:ctx('win')});assert.equal(store.account('a').balance,999);assert.equal(store.assertAccounting(),true);
+});
+
+test('pass line odds pay true odds with the line and conserve accounting',t=>{
+ const {games,store}=setup(t,[2,2,2,2]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsOdds({...b,target:'pass',stake:10,context:ctx('odds')});games.crapsRoll({...b,roundId:r.id,context:ctx('win')});
+ assert.equal(store.account('a').balance,1030);assert.equal(store.assertAccounting(),true);
+});
+test('come odds travel with their come bet and are off on a come-out roll',t=>{
+ const {games,store}=setup(t,[2,3,3,3,2,3,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'come',stake:10,context:ctx('come')});games.crapsRoll({...b,roundId:r.id,context:ctx('six')});
+ games.crapsOdds({...b,target:'come',number:6,stake:10,context:ctx('odds')});const p=games.crapsRoll({...b,roundId:r.id,context:ctx('pointwin')});
+ games.crapsRoll({...b,roundId:p.nextRoundId,context:ctx('comeout')});assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+});
+
+test('taking down dont pass also refunds its odds once',t=>{
+ const {games,store}=setup(t,[2,2,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'dont',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsOdds({...b,target:'dont',stake:20,context:ctx('odds')});games.crapsTakeLine({...b,context:ctx('take')});assert.equal(store.account('a').balance,1000);
+ games.crapsRoll({...b,roundId:r.id,context:ctx('seven')});assert.equal(store.account('a').balance,1000);assert.equal(store.assertAccounting(),true);
+});
+test('place bet can be switched off across rolls and restored on',t=>{
+ const {games,store}=setup(t,[2,3,3,3,3,3]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsPlace({...b,number:6,stake:6,context:ctx('place')});
+ games.crapsWorking({...b,kind:'place',number:6,working:'off',context:ctx('off')});games.crapsRoll({...b,roundId:r.id,context:ctx('offroll')});assert.equal(store.account('a').balance,984);
+ games.crapsWorking({...b,kind:'place',number:6,working:'on',context:ctx('on')});games.crapsRoll({...b,roundId:r.id,context:ctx('onroll')});assert.equal(store.account('a').balance,991);assert.equal(store.assertAccounting(),true);
+});
+
+test('taking down a dont come wager refunds its attached odds only to its owner',t=>{
+ const {games,store}=setup(t,[2,3,3,3,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'dontcome',stake:10,context:ctx('dontcome')});games.crapsRoll({...b,roundId:r.id,context:ctx('six')});games.crapsOdds({...b,target:'dontcome',number:6,stake:20,context:ctx('odds')});
+ assert.throws(()=>games.crapsTakeWager({...b,userId:'b',kind:'dontcome',number:6,context:ctx('steal','b')}),/not found/i);
+ games.crapsTakeWager({...b,kind:'dontcome',number:6,context:ctx('take')});assert.equal(store.account('a').balance,990);
+ games.crapsRoll({...b,roundId:r.id,context:ctx('seven')});assert.equal(store.account('a').balance,990);assert.equal(store.assertAccounting(),true);
+});
+
+test('Discord commands accept new bets, odds and working controls for several players',async t=>{
+ const {games,store}=setup(t,[2,3,3,3]),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};
+ await registry.get('craps')(m,['join','pass','10']);const r=games.crapsStatus({guildId:'g',channelId:'c'});games.crapsRoll({guildId:'g',channelId:'c',userId:'a',roundId:r.id,context:ctx('roll')});
+ m.author.id='b';m.id='2';await registry.get('craps')(m,['come','10']);assert.match(messages.at(-1).content,/come/i);
+ m.id='3';await registry.get('craps')(m,['hardway','33','10']);assert.match(messages.at(-1).content,/hardway/i);
+ m.id='4';await registry.get('craps')(m,['off','hardway','6']);assert.match(messages.at(-1).content,/off/i);
+ m.id='5';await registry.get('craps')(m,['field','10']);assert.match(messages.at(-1).content,/field/i);assert.equal(store.assertAccounting(),true);
+});
+
+test('come odds may be turned on for a come-out seven',t=>{
+ const {games,store}=setup(t,[2,3,3,3,2,3,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsWager({...b,kind:'come',stake:10,context:ctx('come')});games.crapsRoll({...b,roundId:r.id,context:ctx('six')});
+ games.crapsOdds({...b,target:'come',number:6,stake:10,context:ctx('odds')});games.crapsWorking({...b,kind:'odds_come',number:6,working:'on',context:ctx('on')});
+ const p=games.crapsRoll({...b,roundId:r.id,context:ctx('pointwin')});games.crapsRoll({...b,roundId:p.nextRoundId,context:ctx('seven')});assert.equal(store.account('a').balance,990);assert.equal(store.assertAccounting(),true);
+});
+
+test('each Discord roll publishes a separate permanent roll result',async t=>{
+ const {games}=setup(t,[2,2,3,4]),registry=new Map(),messages=[];const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const m={id:'1',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['join','pass','10']);
+ const id=messages[0].components[0].components[0].custom_id,history=[];
+ const i={id:'2',customId:id,guildId:'g',channelId:'c',user:{id:'a'},isButton:()=>true,update:async()=>{},followUp:async p=>history.push(p)};
+ await handle(i);i.id='3';await handle(i);assert.equal(history.length,2);assert.match(history[0].content,/4/);assert.match(history[1].content,/7/);
+});
+
+test('dont come pushes 12 on its first roll and dont odds pay true odds on seven',t=>{
+ const {games,store}=setup(t,[2,2,6,6,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'dont',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsOdds({...b,target:'dont',stake:20,context:ctx('odds')});
+ games.crapsWager({...b,kind:'dontcome',stake:10,context:ctx('dc')});games.crapsRoll({...b,roundId:r.id,context:ctx('twelve')});assert.equal(store.account('a').balance,970);
+ games.crapsRoll({...b,roundId:r.id,context:ctx('seven')});assert.equal(store.account('a').balance,1020);assert.equal(store.assertAccounting(),true);
+});
+test('a place wager called on is lost on a come-out seven',t=>{
+ const {games,store}=setup(t,[2,3,2,3,3,4]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsPlace({...b,number:6,stake:6,context:ctx('place')});
+ games.crapsWorking({...b,kind:'place',number:6,working:'on',context:ctx('on')});const p=games.crapsRoll({...b,roundId:r.id,context:ctx('hit')});games.crapsRoll({...b,roundId:p.nextRoundId,context:ctx('seven')});
+ assert.equal(store.account('a').balance,1004);assert.equal(store.assertAccounting(),true);
+});
+test('schema migration keeps an existing active place wager and gives it automatic mode',t=>{
+ const db=new Database(':memory:');t.after(()=>db.close());db.exec("CREATE TABLE point_craps_places(round_id INTEGER NOT NULL,user_id TEXT NOT NULL,number INTEGER NOT NULL,stake INTEGER NOT NULL,status TEXT NOT NULL,PRIMARY KEY(round_id,user_id,number)); INSERT INTO point_craps_places VALUES(7,'a',6,20,'active')");
+ new PredictionStore(db);assert.deepEqual(db.prepare('SELECT stake,status,working FROM point_craps_places').get(),{stake:20,status:'active',working:'auto'});
+});
+
+test('a removed dont pass wager may be replaced before the first roll',t=>{
+ const {games,store}=setup(t,[2,2]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'dont',stake:10,context:ctx('join')});games.crapsTakeLine({...b,context:ctx('take')});
+ games.crapsJoin({...b,pick:'dont',stake:20,context:ctx('rejoin')});games.crapsRoll({...b,roundId:r.id,context:ctx('roll')});
+ assert.equal(store.account('a').balance,980);assert.equal(store.assertAccounting(),true);
+});
+
+test('table status pages show bets beyond the first ten',async t=>{
+ const {games}=setup(t,[2,3]),registry=new Map(),messages=[];require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ for(let n=0;n<11;n++)games.crapsWager({...b,userId:String(n),kind:'field',stake:1,context:ctx('field'+n,String(n))});
+ const m={id:'status',guild:{id:'g'},channel:{id:'c',send:async p=>messages.push(p)},author:{id:'a'}};await registry.get('craps')(m,['status','2']);assert.match(messages[0].content,/page 2/i);assert.match(messages[0].content,/<@9>/);
+});
+
+test('bank statement includes all new craps wager stakes in held funds',async t=>{
+ const {games,store}=setup(t,[2,3]),b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});
+ games.crapsWager({...b,kind:'field',stake:15,context:ctx('field')});games.crapsOdds({...b,target:'pass',stake:20,context:ctx('odds')});
+ let output;const service={store,context:()=>ctx('bank'),clock:()=>1000,logger:{warn(){}},config:{channels:{}}};
+ await require('../predictions/bank').handleBankCommand(service,{author:{id:'a',send:async p=>{output=p}},client:null});assert.match(output.content,/Held in active bets: \*\*45 points\*\*/);assert.match(output.content,/Total points: \*\*1,000\*\*/);
+});
+
+test('new wagers persist after restart and settlement failure rolls back every payout',t=>{
+ const {games,store,db}=setup(t,[2,3,1,1]);const b={guildId:'g',channelId:'c',userId:'a'};
+ const r=games.crapsJoin({...b,pick:'pass',stake:10,context:ctx('join')});games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsWager({...b,kind:'field',stake:10,context:ctx('field')});
+ const restarted=new PointGames(new PredictionStore(db),{randomInt:()=>0});db.exec("CREATE TRIGGER fail_extra BEFORE INSERT ON prediction_transactions WHEN NEW.kind='house_funding' BEGIN SELECT RAISE(ABORT,'test failure'); END");
+ assert.throws(()=>restarted.crapsRoll({...b,roundId:r.id,context:ctx('fail')}),/test failure/);assert.equal(store.account('a').balance,980);assert.equal(store.assertAccounting(),true);
+ db.exec('DROP TRIGGER fail_extra');restarted.crapsRoll({...b,roundId:r.id,context:ctx('retry')});assert.equal(store.account('a').balance,1010);assert.equal(store.assertAccounting(),true);
+});
+
+test('lay bets pay the three true-odds rates less commission',t=>{
+ for(const [number,profit] of [[4,28],[5,38],[6,47],[8,47],[9,38],[10,28]]){
+  const {games,store}=setup(t,[2,3,3,4]),b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});
+  games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsWager({...b,kind:'lay',number,stake:60,context:ctx('lay')});games.crapsRoll({...b,roundId:r.id,context:ctx('seven')});
+  assert.equal(store.account('a').balance,999+profit,`lay ${number}`);assert.equal(store.assertAccounting(),true);
+ }
+});
+test('individual propositions settle for every supported number',t=>{
+ for(const [number,dice,profit] of [[2,[1,1],30],[3,[1,2],15],[11,[5,6],15],[12,[6,6],30]]){
+  const {games,store}=setup(t,[2,3,...dice]),b={guildId:'g',channelId:'c',userId:'a'};const r=games.crapsJoin({...b,pick:'pass',stake:1,context:ctx('join')});
+  games.crapsRoll({...b,roundId:r.id,context:ctx('point')});games.crapsWager({...b,kind:'prop',number,stake:1,context:ctx('prop')});games.crapsRoll({...b,roundId:r.id,context:ctx('roll')});
+  assert.equal(store.account('a').balance,999+profit,`prop ${number}`);assert.equal(store.assertAccounting(),true);
+ }
+});
+
+test('pass and dont odds use the correct payout ratios for all six points',t=>{
+ for(const [point,dice,passProfit,dontProfit] of [[4,[2,2],120,30],[5,[2,3],90,40],[6,[3,3],72,50],[8,[4,4],72,50],[9,[4,5],90,40],[10,[4,6],120,30]]){
+  for(const [pick,winDice,profit] of [['pass',dice,passProfit],['dont',[3,4],dontProfit]]){
+   const {games,store}=setup(t,[...dice,...winDice]),b={guildId:'g',channelId:'c',userId:'a'},tag=pick+point;
+   const r=games.crapsJoin({...b,pick,stake:1,context:ctx('join'+tag)});games.crapsRoll({...b,roundId:r.id,context:ctx('point'+tag)});
+   games.crapsOdds({...b,target:pick,stake:60,context:ctx('odds'+tag)});games.crapsRoll({...b,roundId:r.id,context:ctx('settle'+tag)});
+   assert.equal(store.account('a').balance,1001+profit,tag);assert.equal(store.assertAccounting(),true);
+  }
+ }
+});
