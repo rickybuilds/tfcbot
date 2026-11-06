@@ -8,6 +8,7 @@ const {
   licenseRoleIds,
   pollBootcampEvents,
   syncMemberRoles,
+  postEvent,
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
@@ -60,6 +61,17 @@ test("license roles stack: platinum keeps the licensed and permit roles", () => 
   const roles = rolesForLicense({ level: "platinum", endorsements: ["offense", "class:engineer"] }, roleIds);
   assert.deepEqual([...roles].sort(), ["e", "l", "o", "p", "x"]);
   assert.deepEqual([...rolesForLicense({ level: "none", endorsements: [] }, roleIds)], []);
+});
+
+test("personal bests and bronze tier-ups produce progress notifications", async () => {
+  const sent = [];
+  const channel = { send: async message => sent.push(message) };
+  const pool = fakePool([[/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Water", map: "openfire" }]]]);
+  await postEvent(channel, pool, { kind: "pb", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route", target_id: 4, value_ms: 12000 });
+  await postEvent(channel, pool, { kind: "tier_up", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route", target_id: 4, tier: 1 });
+  assert.equal(sent.length, 2);
+  assert.match(String(sent[0]), /personal best/i);
+  assert.match(String(sent[1]), /bronze/i);
 });
 
 test("license role ids come from the environment and reuse the offense role", () => {

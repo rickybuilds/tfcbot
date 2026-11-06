@@ -218,8 +218,9 @@ async function postEvent(channel, pool, event) {
       .setDescription(`${player} set the record on **${await targetName(pool, "route", event.target_id)}**: **${formatTime(event.value_ms)}**${replay}`)
       .setTimestamp(new Date(event.created_at || Date.now()));
     await channel.send({ embeds: [embed] }).catch(() => {});
-  } else if (event.kind === "tier_up" && Number(event.tier) >= 3) {
-    // Bronze and silver are frequent; only gold and platinum are announced.
+  } else if (event.kind === "pb") {
+    await channel.send(`${player} set a personal best on **${await targetName(pool, event.target_type, event.target_id)}**: **${formatTime(event.value_ms)}**`);
+  } else if (event.kind === "tier_up" && Number(event.tier) >= 1 && Number(event.tier) <= 4) {
     const tier = Number(event.tier);
     await channel.send(
       `${TIER_EMOJI[tier]} ${player} reached **${TIER_NAMES[tier]}** on ${await targetName(pool, event.target_type, event.target_id)}`
@@ -330,6 +331,7 @@ module.exports = {
   recomputeLicense,
   licenseForDiscord,
   syncMemberRoles,
+  postEvent,
   licenseRoleIds,
   rolesForLicense,
   formatTime,
