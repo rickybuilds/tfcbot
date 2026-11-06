@@ -158,7 +158,7 @@ async function licenseForDiscord(pool, steamLinks, discordId) {
 async function syncMemberRoles({ client, pool, steamLinks, config, logger }, discordId) {
   const guildId = process.env.GUILD_ID || process.env.DISCORD_GUILD_ID;
   const guilds = guildId
-    ? [await client.guilds.fetch(guildId).catch(() => null)].filter(Boolean)
+    ? [await client.guilds.fetch(guildId)]
     : [...client.guilds.cache.values()];
   const roleIds = licenseRoleIds(config);
   const managed = new Set(Object.values(roleIds).filter(Boolean));
@@ -169,8 +169,16 @@ async function syncMemberRoles({ client, pool, steamLinks, config, logger }, dis
   const wanted = rolesForLicense(license, roleIds);
 
   for (const guild of guilds) {
-    const member = await guild.members.fetch(discordId).catch(() => null);
-    if (!member) continue;
+    let member;
+    try {
+      member = await guild.members.fetch(discordId);
+    } catch (error) {
+      // Discord's Unknown Member means the user is not in this guild; other
+      // failures must be retried rather than advancing the event cursor.
+      if (Number(error.code) === 10007) continue;
+      throw error;
+    }
+    if (!member) throw new Error("Discord member lookup returned no member");
     for (const roleId of managed) {
       const has = member.roles.cache.has(roleId);
       // The offense role may be granted by hand too; Bootcamp only adds it.

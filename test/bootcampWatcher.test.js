@@ -89,6 +89,21 @@ test("a Steam link lookup failure does not revoke license roles", async () => {
   }
 });
 
+test("role synchronization retries transient member lookup failures but skips unknown members", async () => {
+  const original = process.env.BOOTCAMP_LICENSED_ROLE_ID;
+  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
+  const guild = { members: { fetch: async () => { throw new Error("Discord unavailable"); } } };
+  const ctx = { client: { guilds: { cache: new Map([["guild", guild]]) } }, pool: fakePool([]), config: {}, logger: {}, steamLinks: { getSteamIds: async () => [] } };
+  try {
+    await assert.rejects(syncMemberRoles(ctx, "user"), /Discord unavailable/);
+    guild.members.fetch = async () => { const error = new Error("Unknown Member"); error.code = 10007; throw error; };
+    await assert.doesNotReject(syncMemberRoles(ctx, "user"));
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_LICENSED_ROLE_ID;
+    else process.env.BOOTCAMP_LICENSED_ROLE_ID = original;
+  }
+});
+
 test("the first poll starts at the end of the feed instead of replaying history", async () => {
   const store = new Map();
   const settings = {
