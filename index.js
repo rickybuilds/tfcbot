@@ -50,6 +50,7 @@ const {
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
+const { startBootcampWatcher } = require("./services/bootcampWatcher");
 const { EloShadowService } = require("./services/eloShadow");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
@@ -458,6 +459,12 @@ startSpeedrunPlayerLinkSync({
   db: matchesStore.db,
   speedrunDb: mysqlPool,
 });
+
+  try {
+    await startBootcampWatcher({ client, pool: mysqlPool, config, settings, steamLinks, logger: console });
+  } catch (error) {
+    console.error("[BOOTCAMP-WATCHER] failed:", error);
+  }
 
   try { startJailWatcher(client, jailStore); } catch (e) { console.error("[JAIL-WATCHER] failed:", e); }
     // Auto-re-jail anyone who rejoins while still flagged
