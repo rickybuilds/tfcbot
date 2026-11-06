@@ -141,7 +141,8 @@ async function findBootcampChannel(client) {
 
 // Best license across every Steam ID a Discord member has linked.
 async function licenseForDiscord(pool, steamLinks, discordId) {
-  const links = (await steamLinks.getSteamIds(discordId).catch(() => [])) || [];
+  // Failure to read identities must not be interpreted as a player unlinking.
+  const links = (await steamLinks.getSteamIds(discordId)) || [];
   const steamIds = links.map(l => l.steam_id).filter(Boolean);
   if (!steamIds.length) return { level: "none", endorsements: [] };
   const [rows] = await pool.query(
@@ -174,9 +175,9 @@ async function syncMemberRoles({ client, pool, steamLinks, config, logger }, dis
       const has = member.roles.cache.has(roleId);
       // The offense role may be granted by hand too; Bootcamp only adds it.
       if (wanted.has(roleId) && !has)
-        await member.roles.add(roleId, "Bootcamp license").catch(e => logger.warn?.(`[bootcamp] add role ${roleId}: ${e.message}`));
+        await member.roles.add(roleId, "Bootcamp license");
       else if (!wanted.has(roleId) && has && roleId !== roleIds.offense)
-        await member.roles.remove(roleId, "Bootcamp license").catch(e => logger.warn?.(`[bootcamp] remove role ${roleId}: ${e.message}`));
+        await member.roles.remove(roleId, "Bootcamp license");
     }
   }
 }
@@ -263,9 +264,8 @@ async function pollBootcampEvents(ctx) {
 
     for (const [steamid, name] of touched) {
       const { previous, next, changed } = await recomputeLicense(pool, steamid, catalogue);
-      if (!changed) continue;
-      const rose = levelRank(next.level) > levelRank(previous.level) ||
-        next.endorsements.some(e => !previous.endorsements.includes(e));
+      const rose = changed && (levelRank(next.level) > levelRank(previous.level) ||
+        next.endorsements.some(e => !previous.endorsements.includes(e)));
       if (rose) {
         await pool.query(
           "INSERT INTO bootcamp_events (kind, steamid, player_name, target_type) VALUES ('license', ?, ?, ?)",
@@ -273,9 +273,9 @@ async function pollBootcampEvents(ctx) {
         ).catch(() => {});
         await postLicense(channel, steamid, name, next);
       }
-      const linked = (await steamLinks?.getDiscordBySteam?.(steamid).catch(() => [])) || [];
+      const linked = (await steamLinks.getDiscordBySteam(steamid)) || [];
       for (const link of linked)
-        await syncMemberRoles(ctx, link.discord_id).catch(e => logger.warn?.(`[bootcamp] role sync: ${e.message}`));
+        await syncMemberRoles(ctx, link.discord_id);
     }
 
     settings?.setNumber?.(LAST_EVENT_KEY, lastId);

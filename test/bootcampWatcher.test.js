@@ -7,6 +7,7 @@ const {
   rolesForLicense,
   licenseRoleIds,
   pollBootcampEvents,
+  syncMemberRoles,
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
@@ -72,6 +73,22 @@ test("license role ids come from the environment and reuse the offense role", ()
   delete process.env.BOOTCAMP_ENGINEER_ROLE_ID;
 });
 
+test("a Steam link lookup failure does not revoke license roles", async () => {
+  const original = process.env.BOOTCAMP_LICENSED_ROLE_ID;
+  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
+  let removed = 0;
+  const member = { roles: { cache: new Set(["licensed"]), remove: async () => { removed++; } } };
+  const guild = { members: { fetch: async () => member } };
+  const ctx = { client: { guilds: { cache: new Map([["guild", guild]]) } }, pool: {}, config: {}, logger: {}, steamLinks: { getSteamIds: async () => { throw new Error("link store unavailable"); } } };
+  try {
+    await assert.rejects(syncMemberRoles(ctx, "user"), /link store unavailable/);
+    assert.equal(removed, 0);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_LICENSED_ROLE_ID;
+    else process.env.BOOTCAMP_LICENSED_ROLE_ID = original;
+  }
+});
+
 test("the first poll starts at the end of the feed instead of replaying history", async () => {
   const store = new Map();
   const settings = {
@@ -106,6 +123,21 @@ test("an initially empty feed processes the first event on the next poll", async
   await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
   await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
   assert.equal(store.get("bootcamp:last_event_id"), 1);
+});
+
+test("a link lookup failure keeps the event cursor for retry", async () => {
+  const store = new Map([["bootcamp:last_event_id", 10]]);
+  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
+  const pool = fakePool([
+    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "tier_up", steamid: "STEAM_0:1:7", target_type: "drill", target_id: 1, tier: 1 }]],
+    [/FROM bootcamp_drills/, () => catalogue.drills],
+    [/FROM bootcamp_maps/, () => catalogue.rotation],
+    [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
+  ]);
+  const client = { channels: { cache: { find: () => null } } };
+  const steamLinks = { getDiscordBySteam: async () => { throw new Error("offline"); } };
+  await pollBootcampEvents({ client, pool, settings, steamLinks, logger: { error() {} } });
+  assert.equal(store.get("bootcamp:last_event_id"), 10);
 });
 
 test("a tier-up recomputes the license and advances the feed", async () => {
