@@ -51,10 +51,18 @@ test("player last games ignore completed roster-only matches", () => {
   );
   db.prepare("INSERT INTO rating_changes VALUES (?, ?)").run("VALID_WIN", playerId);
 
+  const now = 5000000;
+  const cutoff = now - 45 * 86400;
+  db.prepare("UPDATE matches SET created_at = ? WHERE match_id = ?").run(now, "ROSTER_ONLY_LOSS");
+  db.prepare("UPDATE matches SET created_at = ? WHERE match_id = ?").run(cutoff, "VALID_WIN");
+  insertMatch.run("EXPIRED_WIN", "RED", cutoff - 1, "old_map", "completed", "[]", JSON.stringify([playerId]));
+  db.prepare("INSERT INTO rating_changes VALUES (?, ?)").run("EXPIRED_WIN", playerId);
+
   try {
-    const games = getPlayerLastGames(db, playerId);
+    const games = getPlayerLastGames(db, playerId, now);
     assert.deepEqual(games.map(game => game.match_id), ["VALID_WIN"]);
     assert.equal(games[0].state, "win");
+    assert.deepEqual(getPlayerLastGames(db, playerId, now + 1), []);
   } finally {
     db.close();
   }
