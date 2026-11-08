@@ -28,6 +28,14 @@ platinum members. If it is unset, the configured licensed role is reused.
 endorsement; existing manually granted `OFFENSE_ROLE_ID` is not removed by
 Bootcamp synchronization.
 
+The event cursor is persisted after each successful notification, and failed
+Discord sends or role synchronization leave the event eligible for retry. The
+watcher also announces lesson completions and reads license details from the
+authoritative `bootcamp_licenses` row when delivering a license event. Configure
+an available Bootcamp channel (or a channel with the configured name) before
+enabling the watcher; publishable events remain queued while no channel is
+available.
+
 ## Optional queue enforcement
 
 Both switches default to false:

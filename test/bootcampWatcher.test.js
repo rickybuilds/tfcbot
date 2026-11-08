@@ -89,6 +89,43 @@ test("record announcements link to the Bootcamp replay API", async () => {
   assert.match(sent[0].embeds[0].data.description, /speedrun-replay\.html\?source=bootcamp&runId=12/);
 });
 
+test("failed record delivery leaves the event cursor for retry", async () => {
+  const store = new Map([["bootcamp:last_event_id", 10]]);
+  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
+  const pool = fakePool([
+    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "record", steamid: "STEAM_0:1:7", player_name: "runner", target_type: "route", target_id: 1, value_ms: 1000 }]],
+    [/SELECT id FROM bootcamp_runs/, () => [{ id: 11 }]],
+    [/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Ramp", map: "openfire" }]],
+  ]);
+  const channel = { send: async () => { throw new Error("Discord send failed"); } };
+  const client = { channels: { fetch: async () => null, cache: { find: () => channel } } };
+  await pollBootcampEvents({ client, pool, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
+  assert.equal(store.get("bootcamp:last_event_id"), 10);
+});
+
+test("successful events advance the durable cursor before a later event fails", async () => {
+  const store = new Map([["bootcamp:last_event_id", 10]]);
+  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
+  const pool = fakePool([
+    [/FROM bootcamp_events WHERE id > \?/, () => [11, 12].filter(id => id > (store.get("bootcamp:last_event_id") || 0)).map(id => ({ id, kind: "pb", steamid: "STEAM_0:1:7", player_name: "runner", target_type: "route", target_id: id, value_ms: 1000 }))],
+    [/SELECT name, map FROM bootcamp_routes/, (_sql, [id]) => [{ name: `Route ${id}`, map: "openfire" }]],
+  ]);
+  let sends = 0;
+  const channel = { send: async () => { if (++sends === 2) throw new Error("Discord send failed"); } };
+  const client = { channels: { fetch: async () => null, cache: { find: () => channel } } };
+  await pollBootcampEvents({ client, pool, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
+  assert.equal(store.get("bootcamp:last_event_id"), 11);
+});
+
+test("lesson completion events announce the achievement", async () => {
+  const sent = [];
+  const channel = { send: async message => sent.push(message) };
+  await postEvent(channel, fakePool([]), { kind: "lesson", steamid: "STEAM_0:1:1", player_name: "Runner", map: "2fort" });
+  assert.equal(sent.length, 1);
+  assert.match(String(sent[0]), /completed.*lesson/i);
+  assert.match(String(sent[0]), /2fort/i);
+});
+
 test("license role ids come from the environment and reuse the offense role", () => {
   process.env.BOOTCAMP_LICENSED_ROLE_ID = "111";
   process.env.BOOTCAMP_ENGINEER_ROLE_ID = "222";
@@ -174,7 +211,7 @@ test("license events advance the cursor even when no other events follow", async
   const pool = fakePool([
     [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "license" }]],
   ]);
-  const client = { channels: { cache: { find: () => null } } };
+  const client = { channels: { cache: { find: () => ({ send: async () => {} }) } } };
   await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
   assert.equal(store.get("bootcamp:last_event_id"), 11);
 });
@@ -186,7 +223,7 @@ test("an initially empty feed processes the first event on the next poll", async
     [/MAX\(id\)/, () => [{ id: 0 }]],
     [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 1, kind: "license" }]],
   ]);
-  const client = { channels: { cache: { find: () => null } } };
+  const client = { channels: { cache: { find: () => ({ send: async () => {} }) } } };
   await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
   await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
   assert.equal(store.get("bootcamp:last_event_id"), 1);
@@ -207,6 +244,15 @@ test("a link lookup failure keeps the event cursor for retry", async () => {
   assert.equal(store.get("bootcamp:last_event_id"), 10);
 });
 
+test("missing notification channel leaves publishable events queued", async () => {
+  const store = new Map([["bootcamp:last_event_id", 10]]);
+  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
+  const pool = fakePool([[/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "lesson", steamid: "STEAM_0:1:7", player_name: "runner", map: "2fort" }]]]);
+  const client = { channels: { cache: { find: () => null } } };
+  await pollBootcampEvents({ client, pool, settings, logger: { error() {}, warn() {} } });
+  assert.equal(store.get("bootcamp:last_event_id"), 10);
+});
+
 test("a tier-up recomputes the license and advances the feed", async () => {
   const store = new Map([["bootcamp:last_event_id", 10]]);
   const settings = {
@@ -223,7 +269,7 @@ test("a tier-up recomputes the license and advances the feed", async () => {
     [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
     [/FROM bootcamp_licenses/, () => []],
   ]);
-  const client = { channels: { fetch: async () => null, cache: { find: () => null } }, guilds: { cache: new Map() } };
+  const client = { channels: { fetch: async () => null, cache: { find: () => ({ send: async () => {} }) } }, guilds: { cache: new Map() } };
   const steamLinks = { getDiscordBySteam: async () => [] };
   await pollBootcampEvents({ client, pool, settings, steamLinks, logger: { error: e => { throw new Error(e); }, warn() {} } });
   assert.equal(store.get("bootcamp:last_event_id"), 11);

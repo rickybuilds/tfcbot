@@ -206,7 +206,7 @@ function playerUrl(steamid) {
 }
 
 async function postEvent(channel, pool, event) {
-  if (!channel) return;
+  if (!channel) return !["record", "pb", "tier_up", "lesson", "license"].includes(event.kind);
   const name = event.player_name || event.steamid;
   const player = `[${name}](${playerUrl(event.steamid)})`;
 
@@ -222,15 +222,23 @@ async function postEvent(channel, pool, event) {
       .setTitle("🏁 New Bootcamp route record")
       .setDescription(`${player} set the record on **${await targetName(pool, "route", event.target_id)}**: **${formatTime(event.value_ms)}**${replay}`)
       .setTimestamp(new Date(event.created_at || Date.now()));
-    await channel.send({ embeds: [embed] }).catch(() => {});
+    await channel.send({ embeds: [embed] });
   } else if (event.kind === "pb") {
     await channel.send(`${player} set a personal best on **${await targetName(pool, event.target_type, event.target_id)}**: **${formatTime(event.value_ms)}**`);
   } else if (event.kind === "tier_up" && Number(event.tier) >= 1 && Number(event.tier) <= 4) {
     const tier = Number(event.tier);
     await channel.send(
       `${TIER_EMOJI[tier]} ${player} reached **${TIER_NAMES[tier]}** on ${await targetName(pool, event.target_type, event.target_id)}`
-    ).catch(() => {});
+    );
+  } else if (event.kind === "lesson") {
+    await channel.send(`📘 ${player} completed a Bootcamp lesson on **${event.map || "a training map"}**.`);
+  } else if (event.kind === "license") {
+    const [rows] = await pool.query("SELECT level, endorsements FROM bootcamp_licenses WHERE steamid = ? LIMIT 1", [event.steamid]);
+    if (rows[0]) await postLicense(channel, event.steamid, event.player_name, {
+      level: rows[0].level, endorsements: parseEndorsements(rows[0].endorsements)
+    });
   }
+  return true;
 }
 
 async function postLicense(channel, steamid, name, next) {
@@ -238,7 +246,7 @@ async function postLicense(channel, steamid, name, next) {
   const parts = [`🎓 [${name || steamid}](${playerUrl(steamid)}) earned the **${formatLevel(next.level)}**`];
   if (next.endorsements.length)
     parts.push(`Endorsements: ${next.endorsements.map(formatEndorsement).join(", ")}`);
-  await channel.send(parts.join("\n")).catch(() => {});
+  await channel.send(parts.join("\n"));
 }
 
 /* ---------------------------------------------------------------------------
@@ -265,13 +273,12 @@ async function pollBootcampEvents(ctx) {
     if (!events.length) return;
 
     const channel = await findBootcampChannel(client);
-    const catalogue = await loadCatalogue(pool);
+    const catalogue = events.some(event => ["tier_up", "lesson", "record"].includes(event.kind))
+      ? await loadCatalogue(pool) : { drills: [], routes: [], rotation: [] };
     const touched = new Map();   // steamid -> player name
 
     for (const event of events) {
-      lastId = Math.max(lastId, Number(event.id));
       if (event.kind === "license") continue;
-      await postEvent(channel, pool, event);
       if (event.kind === "tier_up" || event.kind === "lesson" || event.kind === "record")
         touched.set(event.steamid, event.player_name);
     }
@@ -285,14 +292,24 @@ async function pollBootcampEvents(ctx) {
           "INSERT INTO bootcamp_events (kind, steamid, player_name, target_type) VALUES ('license', ?, ?, ?)",
           [steamid, name || "", next.level]
         ).catch(() => {});
-        await postLicense(channel, steamid, name, next);
       }
       const linked = (await steamLinks.getDiscordBySteam(steamid)) || [];
       for (const link of linked)
         await syncMemberRoles(ctx, link.discord_id);
     }
 
-    settings?.setNumber?.(LAST_EVENT_KEY, lastId);
+    // Advance after each successful delivery so a later Discord failure retries
+    // only the undelivered events. Role synchronization above must also succeed
+    // before publishing notifications or acknowledging this batch.
+    for (const event of events) {
+      const delivered = await postEvent(channel, pool, event);
+      if (!delivered) {
+        logger.warn?.(`[bootcampWatcher] no notification channel; event ${event.id} remains queued`);
+        return;
+      }
+      lastId = Math.max(lastId, Number(event.id));
+      settings?.setNumber?.(LAST_EVENT_KEY, lastId);
+    }
   } catch (err) {
     logger.error?.(`[bootcampWatcher] poll failed: ${err.message}`);
   } finally {
