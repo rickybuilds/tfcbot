@@ -8,7 +8,7 @@ test("!license shows the linked player's authoritative license and endorsements"
   const commands = new Map();
   const sent = [];
   register(commands, {
-    api: { player: async steamId => ({ steamId, license: { level: "licensed", endorsements: ["offense", "class:engineer"] } }) },
+    api: { player: async steamId => ({ steamId, license: { level: "licensed", endorsements: ["offense", "class:engineer"], cosignedBy: "12345678901234567" } }) },
     steamLinks: { getSteamIds: async id => id === "discord-user" ? [{ steam_id: "STEAM_0:1:5" }] : [] },
     config: {},
   });
@@ -18,6 +18,7 @@ test("!license shows the linked player's authoritative license and endorsements"
   });
   assert.match(sent[0].embeds[0].data.description, /TFC license/i);
   assert.match(sent[0].embeds[0].data.description, /Offense.*Engineer|Engineer.*Offense/);
+  assert.match(sent[0].embeds[0].data.description, /Mentor co-sign/);
   assert.match(sent[0].embeds[0].data.url, /bootcamp\.html\?steamid=STEAM_0%3A1%3A5/);
 });
 

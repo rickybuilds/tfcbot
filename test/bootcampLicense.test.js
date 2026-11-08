@@ -181,6 +181,14 @@ test("bestLicense merges linked Steam IDs", () => {
   assert.deepEqual(merged.endorsements, ["class:medic", "offense"]);
 });
 
+test("bestLicense preserves mentor attribution from the strongest linked Steam license", () => {
+  const merged = bestLicense(
+    { level: "permit", endorsements: [], cosignedBy: "11111111111111111" },
+    { level: "licensed", endorsements: ["offense"], cosignedBy: "22222222222222222" }
+  );
+  assert.equal(merged.cosignedBy, "22222222222222222");
+});
+
 test("formatting helpers", () => {
   assert.deepEqual(parseEndorsements("offense, class:hwguy,"), ["offense", "class:hwguy"]);
   assert.equal(formatLevel("permit"), "Learner's permit");

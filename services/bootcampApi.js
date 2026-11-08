@@ -41,6 +41,14 @@ function createBootcampApi({
       if (!response.data?.license || typeof response.data.license.level !== "string") throw new Error("Invalid Bootcamp license response");
       return response.data.license;
     },
+    async cosignLicense(steamId, mentorDiscordId) {
+      if (!STEAM_RE.test(String(steamId || ""))) throw new Error("Invalid Steam ID");
+      if (!/^\d{17,20}$/.test(String(mentorDiscordId || ""))) throw new Error("Invalid mentor Discord ID");
+      const response = await client.post(`${basePath}/integrations/discord/licenses/cosign`,
+        { steamId, mentorDiscordId }, requestOptions(serviceHeaders()));
+      if (response.data?.cosigned !== true) throw new Error("Invalid Bootcamp co-sign response");
+      return response.data;
+    },
     async player(steamId) {
       if (!STEAM_RE.test(String(steamId || ""))) throw new Error("Invalid Steam ID");
       const response = await client.get(`${basePath}/players/${encodeURIComponent(steamId)}`, requestOptions({}));

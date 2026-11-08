@@ -34,6 +34,18 @@ test("Bootcamp API client fails closed when service auth is missing or inputs ar
   assert.equal(api.baseUrl, "https://example.test");
 });
 
+test("Bootcamp API client records mentor co-signs through the authenticated website endpoint", async () => {
+  const calls = [];
+  const client = { post: async (...args) => { calls.push(args); return { data: { cosigned: true, steamId: args[1].steamId, mentorDiscordId: args[1].mentorDiscordId } }; } };
+  const api = createBootcampApi({ baseUrl: "https://example.test", token: "secret", client });
+  await api.cosignLicense("STEAM_0:1:4", "12345678901234567");
+  assert.equal(calls[0][0], "https://example.test/api/bootcamp/integrations/discord/licenses/cosign");
+  assert.deepEqual(calls[0][1], { steamId: "STEAM_0:1:4", mentorDiscordId: "12345678901234567" });
+  assert.equal(calls[0][2].headers.Authorization, "Bearer secret");
+  await assert.rejects(api.cosignLicense("invalid", "12345678901234567"), /Invalid Steam ID/);
+  await assert.rejects(api.cosignLicense("STEAM_0:1:4", "not-a-discord-id"), /Invalid mentor Discord ID/);
+});
+
 test("Bot runtime Bootcamp commands and watcher never query Bootcamp tables directly", () => {
   const root = path.join(__dirname, "..");
   for (const file of ["services/bootcampWatcher.js", "services/bootcampChallenge.js", "commands/bootcamp.js"]) {

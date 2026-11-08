@@ -13,6 +13,10 @@ when these values are unset.
   player to an administrator-managed `!linksteam` link.
 - `!challenge` shows the active weekly route or drill challenge and its
   standings. It remains disabled until `BOOTCAMP_CHALLENGES_ENABLED=true`.
+- `!cosign @player` records a mentor's optional learning-pug attestation. It is
+  disabled unless `BOOTCAMP_MENTOR_COSIGN_ENABLED=true` and
+  `BOOTCAMP_MENTOR_ROLE_ID` are configured. The target needs a primary linked
+  Steam ID; the website records the mentor Discord ID on the license.
 - Record announcements link to the shared replay viewer using the Bootcamp
   replay API. Speedrun replay links and data stay separate.
 
