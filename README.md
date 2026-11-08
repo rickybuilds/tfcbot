@@ -17,8 +17,8 @@ service token, persistent log archive, deployment and reprocessing commands.
 
 To show Aron PUGs' queue in a separate channel, set
 `ARON_PICKUP_CHANNEL_ID=your_discord_channel_id` in `.env` and restart the bot.
-The bot checks their API every 30 seconds and posts a board once at least four
-players are queued, then updates it as the queue changes. The bot needs access
+The bot checks their API every 30 seconds and posts a board even when the queue
+is empty, then updates it as the queue changes. The bot needs access
 to view the channel, read its message history, send messages, and embed links.
 
 Private 4v4 match predictions are available behind `PREDICTIONS_ENABLED=0` by default. Points are separate from ELO; betting closes a full two minutes after all eight roster players are confirmed on the assigned server. Use `!bank` or `!points` for a private DM with your balance, recent bets and player rewards. See [prediction rules, owner controls and rollout checks](docs/match-predictions.md).

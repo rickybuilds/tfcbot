@@ -32,7 +32,6 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
           message.embeds?.some(embed => embed.footer?.text === MARKER)) || null;
         checkedHistory = true;
       }
-      if (!board && queue.count < 4) return;
       const content = JSON.stringify({ count: queue.count, max: queue.max, players: queue.players });
       if (content === lastContent) return;
       const names = queue.players.map(player => escapeMarkdown(player.name.replace(/[\r\n]/g, " ").slice(0, 100)));
@@ -49,7 +48,7 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
         catch (error) {
           if (error.code !== 10008) throw error;
           board = null;
-          if (queue.count >= 4) board = await channel.send(payload);
+          board = await channel.send(payload);
         }
       } else {
         board = await channel.send(payload);
