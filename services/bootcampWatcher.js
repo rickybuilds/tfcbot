@@ -210,7 +210,7 @@ async function postEvent(channel, pool, event) {
       "SELECT id FROM bootcamp_runs WHERE route_id = ? AND steamid = ? AND time_ms = ? ORDER BY id DESC LIMIT 1",
       [event.target_id, event.steamid, event.value_ms]
     ).catch(() => [[]]);
-    const replay = runs[0] ? `\n[View replay](${baseUrl()}/speedrun-replay.html?bootcampRunId=${runs[0].id})` : "";
+    const replay = runs[0] ? `\n[View replay](${baseUrl()}/speedrun-replay.html?source=bootcamp&runId=${encodeURIComponent(runs[0].id)})` : "";
     const { EmbedBuilder } = require("discord.js");
     const embed = new EmbedBuilder()
       .setColor(0xffc83d)

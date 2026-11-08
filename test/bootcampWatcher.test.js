@@ -74,6 +74,21 @@ test("personal bests and bronze tier-ups produce progress notifications", async 
   assert.match(String(sent[1]), /bronze/i);
 });
 
+test("record announcements link to the Bootcamp replay API", async () => {
+  const sent = [];
+  const channel = { send: async message => sent.push(message) };
+  const pool = fakePool([
+    [/SELECT id FROM bootcamp_runs/, () => [{ id: 12 }]],
+    [/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Water", map: "openfire" }]],
+  ]);
+  await postEvent(channel, pool, {
+    kind: "record", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route",
+    target_id: 4, value_ms: 12000,
+  });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].embeds[0].data.description, /speedrun-replay\.html\?source=bootcamp&runId=12/);
+});
+
 test("license role ids come from the environment and reuse the offense role", () => {
   process.env.BOOTCAMP_LICENSED_ROLE_ID = "111";
   process.env.BOOTCAMP_ENGINEER_ROLE_ID = "222";
