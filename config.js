@@ -10,7 +10,6 @@ module.exports = {
     casino: String(process.env.CASINO_CHANNEL_ID || "").trim(),
     odds: process.env.ODDS_CHANNEL_ID,
     pickup: process.env.PICKUP_CHANNEL_ID,
-    aronPickup: String(process.env.ARON_PICKUP_CHANNEL_ID || "").trim(),
     clips: process.env.PICKUP_CLIPS_CHANNEL_ID,
     eloAdmin: process.env.ELO_ADMIN_CHANNEL_ID,
     eloTest: process.env.ELOTEST_CHANNEL_ID,
