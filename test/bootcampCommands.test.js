@@ -24,6 +24,7 @@ test("!license shows the linked player's authoritative license and endorsements"
   assert.deepEqual(queries[0].values, ["STEAM_0:1:5"]);
   assert.match(sent[0].embeds[0].data.description, /TFC license/i);
   assert.match(sent[0].embeds[0].data.description, /Offense.*Engineer|Engineer.*Offense/);
+  assert.match(sent[0].embeds[0].data.url, /bootcamp\.html\?steamid=STEAM_0%3A1%3A5/);
 });
 
 test("!license explains how an unlinked member can get linked", async () => {

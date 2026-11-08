@@ -9,6 +9,7 @@ const {
   pollBootcampEvents,
   syncMemberRoles,
   postEvent,
+  playerUrl,
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
@@ -32,6 +33,10 @@ const catalogue = {
   routes: [],
   rotation: [{ map: "openfire", rotation_order: 0 }],
 };
+
+test("player profile links target the existing query-driven Bootcamp hub", () => {
+  assert.match(playerUrl("STEAM_0:1:4"), /\/bootcamp\.html\?steamid=STEAM_0%3A1%3A4$/);
+});
 
 test("recomputeLicense stores a new permit and reports the change", async () => {
   const pool = fakePool([

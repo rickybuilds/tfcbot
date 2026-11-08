@@ -28,7 +28,7 @@ function register(registry, { pool, steamLinks }) {
           endorsements.length ? `Endorsements: ${endorsements.join(", ")}` : "No endorsements yet.",
           `Steam IDs: ${linked.map(row => `\`${row.steam_id}\``).join(", ")}`,
         ].join("\n"));
-        const profile = `${siteUrl()}/bootcamp-player.html?id=${encodeURIComponent(linked[0].steam_id)}`;
+        const profile = `${siteUrl()}/bootcamp.html?steamid=${encodeURIComponent(linked[0].steam_id)}`;
         embed.setURL(profile).setFooter({ text: "Training hub and detailed progress are available on your player profile." });
       }
       await message.channel.send({ embeds: [embed] });

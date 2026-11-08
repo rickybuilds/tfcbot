@@ -202,7 +202,7 @@ async function targetName(pool, type, id) {
 }
 
 function playerUrl(steamid) {
-  return `${baseUrl()}/bootcamp-player.html?id=${encodeURIComponent(steamid)}`;
+  return `${baseUrl()}/bootcamp.html?steamid=${encodeURIComponent(steamid)}`;
 }
 
 async function postEvent(channel, pool, event) {
@@ -357,4 +357,5 @@ module.exports = {
   licenseRoleIds,
   rolesForLicense,
   formatTime,
+  playerUrl,
 };
