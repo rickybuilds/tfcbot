@@ -3,6 +3,7 @@ const { EmbedBuilder, escapeMarkdown } = require("discord.js");
 
 const API_URL = "http://137.184.215.22:4000/api/queue";
 const MARKER = "Aron PUGs queue";
+const TITLE_PREFIX = "Aron PUGs Player Queue — (";
 
 function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
   const response = await axios.get(API_URL, { timeout: 10000 });
@@ -29,7 +30,7 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
       if (!checkedHistory) {
         const messages = await channel.messages.fetch({ limit: 100 });
         board = messages.find(message => message.author?.id === client.user.id &&
-          message.embeds?.some(embed => embed.footer?.text === MARKER)) || null;
+          message.embeds?.some(embed => embed.footer?.text === MARKER || embed.title?.startsWith(TITLE_PREFIX))) || null;
         checkedHistory = true;
       }
       const content = JSON.stringify({ count: queue.count, max: queue.max, players: queue.players });
@@ -38,14 +39,12 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
       const updatedAt = new Date();
       const embed = new EmbedBuilder()
         .setColor(0xed4245)
-        .setTitle(`Aron PUGs Player Queue — (${queue.count}/${queue.max})`)
+        .setTitle(`${TITLE_PREFIX}${queue.count}/${queue.max})`)
         .setDescription((names.join("\n") || "_empty_").slice(0, 4000))
         .addFields(
           { name: "Join Aron PUGs", value: "https://discord.gg/udNgzWfDWa" },
           { name: "Last updated", value: `<t:${Math.floor(updatedAt.getTime() / 1000)}:D> at <t:${Math.floor(updatedAt.getTime() / 1000)}:T>` }
-        )
-        .setFooter({ text: MARKER })
-        .setTimestamp(updatedAt);
+        );
       const payload = { embeds: [embed], allowedMentions: { parse: [] } };
       if (board) {
         try { await board.edit(payload); }

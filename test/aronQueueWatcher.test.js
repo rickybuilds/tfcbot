@@ -12,8 +12,9 @@ test('publishes an empty queue and updates the same board as players join', asyn
   assert.match(sent[0].embeds[0].data.title, /0\/10/);
   const embed = sent[0].embeds[0].data;
   const updated = embed.fields.find(field => field.name === 'Last updated');
-  const seconds = Math.floor(Date.parse(embed.timestamp) / 1000);
-  assert.equal(updated.value, `<t:${seconds}:D> at <t:${seconds}:T>`);
+  assert.match(updated.value, /^<t:(\d+):D> at <t:\1:T>$/);
+  assert.equal(embed.footer, undefined);
+  assert.equal(embed.timestamp, undefined);
   data = { ...data, count: 1, players: [{name:'a'}] };
   await watcher.poll(); assert.equal(sent.length, 1);
   assert.match(edits[0].embeds[0].data.title, /1\/10/);
@@ -50,4 +51,13 @@ test('recovers the existing board after a restart even below four players', asyn
   const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => ({ ok: true, count: 0, max: 10, players: [] }) });
   await watcher.poll();
   assert.match(edits[0].embeds[0].data.title, /0\/10/);
+});
+
+test('recovers a board without the old footer after a restart', async () => {
+  const edits = [];
+  const existing = { author: { id: 'bot' }, embeds: [{ title: 'Aron PUGs Player Queue — (0/10)' }], edit: async payload => edits.push(payload) };
+  const channel = { messages: { fetch: async () => [existing] }, send: async () => assert.fail('should reuse the existing board') };
+  const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => ({ ok: true, count: 0, max: 10, players: [] }) });
+  await watcher.poll();
+  assert.equal(edits.length, 1);
 });
