@@ -42,7 +42,7 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
         .setDescription((names.join("\n") || "_empty_").slice(0, 4000))
         .addFields(
           { name: "Join Aron PUGs", value: "https://discord.gg/udNgzWfDWa" },
-          { name: "Last updated", value: `<t:${Math.floor(updatedAt.getTime() / 1000)}:T>` }
+          { name: "Last updated", value: `<t:${Math.floor(updatedAt.getTime() / 1000)}:D> at <t:${Math.floor(updatedAt.getTime() / 1000)}:T>` }
         )
         .setFooter({ text: MARKER })
         .setTimestamp(updatedAt);

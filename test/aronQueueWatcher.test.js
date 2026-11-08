@@ -12,7 +12,8 @@ test('publishes an empty queue and updates the same board as players join', asyn
   assert.match(sent[0].embeds[0].data.title, /0\/10/);
   const embed = sent[0].embeds[0].data;
   const updated = embed.fields.find(field => field.name === 'Last updated');
-  assert.equal(updated.value, `<t:${Math.floor(Date.parse(embed.timestamp) / 1000)}:T>`);
+  const seconds = Math.floor(Date.parse(embed.timestamp) / 1000);
+  assert.equal(updated.value, `<t:${seconds}:D> at <t:${seconds}:T>`);
   data = { ...data, count: 1, players: [{name:'a'}] };
   await watcher.poll(); assert.equal(sent.length, 1);
   assert.match(edits[0].embeds[0].data.title, /1\/10/);
