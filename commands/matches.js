@@ -152,13 +152,15 @@ function formatPlayerLastGames(games, playerId) {
   return `Last ${games.length}: ${indicators} [W-L-T(${getPlayerGameRecord(games)})](<${profileUrl}>)`;
 }
 
-function getPlayerLastGames(database, playerId) {
+function getPlayerLastGames(database, playerId, now = Math.floor(Date.now() / 1000)) {
   const id = String(playerId);
+  const cutoff = now - 45 * 86400;
   const rows = database
     .prepare(
       `SELECT match_id, winner, created_at, map_name, status, blue_ids, red_ids
        FROM matches
        WHERE status = 'completed'
+         AND created_at >= ?
          AND EXISTS (
            SELECT 1
            FROM rating_changes rc
@@ -172,7 +174,7 @@ function getPlayerLastGames(database, playerId) {
        ORDER BY created_at DESC
        LIMIT 10`
     )
-    .all(id, id, id);
+    .all(cutoff, id, id, id);
 
   const mvpMatches = new Set();
   try {
@@ -253,7 +255,7 @@ function register(reg, deps = {}) {
       const database = deps.elo?.db || getElo().db;
       const games = getPlayerLastGames(database, target.id);
       if (!games.length) {
-        return message.channel.send(`No completed games found for <@${target.id}>.`);
+        return message.channel.send(`No completed games in the last 45 days for <@${target.id}>.`);
       }
 
       await message.channel.send(formatPlayerLastGames(games, target.id));
