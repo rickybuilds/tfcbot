@@ -31,6 +31,59 @@ test("!license explains how an unlinked member can get linked", async () => {
   assert.match(sent[0].embeds[0].data.description, /linksteam/i);
 });
 
+test("!learning stays disabled until the eligibility flag is enabled", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+  delete process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+  try {
+    register(commands, { api: { player: async () => { throw new Error("must not query"); } },
+      steamLinks: { getSteamIds: async () => [{ steam_id: "STEAM_0:1:5" }] }, config: {} });
+    await commands.get("learning")({ author: { id: "trainee" }, channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0], /not enabled/i);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+    else process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED = original;
+  }
+});
+
+test("!learning verifies the linked player's learner permit through the website API", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+  process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED = "true";
+  try {
+    register(commands, {
+      api: { player: async steamId => ({ steamId, license: { level: "permit", endorsements: [] } }) },
+      steamLinks: { getSteamIds: async () => [{ steam_id: "STEAM_0:1:5" }] }, config: {}
+    });
+    await commands.get("learning")({ author: { id: "trainee" }, channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0], /eligible for learning pugs/i);
+    assert.match(sent[0], /Learner's permit/i);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+    else process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED = original;
+  }
+});
+
+test("!learning explains that a permit is still needed", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+  process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED = "true";
+  try {
+    register(commands, {
+      api: { player: async steamId => ({ steamId, license: { level: "none", endorsements: [] } }) },
+      steamLinks: { getSteamIds: async () => [{ steam_id: "STEAM_0:1:5" }] }, config: {}
+    });
+    await commands.get("learning")({ author: { id: "trainee" }, channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0], /need a learner's permit/i);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED;
+    else process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED = original;
+  }
+});
+
 test("!bootcamp provides the training hub and in-game start command", async () => {
   const commands = new Map();
   const sent = [];

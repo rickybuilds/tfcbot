@@ -2,7 +2,7 @@
 
 const { EmbedBuilder } = require("discord.js");
 const { licenseForDiscord } = require("../services/bootcampWatcher");
-const { formatLevel, formatEndorsement } = require("../lib/bootcampLicense");
+const { formatLevel, formatEndorsement, levelRank } = require("../lib/bootcampLicense");
 const { challengesEnabled } = require("../services/bootcampChallenge");
 
 function siteUrl() {
@@ -37,6 +37,29 @@ function register(registry, { api, steamLinks, config = {} }) {
     } catch (error) {
       console.error("[bootcamp license] lookup failed:", error);
       await message.channel.send("Could not load your Bootcamp license right now. Please try again shortly.");
+    }
+  });
+
+  registry.set("learning", async message => {
+    if (String(process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED || "").trim().toLowerCase() !== "true") {
+      await message.channel.send("Learning-pug eligibility checks are not enabled.");
+      return;
+    }
+    try {
+      const linked = (await steamLinks.getSteamIds(message.author.id)) || [];
+      if (!linked.length) {
+        await message.channel.send("Link a Steam ID with `!linksteam`, then use `!learning` to check permit eligibility.");
+        return;
+      }
+      const license = await licenseForDiscord(api, steamLinks, message.author.id, linked);
+      if (levelRank(license.level) >= levelRank("permit")) {
+        await message.channel.send("You have a Learner's permit and are eligible for learning pugs. Ask an organizer for the next session.");
+      } else {
+        await message.channel.send("You need a Learner's permit for learning pugs. Complete a bronze map-tour quiz on the Bootcamp server, then use `!learning` again.");
+      }
+    } catch (error) {
+      console.error("[bootcamp learning eligibility] lookup failed:", error);
+      await message.channel.send("Could not verify learning-pug eligibility right now. Please try again shortly.");
     }
   });
 

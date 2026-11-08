@@ -11,6 +11,10 @@ when these values are unset.
 - `!license` shows the player's linked Steam IDs, authoritative license,
   endorsements and profile link. If no Steam ID is linked, it directs the
   player to an administrator-managed `!linksteam` link.
+- `!learning` checks the authoritative Website license and reports whether the
+  player has the Learner's permit required for learning pugs. It is disabled
+  unless `BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED=true`. This is an eligibility
+  check only; the Bot does not currently run a separate learning-pug queue.
 - `!challenge` shows the active weekly route or drill challenge and its
   standings. It remains disabled until `BOOTCAMP_CHALLENGES_ENABLED=true`.
 - `!cosign @player` records a mentor's optional learning-pug attestation. It is
@@ -72,6 +76,9 @@ HLDS `!add` queue events on the queue-required role. Administrators retain
 access. `BOOTCAMP_OFFENSE_GATE_ENABLED=true` requires the Bootcamp offense
 endorsement for full-time offense selection. Existing queue role rules remain
 unchanged when these flags are false.
+
+The optional `!learning` command is separately gated by
+`BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED=false` by default.
 
 Enable role synchronization and verify linked accounts, role assignment,
 Discord `!add`, HLDS `!add`, admin bypass, and offense selection in a test guild

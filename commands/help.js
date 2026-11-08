@@ -44,6 +44,16 @@ function register(reg, { config }) {
         "`!tfcmap <mapname>` — Check if a map exists on mrclan/tfcmaps.net",
     });
 
+    emb.addFields({
+      name: "🏁 TFC Bootcamp",
+      value:
+        "`!bootcamp` — Open the training hub\n" +
+        "`!license` — Show your linked Steam IDs, license and endorsements\n" +
+        "`!learning` — Check Learner's permit eligibility (feature flag required)\n" +
+        "`!challenge` — Show the active weekly training challenge\n" +
+        "`!cosign @player` — Mentor co-sign (mentor role and feature flag required)",
+    });
+
 
     if (config.predictionsEnabled) emb.addFields({
       name: "Private Match Predictions",
