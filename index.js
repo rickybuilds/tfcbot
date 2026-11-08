@@ -52,6 +52,7 @@ const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
 const { startBootcampWatcher } = require("./services/bootcampWatcher");
 const { createBootcampApi } = require("./services/bootcampApi");
+const { startAronQueueWatcher } = require("./services/aronQueueWatcher");
 const { EloShadowService } = require("./services/eloShadow");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
@@ -440,6 +441,7 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  startAronQueueWatcher({ client, channelId: config.channels.aronPickup });
   try { await predictions.initialize(); } catch (error) {
     predictions.store.setMetadata("paused", "1");
     console.error("[predictions] recovery failed; betting paused");
