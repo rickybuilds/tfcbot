@@ -10,6 +10,7 @@ const {
   syncMemberRoles,
   postEvent,
   playerUrl,
+  announceWeeklyChallenge,
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
@@ -33,6 +34,42 @@ const catalogue = {
   routes: [],
   rotation: [{ map: "openfire", rotation_order: 0 }],
 };
+
+test("weekly challenge announcements are disabled unless explicitly enabled", async () => {
+  const original = process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
+  delete process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
+  let queries = 0;
+  try {
+    await announceWeeklyChallenge({ pool: { query: async () => { queries++; throw new Error("must not query"); } } });
+    assert.equal(queries, 0);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
+    else process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED = original;
+  }
+});
+
+test("weekly challenge announcement retries failed sends and records successful delivery once", async () => {
+  const original = process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
+  process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED = "true";
+  const values = new Map();
+  const settings = { getNumber: (key, fallback) => values.has(key) ? values.get(key) : fallback, setNumber: (key, value) => values.set(key, value) };
+  const pool = fakePool([[/FROM bootcamp_challenges/, () => [{ id: 12, title: "Weekly run", map: "openfire", target_type: "route", target_id: 4, target_name: "Main", week_start: "2026-11-02" }]]]);
+  let attempts = 0;
+  const channel = { send: async text => { attempts++; if (attempts === 1) throw new Error("Discord offline"); return text; } };
+  const client = { channels: { cache: { find: () => channel } } };
+  const ctx = { client, pool, settings, logger: { warn() {} } };
+  try {
+    await assert.rejects(announceWeeklyChallenge(ctx), /Discord offline/);
+    assert.equal(values.has("bootcamp:last_challenge_id"), false);
+    await announceWeeklyChallenge(ctx);
+    assert.equal(values.get("bootcamp:last_challenge_id"), 12);
+    await announceWeeklyChallenge(ctx);
+    assert.equal(attempts, 2);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
+    else process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED = original;
+  }
+});
 
 test("player profile links target the existing query-driven Bootcamp hub", () => {
   assert.match(playerUrl("STEAM_0:1:4"), /\/bootcamp\.html\?steamid=STEAM_0%3A1%3A4$/);

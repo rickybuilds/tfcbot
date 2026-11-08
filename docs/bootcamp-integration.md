@@ -11,6 +11,8 @@ when these values are unset.
 - `!license` shows the player's linked Steam IDs, authoritative license,
   endorsements and profile link. If no Steam ID is linked, it directs the
   player to an administrator-managed `!linksteam` link.
+- `!challenge` shows the active weekly route or drill challenge and its
+  standings. It remains disabled until `BOOTCAMP_CHALLENGES_ENABLED=true`.
 - Record announcements link to the shared replay viewer using the Bootcamp
   replay API. Speedrun replay links and data stay separate.
 
@@ -35,6 +37,12 @@ authoritative `bootcamp_licenses` row when delivering a license event. Configure
 an available Bootcamp channel (or a channel with the configured name) before
 enabling the watcher; publishable events remain queued while no channel is
 available.
+
+Weekly challenge posts are separately controlled by
+`BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED=true` and require the watcher to be
+enabled. The watcher stores the last successfully announced challenge ID and
+retries a failed delivery. See `TFC-Bootcamp/docs/weekly-challenges.md` for the
+shared challenge schema and scheduling tool.
 
 ## Optional queue enforcement
 

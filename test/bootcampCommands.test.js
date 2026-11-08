@@ -44,3 +44,41 @@ test("!bootcamp provides the training hub and in-game start command", async () =
   assert.match(sent[0], /bootcamp\.html/i);
   assert.match(sent[0], /tt_lessons/i);
 });
+
+test("!challenge shows the active weekly challenge and its standings when enabled", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_CHALLENGES_ENABLED;
+  process.env.BOOTCAMP_CHALLENGES_ENABLED = "true";
+  const pool = { query: async sql => {
+    if (/FROM bootcamp_challenges/i.test(sql)) return [[{ id: 3, title: "Openfire route", map: "openfire", target_type: "route", target_id: 9,
+      target_name: "Main Conc", week_start: "2026-11-02", ends_at: "2026-11-09 00:00:00" }]];
+    if (/FROM bootcamp_runs/i.test(sql)) return [[{ steamid: "STEAM_0:1:5", player_name: "Runner", class_id: 5, result: 12000 }]];
+    throw new Error("Unexpected challenge query");
+  } };
+  try {
+    register(commands, { pool, config: {} });
+    await commands.get("challenge")({ channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0].embeds[0].data.title, /weekly.*challenge/i);
+    assert.match(sent[0].embeds[0].data.description, /Openfire route/);
+    assert.match(sent[0].embeds[0].data.description, /Runner.*12\.000s/);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_CHALLENGES_ENABLED;
+    else process.env.BOOTCAMP_CHALLENGES_ENABLED = original;
+  }
+});
+
+test("!challenge stays disabled until explicitly enabled", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_CHALLENGES_ENABLED;
+  delete process.env.BOOTCAMP_CHALLENGES_ENABLED;
+  try {
+    register(commands, { pool: { query: async () => { throw new Error("must not query"); } }, config: {} });
+    await commands.get("challenge")({ channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0], /not enabled/i);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_CHALLENGES_ENABLED;
+    else process.env.BOOTCAMP_CHALLENGES_ENABLED = original;
+  }
+});

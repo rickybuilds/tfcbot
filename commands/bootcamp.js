@@ -3,6 +3,7 @@
 const { EmbedBuilder } = require("discord.js");
 const { licenseForDiscord } = require("../services/bootcampWatcher");
 const { formatLevel, formatEndorsement } = require("../lib/bootcampLicense");
+const { challengesEnabled, currentChallenge, challengeStandings } = require("../services/bootcampChallenge");
 
 function siteUrl() {
   return String(process.env.NONAME_URL || "https://nonamepickup.servehalflife.com").replace(/\/$/, "");
@@ -35,6 +36,32 @@ function register(registry, { pool, steamLinks }) {
     } catch (error) {
       console.error("[bootcamp license] lookup failed:", error);
       await message.channel.send("Could not load your Bootcamp license right now. Please try again shortly.");
+    }
+  });
+
+  registry.set("challenge", async message => {
+    if (!challengesEnabled()) {
+      await message.channel.send("Weekly Bootcamp challenges are not enabled.");
+      return;
+    }
+    try {
+      const challenge = await currentChallenge(pool);
+      if (!challenge) {
+        await message.channel.send("There is no active Bootcamp challenge this week.");
+        return;
+      }
+      const standings = await challengeStandings(pool, challenge, 10);
+      const rows = standings.map((row, index) => {
+        const result = challenge.target_type === "route" ? `${(Number(row.result) / 1000).toFixed(3)}s` : `${Number(row.result).toFixed(2)} pts`;
+        return `**${index + 1}.** ${row.player_name || row.steamid} · class ${row.class_id} — ${result}`;
+      });
+      const embed = new EmbedBuilder().setColor(0x72d8ff).setTitle("Weekly TFC Bootcamp Challenge")
+        .setDescription([`**${challenge.title}**`, `${challenge.map} · ${challenge.target_name} · ${challenge.target_type === "route" ? "Fastest valid run wins" : "Highest published score wins"}`,
+          "", ...(rows.length ? rows : ["No eligible results yet."])].join("\n"));
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("[bootcamp challenge] lookup failed:", error);
+      await message.channel.send("Could not load the Bootcamp challenge right now. Please try again shortly.");
     }
   });
 }

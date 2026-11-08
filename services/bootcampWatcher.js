@@ -22,8 +22,10 @@ const {
 
 const DEFAULT_POLL_MS = 20_000;
 const LAST_EVENT_KEY = "bootcamp:last_event_id";
+const LAST_CHALLENGE_KEY = "bootcamp:last_challenge_id";
 const TIER_NAMES = ["None", "Bronze", "Silver", "Gold", "Platinum"];
 const TIER_EMOJI = ["", "🥉", "🥈", "🥇", "💎"];
+const { currentChallenge } = require("./bootcampChallenge");
 
 let interval = null;
 let running = false;
@@ -144,6 +146,23 @@ async function findBootcampChannel(client) {
   return client.channels.cache.find(ch => ch.name === name) || null;
 }
 
+async function announceWeeklyChallenge({ client, pool, settings, logger = console }) {
+  if (String(process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED || "").trim().toLowerCase() !== "true")
+    return false;
+  const challenge = await currentChallenge(pool);
+  if (!challenge) return false;
+  const id = Number(challenge.id);
+  if (Number(settings?.getNumber?.(LAST_CHALLENGE_KEY, -1)) === id) return true;
+  const channel = await findBootcampChannel(client);
+  if (!channel) {
+    logger.warn?.("[bootcampWatcher] weekly challenge has no notification channel; announcement will retry");
+    return false;
+  }
+  await channel.send(`🏆 This week's TFC Bootcamp challenge: **${challenge.title}** — ${challenge.target_name} on **${challenge.map}**. Use !challenge to see standings.`);
+  settings?.setNumber?.(LAST_CHALLENGE_KEY, id);
+  return true;
+}
+
 // Best license across every Steam ID a Discord member has linked.
 async function licenseForDiscord(pool, steamLinks, discordId, linkedRows = null) {
   // Failure to read identities must not be interpreted as a player unlinking.
@@ -257,6 +276,10 @@ async function pollBootcampEvents(ctx) {
   running = true;
   const { client, pool, settings, steamLinks, logger = console } = ctx;
   try {
+    if (String(process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED || "").trim().toLowerCase() === "true") {
+      try { await announceWeeklyChallenge(ctx); }
+      catch (error) { logger.warn?.(`[bootcampWatcher] weekly challenge announcement failed: ${error.message}`); }
+    }
     let lastId = Number(settings?.getNumber?.(LAST_EVENT_KEY, -1) ?? -1);
     if (lastId < 0 || !Number.isFinite(lastId)) {
       // First start: begin at the end of the feed instead of replaying history.
@@ -358,4 +381,5 @@ module.exports = {
   rolesForLicense,
   formatTime,
   playerUrl,
+  announceWeeklyChallenge,
 };
