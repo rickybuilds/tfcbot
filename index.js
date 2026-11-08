@@ -51,6 +51,7 @@ const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
 const { startBootcampWatcher } = require("./services/bootcampWatcher");
+const { createBootcampApi } = require("./services/bootcampApi");
 const { EloShadowService } = require("./services/eloShadow");
 const mysqlPool = require("./lib/mysql");
 const { SteamLinks } = require("./lib/steamLinks");
@@ -84,6 +85,7 @@ const queueStore   = new QueueStore("queue.json");
 const offenseStore = new QueueStore("offense_queue.json");
 const banStore     = new BanStore("bot.db");
 const steamLinks = new SteamLinks(eloDbPath);
+const bootcampApi = createBootcampApi();
 
 // Jail system
 const jailStore    = new JailStore();
@@ -191,7 +193,7 @@ registry.set("addsupport", (m, a) => supporters.execute(m, a, deps));
 
 // Commands with register() entry points
 require("./commands/queue").register(registry, deps);
-require("./commands/bootcamp").register(registry, { pool: mysqlPool, steamLinks });
+require("./commands/bootcamp").register(registry, { api: bootcampApi, steamLinks });
 require("./commands/eloAdminAdjust").register(registry, deps);
 require("./commands/files").register(registry, deps);
 require("./commands/admin").register(registry, deps);
@@ -462,7 +464,7 @@ startSpeedrunPlayerLinkSync({
 });
 
   try {
-    await startBootcampWatcher({ client, pool: mysqlPool, config, settings, steamLinks, logger: console });
+    await startBootcampWatcher({ client, api: bootcampApi, config, settings, steamLinks, logger: console });
   } catch (error) {
     console.error("[BOOTCAMP-WATCHER] failed:", error);
   }

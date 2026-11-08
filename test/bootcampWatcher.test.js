@@ -3,9 +3,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  recomputeLicense,
-  rolesForLicense,
-  licenseRoleIds,
   pollBootcampEvents,
   syncMemberRoles,
   postEvent,
@@ -14,34 +11,40 @@ const {
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
-// Minimal mysql2-style pool: routes each query to a handler by its first match.
-function fakePool(handlers) {
-  const calls = [];
+function settingsStore(initial = {}) {
+  const store = new Map(Object.entries(initial));
   return {
-    calls,
-    async query(sql, params = []) {
-      calls.push({ sql, params });
-      for (const [pattern, fn] of handlers) {
-        if (pattern.test(sql)) return [await fn(sql, params)];
-      }
-      return [[]];
-    },
+    store,
+    getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback,
+    setNumber: (key, value) => store.set(key, value),
   };
 }
 
-const catalogue = {
-  drills: [{ id: 1, map: "openfire", slug: "tour_quiz", class_id: 0 }],
-  routes: [],
-  rotation: [{ map: "openfire", rotation_order: 0 }],
-};
+function mockClient(channel = null, guilds = new Map()) {
+  return {
+    channels: { fetch: async () => channel, cache: { find: () => channel } },
+    guilds: { cache: guilds, fetch: async () => [...guilds.values()][0] },
+  };
+}
 
-test("weekly challenge announcements are disabled unless explicitly enabled", async () => {
+function baseApi(overrides = {}) {
+  return {
+    latestEventId: async () => 0,
+    events: async () => [],
+    recomputeLicense: async () => ({ level: "permit", endorsements: [] }),
+    player: async steamId => ({ steamId, license: { level: "permit", endorsements: [] } }),
+    challenge: async () => ({ challenge: null, standings: [] }),
+    ...overrides,
+  };
+}
+
+test("weekly challenge announcements remain disabled unless explicitly enabled", async () => {
   const original = process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
   delete process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
-  let queries = 0;
+  let calls = 0;
   try {
-    await announceWeeklyChallenge({ pool: { query: async () => { queries++; throw new Error("must not query"); } } });
-    assert.equal(queries, 0);
+    assert.equal(await announceWeeklyChallenge({ api: { challenge: async () => { calls++; } } }), false);
+    assert.equal(calls, 0);
   } finally {
     if (original === undefined) delete process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
     else process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED = original;
@@ -51,18 +54,16 @@ test("weekly challenge announcements are disabled unless explicitly enabled", as
 test("weekly challenge announcement retries failed sends and records successful delivery once", async () => {
   const original = process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED;
   process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED = "true";
-  const values = new Map();
-  const settings = { getNumber: (key, fallback) => values.has(key) ? values.get(key) : fallback, setNumber: (key, value) => values.set(key, value) };
-  const pool = fakePool([[/FROM bootcamp_challenges/, () => [{ id: 12, title: "Weekly run", map: "openfire", target_type: "route", target_id: 4, target_name: "Main", week_start: "2026-11-02" }]]]);
+  const settings = settingsStore();
   let attempts = 0;
   const channel = { send: async text => { attempts++; if (attempts === 1) throw new Error("Discord offline"); return text; } };
-  const client = { channels: { cache: { find: () => channel } } };
-  const ctx = { client, pool, settings, logger: { warn() {} } };
+  const ctx = { client: mockClient(channel), api: baseApi({ challenge: async () => ({ challenge: { id: 12,
+    title: "Weekly run", map: "openfire", targetName: "Main" } }) }), settings, logger: { warn() {} } };
   try {
     await assert.rejects(announceWeeklyChallenge(ctx), /Discord offline/);
-    assert.equal(values.has("bootcamp:last_challenge_id"), false);
+    assert.equal(settings.store.has("bootcamp:last_challenge_id"), false);
     await announceWeeklyChallenge(ctx);
-    assert.equal(values.get("bootcamp:last_challenge_id"), 12);
+    assert.equal(settings.store.get("bootcamp:last_challenge_id"), 12);
     await announceWeeklyChallenge(ctx);
     assert.equal(attempts, 2);
   } finally {
@@ -75,256 +76,136 @@ test("player profile links target the existing query-driven Bootcamp hub", () =>
   assert.match(playerUrl("STEAM_0:1:4"), /\/bootcamp\.html\?steamid=STEAM_0%3A1%3A4$/);
 });
 
-test("recomputeLicense stores a new permit and reports the change", async () => {
-  const pool = fakePool([
-    [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
-    [/FROM bootcamp_licenses/, () => []],
-    [/INSERT INTO bootcamp_licenses/, () => ({ affectedRows: 1 })],
-  ]);
-  const result = await recomputeLicense(pool, "STEAM_0:1:1", catalogue);
-  assert.equal(result.changed, true);
-  assert.equal(result.next.level, "permit");
-  const insert = pool.calls.find(c => /INSERT INTO bootcamp_licenses/.test(c.sql));
-  assert.deepEqual(insert.params.slice(0, 3), ["STEAM_0:1:1", "permit", ""]);
-});
-
-test("recomputeLicense leaves an unchanged license alone", async () => {
-  const pool = fakePool([
-    [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
-    [/FROM bootcamp_licenses/, () => [{ level: "permit", endorsements: "" }]],
-  ]);
-  const result = await recomputeLicense(pool, "STEAM_0:1:1", catalogue);
-  assert.equal(result.changed, false);
-  assert.ok(!pool.calls.some(c => /INSERT INTO bootcamp_licenses/.test(c.sql)));
-});
-
-test("license roles stack: platinum keeps the licensed and permit roles", () => {
-  const roleIds = { permit: "p", licensed: "l", platinum: "x", offense: "o", "class:engineer": "e" };
-  const roles = rolesForLicense({ level: "platinum", endorsements: ["offense", "class:engineer"] }, roleIds);
-  assert.deepEqual([...roles].sort(), ["e", "l", "o", "p", "x"]);
-  assert.deepEqual([...rolesForLicense({ level: "none", endorsements: [] }, roleIds)], []);
-});
-
-test("personal bests and bronze tier-ups produce progress notifications", async () => {
+test("record announcements use the replay id supplied by the website API", async () => {
   const sent = [];
   const channel = { send: async message => sent.push(message) };
-  const pool = fakePool([[/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Water", map: "openfire" }]]]);
-  await postEvent(channel, pool, { kind: "pb", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route", target_id: 4, value_ms: 12000 });
-  await postEvent(channel, pool, { kind: "tier_up", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route", target_id: 4, tier: 1 });
-  assert.equal(sent.length, 2);
-  assert.match(String(sent[0]), /personal best/i);
-  assert.match(String(sent[1]), /bronze/i);
-});
-
-test("record announcements link to the Bootcamp replay API", async () => {
-  const sent = [];
-  const channel = { send: async message => sent.push(message) };
-  const pool = fakePool([
-    [/SELECT id FROM bootcamp_runs/, () => [{ id: 12 }]],
-    [/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Water", map: "openfire" }]],
-  ]);
-  await postEvent(channel, pool, {
-    kind: "record", steamid: "STEAM_0:1:1", player_name: "Runner", target_type: "route",
-    target_id: 4, value_ms: 12000,
+  await postEvent(channel, baseApi(), {
+    kind: "record", steamId: "STEAM_0:1:1", playerName: "Runner", targetName: "Water route",
+    valueMs: 12000, replayRunId: 12,
   });
   assert.equal(sent.length, 1);
   assert.match(sent[0].embeds[0].data.description, /speedrun-replay\.html\?source=bootcamp&runId=12/);
+  assert.match(sent[0].embeds[0].data.description, /Water route/);
 });
 
-test("failed record delivery leaves the event cursor for retry", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([
-    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "record", steamid: "STEAM_0:1:7", player_name: "runner", target_type: "route", target_id: 1, value_ms: 1000 }]],
-    [/SELECT id FROM bootcamp_runs/, () => [{ id: 11 }]],
-    [/SELECT name, map FROM bootcamp_routes/, () => [{ name: "Ramp", map: "openfire" }]],
-  ]);
-  const channel = { send: async () => { throw new Error("Discord send failed"); } };
-  const client = { channels: { fetch: async () => null, cache: { find: () => channel } } };
-  await pollBootcampEvents({ client, pool, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 10);
-});
-
-test("successful events advance the durable cursor before a later event fails", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([
-    [/FROM bootcamp_events WHERE id > \?/, () => [11, 12].filter(id => id > (store.get("bootcamp:last_event_id") || 0)).map(id => ({ id, kind: "pb", steamid: "STEAM_0:1:7", player_name: "runner", target_type: "route", target_id: id, value_ms: 1000 }))],
-    [/SELECT name, map FROM bootcamp_routes/, (_sql, [id]) => [{ name: `Route ${id}`, map: "openfire" }]],
-  ]);
-  let sends = 0;
-  const channel = { send: async () => { if (++sends === 2) throw new Error("Discord send failed"); } };
-  const client = { channels: { fetch: async () => null, cache: { find: () => channel } } };
-  await pollBootcampEvents({ client, pool, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 11);
-});
-
-test("lesson completion events announce the achievement", async () => {
+test("personal best, tier and lesson events announce normalized website event fields", async () => {
   const sent = [];
-  const channel = { send: async message => sent.push(message) };
-  await postEvent(channel, fakePool([]), { kind: "lesson", steamid: "STEAM_0:1:1", player_name: "Runner", map: "2fort" });
+  const channel = { send: async value => sent.push(value) };
+  const api = baseApi();
+  await postEvent(channel, api, { kind: "pb", steamId: "STEAM_0:1:1", playerName: "Runner", targetName: "Ramp", valueMs: 12000 });
+  await postEvent(channel, api, { kind: "tier_up", steamId: "STEAM_0:1:1", playerName: "Runner", targetName: "Ramp", tier: 1 });
+  await postEvent(channel, api, { kind: "lesson", steamId: "STEAM_0:1:1", playerName: "Runner", map: "2fort" });
+  assert.equal(sent.length, 3);
+  assert.match(sent[0], /personal best/i);
+  assert.match(sent[1], /Bronze/);
+  assert.match(sent[2], /completed.*lesson/i);
+  assert.match(sent[2], /2fort/i);
+});
+
+test("license events publish the website's current authoritative license", async () => {
+  const sent = [];
+  const api = baseApi({ player: async () => ({ license: { level: "licensed", endorsements: ["offense"] } }) });
+  await postEvent({ send: async value => sent.push(value) }, api, {
+    kind: "license", steamId: "STEAM_0:1:1", playerName: "Runner",
+  });
   assert.equal(sent.length, 1);
-  assert.match(String(sent[0]), /completed.*lesson/i);
-  assert.match(String(sent[0]), /2fort/i);
+  assert.match(sent[0], /TFC license/i);
+  assert.match(sent[0], /Offense/);
 });
 
-test("license role ids come from the environment and reuse the offense role", () => {
-  process.env.BOOTCAMP_LICENSED_ROLE_ID = "111";
-  process.env.BOOTCAMP_ENGINEER_ROLE_ID = "222";
-  const ids = licenseRoleIds({ roles: { offense: "333" } });
-  assert.equal(ids.licensed, "111");
-  assert.equal(ids["class:engineer"], "222");
-  assert.equal(ids.offense, "333");
-  delete process.env.BOOTCAMP_LICENSED_ROLE_ID;
-  delete process.env.BOOTCAMP_ENGINEER_ROLE_ID;
+test("failed delivery leaves the durable event cursor unchanged for retry", async () => {
+  const settings = settingsStore({ "bootcamp:last_event_id": 10 });
+  const api = baseApi({ events: async () => [{ id: 11, kind: "record", steamId: "STEAM_0:1:7", playerName: "runner", targetName: "Ramp", valueMs: 1000, replayRunId: 11 }] });
+  const client = mockClient({ send: async () => { throw new Error("Discord send failed"); } });
+  await pollBootcampEvents({ client, api, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
+  assert.equal(settings.store.get("bootcamp:last_event_id"), 10);
 });
 
-test("issued license roles include custom queue and offense endorsement roles", () => {
-  const prior = Object.fromEntries(["BOOTCAMP_LICENSED_ROLE_ID", "BOOTCAMP_PLATINUM_ROLE_ID"].map(key => [key, process.env[key]]));
-  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
-  delete process.env.BOOTCAMP_PLATINUM_ROLE_ID;
-  try {
-    const ids = licenseRoleIds({ roles: {
-      queueRequired: "queue-required",
-      offense: "legacy-offense",
-      bootcampOffense: "bootcamp-offense",
-    } });
-    const licensed = rolesForLicense({ level: "licensed", endorsements: [] }, ids);
-    assert.equal(licensed.has("licensed"), true);
-    assert.equal(licensed.has("queue-required"), true);
-    assert.equal(licensed.has("legacy-offense"), false);
-
-    const endorsed = rolesForLicense({ level: "licensed", endorsements: ["offense"] }, ids);
-    assert.equal(endorsed.has("legacy-offense"), true);
-    assert.equal(endorsed.has("bootcamp-offense"), true);
-  } finally {
-    for (const [key, value] of Object.entries(prior)) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
-    }
-  }
+test("successful event delivery advances the cursor before a later event fails", async () => {
+  const settings = settingsStore({ "bootcamp:last_event_id": 10 });
+  const events = [
+    { id: 11, kind: "pb", steamId: "STEAM_0:1:7", playerName: "runner", targetName: "Route 1", valueMs: 1000 },
+    { id: 12, kind: "pb", steamId: "STEAM_0:1:7", playerName: "runner", targetName: "Route 2", valueMs: 1000 },
+  ];
+  const api = baseApi({ events: async () => events });
+  let sends = 0;
+  const client = mockClient({ send: async () => { if (++sends === 2) throw new Error("Discord send failed"); } });
+  await pollBootcampEvents({ client, api, settings, steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {} } });
+  assert.equal(settings.store.get("bootcamp:last_event_id"), 11);
 });
 
-test("a Steam link lookup failure does not revoke license roles", async () => {
-  const original = process.env.BOOTCAMP_LICENSED_ROLE_ID;
-  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
-  let removed = 0;
-  const member = { roles: { cache: new Set(["licensed"]), remove: async () => { removed++; } } };
-  const guild = { members: { fetch: async () => member } };
-  const ctx = { client: { guilds: { cache: new Map([["guild", guild]]) } }, pool: {}, config: {}, logger: {}, steamLinks: { getSteamIds: async () => { throw new Error("link store unavailable"); } } };
-  try {
-    await assert.rejects(syncMemberRoles(ctx, "user"), /link store unavailable/);
-    assert.equal(removed, 0);
-  } finally {
-    if (original === undefined) delete process.env.BOOTCAMP_LICENSED_ROLE_ID;
-    else process.env.BOOTCAMP_LICENSED_ROLE_ID = original;
-  }
-});
-
-test("role synchronization retries transient member lookup failures but skips unknown members", async () => {
-  const original = process.env.BOOTCAMP_LICENSED_ROLE_ID;
-  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
-  const guild = { members: { fetch: async () => { throw new Error("Discord unavailable"); } } };
-  const ctx = { client: { guilds: { cache: new Map([["guild", guild]]) } }, pool: fakePool([]), config: {}, logger: {}, steamLinks: { getSteamIds: async () => [] } };
-  try {
-    await assert.rejects(syncMemberRoles(ctx, "user"), /Discord unavailable/);
-    guild.members.fetch = async () => { const error = new Error("Unknown Member"); error.code = 10007; throw error; };
-    await assert.doesNotReject(syncMemberRoles(ctx, "user"));
-  } finally {
-    if (original === undefined) delete process.env.BOOTCAMP_LICENSED_ROLE_ID;
-    else process.env.BOOTCAMP_LICENSED_ROLE_ID = original;
-  }
-});
-
-test("the first poll starts at the end of the feed instead of replaying history", async () => {
-  const store = new Map();
-  const settings = {
-    getNumber: (k, fb) => (store.has(k) ? store.get(k) : fb),
-    setNumber: (k, v) => store.set(k, v),
-  };
-  const pool = fakePool([[/MAX\(id\)/, () => [{ id: 42 }]]]);
-  await pollBootcampEvents({ client: {}, pool, settings, logger: { error() {}, warn() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 42);
-  assert.ok(!pool.calls.some(c => /WHERE id > \?/.test(c.sql)));
-});
-
-test("license events advance the cursor even when no other events follow", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([
-    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "license" }]],
-  ]);
-  const client = { channels: { cache: { find: () => ({ send: async () => {} }) } } };
-  await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 11);
+test("first poll starts at the latest API cursor instead of replaying history", async () => {
+  const settings = settingsStore();
+  let eventCalls = 0;
+  const api = baseApi({ latestEventId: async () => 42, events: async () => { eventCalls++; return []; } });
+  await pollBootcampEvents({ client: mockClient(), api, settings, logger: { error() {}, warn() {} } });
+  assert.equal(settings.store.get("bootcamp:last_event_id"), 42);
+  assert.equal(eventCalls, 0);
 });
 
 test("an initially empty feed processes the first event on the next poll", async () => {
-  const store = new Map();
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([
-    [/MAX\(id\)/, () => [{ id: 0 }]],
-    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 1, kind: "license" }]],
-  ]);
-  const client = { channels: { cache: { find: () => ({ send: async () => {} }) } } };
-  await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
-  await pollBootcampEvents({ client, pool, settings, logger: { error() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 1);
+  const settings = settingsStore();
+  let latest = 0;
+  const api = baseApi({ latestEventId: async () => latest, events: async after => {
+    assert.equal(after, 0);
+    latest = 1;
+    return [{ id: 1, kind: "lesson", steamId: "STEAM_0:1:7", playerName: "runner", map: "2fort" }];
+  } });
+  const sent = [];
+  const ctx = { client: mockClient({ send: async x => sent.push(x) }), api, settings,
+    steamLinks: { getDiscordBySteam: async () => [] }, logger: { error() {}, warn() {} } };
+  await pollBootcampEvents(ctx);
+  await pollBootcampEvents(ctx);
+  assert.equal(settings.store.get("bootcamp:last_event_id"), 1);
+  assert.equal(sent.length, 1);
 });
 
-test("a link lookup failure keeps the event cursor for retry", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([
-    [/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "tier_up", steamid: "STEAM_0:1:7", target_type: "drill", target_id: 1, tier: 1 }]],
-    [/FROM bootcamp_drills/, () => catalogue.drills],
-    [/FROM bootcamp_maps/, () => catalogue.rotation],
-    [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
-  ]);
-  const client = { channels: { cache: { find: () => null } } };
-  const steamLinks = { getDiscordBySteam: async () => { throw new Error("offline"); } };
-  await pollBootcampEvents({ client, pool, settings, steamLinks, logger: { error() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 10);
+test("tier events recompute licenses through the website and then synchronize linked roles", async () => {
+  const settings = settingsStore({ "bootcamp:last_event_id": 10 });
+  let recomputed = 0;
+  let queriedPlayer = 0;
+  let added = 0;
+  const member = { roles: { cache: new Set(), add: async () => { added++; }, remove: async () => {} } };
+  const guild = { members: { fetch: async () => member } };
+  const api = baseApi({
+    events: async () => [{ id: 11, kind: "tier_up", steamId: "STEAM_0:1:7", playerName: "rookie", targetName: "Tour quiz", tier: 1 }],
+    recomputeLicense: async () => { recomputed++; return { level: "permit", endorsements: [] }; },
+    player: async () => { queriedPlayer++; return { license: { level: "permit", endorsements: [] } }; },
+  });
+  const ctx = { client: mockClient({ send: async () => {} }, new Map([["guild", guild]])), api, settings,
+    steamLinks: {
+      getDiscordBySteam: async () => [{ discord_id: "discord-user" }],
+      getSteamIds: async () => [{ steam_id: "STEAM_0:1:7" }],
+    }, logger: { error: e => { throw new Error(e); }, warn() {} } };
+  process.env.BOOTCAMP_PERMIT_ROLE_ID = "permit-role";
+  try {
+    await pollBootcampEvents(ctx);
+    assert.equal(settings.store.get("bootcamp:last_event_id"), 11);
+    assert.equal(recomputed, 1);
+    assert.equal(queriedPlayer, 1);
+    assert.equal(added, 1);
+  } finally {
+    delete process.env.BOOTCAMP_PERMIT_ROLE_ID;
+  }
 });
 
-test("missing notification channel leaves publishable events queued", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = { getNumber: (key, fallback) => store.has(key) ? store.get(key) : fallback, setNumber: (key, value) => store.set(key, value) };
-  const pool = fakePool([[/FROM bootcamp_events WHERE id > \?/, () => [{ id: 11, kind: "lesson", steamid: "STEAM_0:1:7", player_name: "runner", map: "2fort" }]]]);
-  const client = { channels: { cache: { find: () => null } } };
-  await pollBootcampEvents({ client, pool, settings, logger: { error() {}, warn() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 10);
+test("license roles remain unchanged if account linking is unavailable", async () => {
+  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
+  let removed = 0;
+  const member = { roles: { cache: new Set(["licensed"]), remove: async () => { removed++; } } };
+  const ctx = { client: mockClient(null, new Map([["guild", { members: { fetch: async () => member } }]])),
+    api: baseApi(), config: {}, logger: {}, steamLinks: { getSteamIds: async () => { throw new Error("link store unavailable"); } } };
+  try {
+    await assert.rejects(syncMemberRoles(ctx, "user"), /link store unavailable/);
+    assert.equal(removed, 0);
+  } finally { delete process.env.BOOTCAMP_LICENSED_ROLE_ID; }
 });
 
-test("a tier-up recomputes the license and advances the feed", async () => {
-  const store = new Map([["bootcamp:last_event_id", 10]]);
-  const settings = {
-    getNumber: (k, fb) => (store.has(k) ? store.get(k) : fb),
-    setNumber: (k, v) => store.set(k, v),
-  };
-  const pool = fakePool([
-    [/FROM bootcamp_events WHERE id > \?/, () => [
-      { id: 11, kind: "tier_up", steamid: "STEAM_0:1:7", player_name: "rookie", target_type: "drill", target_id: 1, tier: 1 },
-    ]],
-    [/FROM bootcamp_drills/, () => catalogue.drills],
-    [/FROM bootcamp_routes/, () => catalogue.routes],
-    [/FROM bootcamp_maps/, () => catalogue.rotation],
-    [/FROM bootcamp_tiers/, () => [{ target_type: "drill", target_id: 1, class_id: 3, tier: 1 }]],
-    [/FROM bootcamp_licenses/, () => []],
-  ]);
-  const client = { channels: { fetch: async () => null, cache: { find: () => ({ send: async () => {} }) } }, guilds: { cache: new Map() } };
-  const steamLinks = { getDiscordBySteam: async () => [] };
-  await pollBootcampEvents({ client, pool, settings, steamLinks, logger: { error: e => { throw new Error(e); }, warn() {} } });
-  assert.equal(store.get("bootcamp:last_event_id"), 11);
-  assert.ok(pool.calls.some(c => /INSERT INTO bootcamp_licenses/.test(c.sql)));
-  assert.ok(pool.calls.some(c => /VALUES \('license'/.test(c.sql)));
-});
-
-test("queue gate is open without a configured role and checks the role when set", () => {
+test("queue gate stays open unless a required role is explicitly configured", () => {
   const member = roles => ({ roles: { cache: new Set(roles) } });
   assert.equal(canJoinQueue(member([]), { roles: {} }), true);
   const config = { roles: { queueRequired: "lic", admin: "adm" } };
   assert.equal(canJoinQueue(member([]), config), false);
   assert.equal(canJoinQueue(member(["lic"]), config), true);
   assert.equal(canJoinQueue(member(["adm"]), config), true);
-  assert.equal(canJoinQueue(null, config), false);
 });

@@ -3,18 +3,13 @@
 
 // Noname TFC Bootcamp feed.
 //
-// The Bootcamp plugin writes tier-ups, records, PBs and lesson completions to
-// bootcamp_events in the shared MariaDB. This watcher reads that feed, then:
-//   - recomputes the player's TFC license (lib/bootcampLicense.js) and stores
-//     it in bootcamp_licenses, emitting a "license" event when it rises
-//   - syncs the license roles of every Discord member linked to that Steam ID
-//   - posts records, tier-ups and new licenses to the Bootcamp channel
+// The website is the Bootcamp data boundary. This watcher consumes its
+// authenticated event and license APIs, then syncs linked Discord roles and
+// posts records, tier-ups, lessons and licenses to the Bootcamp channel.
 
 const {
-  computeLicense,
   bestLicense,
   levelRank,
-  parseEndorsements,
   formatLevel,
   formatEndorsement,
   CLASS_IDS,
@@ -25,7 +20,6 @@ const LAST_EVENT_KEY = "bootcamp:last_event_id";
 const LAST_CHALLENGE_KEY = "bootcamp:last_challenge_id";
 const TIER_NAMES = ["None", "Bronze", "Silver", "Gold", "Platinum"];
 const TIER_EMOJI = ["", "🥉", "🥈", "🥇", "💎"];
-const { currentChallenge } = require("./bootcampChallenge");
 
 let interval = null;
 let running = false;
@@ -82,58 +76,6 @@ function rolesForLicense(license, roleIds) {
 }
 
 /* ---------------------------------------------------------------------------
-   License computation from the database
-   --------------------------------------------------------------------------- */
-async function loadCatalogue(pool) {
-  const [[drills], [routes], [rotation]] = await Promise.all([
-    pool.query("SELECT id, map, slug, kind, class_id FROM bootcamp_drills WHERE enabled = 1"),
-    pool.query("SELECT id, map, slug, type, class_id FROM bootcamp_routes WHERE enabled = 1"),
-    pool.query("SELECT map, rotation_order FROM bootcamp_maps WHERE in_rotation = 1"),
-  ]);
-  return { drills, routes, rotation };
-}
-
-function licenseRules() {
-  try {
-    return JSON.parse(process.env.BOOTCAMP_LICENSE_RULES || "{}");
-  } catch {
-    return {};
-  }
-}
-
-async function recomputeLicense(pool, steamid, catalogue) {
-  const [tiers] = await pool.query(
-    "SELECT target_type, target_id, class_id, tier FROM bootcamp_tiers WHERE steamid = ?",
-    [steamid]
-  );
-  const [prevRows] = await pool.query(
-    "SELECT level, endorsements FROM bootcamp_licenses WHERE steamid = ?",
-    [steamid]
-  );
-  const previous = prevRows[0]
-    ? { level: prevRows[0].level, endorsements: parseEndorsements(prevRows[0].endorsements) }
-    : { level: "none", endorsements: [] };
-
-  const next = computeLicense({ ...catalogue, tiers, previous, rules: licenseRules() });
-  const changed =
-    next.level !== previous.level ||
-    next.endorsements.join(",") !== previous.endorsements.join(",");
-
-  if (changed) {
-    await pool.query(
-      `INSERT INTO bootcamp_licenses (steamid, level, endorsements, granted_at)
-       VALUES (?, ?, ?, IF(? = 'none', NULL, NOW()))
-       ON DUPLICATE KEY UPDATE
-         granted_at = IF(VALUES(level) <> level, NOW(), granted_at),
-         level = VALUES(level),
-         endorsements = VALUES(endorsements)`,
-      [steamid, next.level, next.endorsements.join(","), next.level]
-    );
-  }
-  return { previous, next, changed };
-}
-
-/* ---------------------------------------------------------------------------
    Discord
    --------------------------------------------------------------------------- */
 async function findBootcampChannel(client) {
@@ -146,10 +88,10 @@ async function findBootcampChannel(client) {
   return client.channels.cache.find(ch => ch.name === name) || null;
 }
 
-async function announceWeeklyChallenge({ client, pool, settings, logger = console }) {
+async function announceWeeklyChallenge({ client, api, settings, logger = console }) {
   if (String(process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED || "").trim().toLowerCase() !== "true")
     return false;
-  const challenge = await currentChallenge(pool);
+  const { challenge } = await api.challenge();
   if (!challenge) return false;
   const id = Number(challenge.id);
   if (Number(settings?.getNumber?.(LAST_CHALLENGE_KEY, -1)) === id) return true;
@@ -158,28 +100,25 @@ async function announceWeeklyChallenge({ client, pool, settings, logger = consol
     logger.warn?.("[bootcampWatcher] weekly challenge has no notification channel; announcement will retry");
     return false;
   }
-  await channel.send(`🏆 This week's TFC Bootcamp challenge: **${challenge.title}** — ${challenge.target_name} on **${challenge.map}**. Use !challenge to see standings.`);
+  await channel.send(`🏆 This week's TFC Bootcamp challenge: **${challenge.title}** — ${challenge.targetName} on **${challenge.map}**. Use !challenge to see standings.`);
   settings?.setNumber?.(LAST_CHALLENGE_KEY, id);
   return true;
 }
 
 // Best license across every Steam ID a Discord member has linked.
-async function licenseForDiscord(pool, steamLinks, discordId, linkedRows = null) {
+async function licenseForDiscord(api, steamLinks, discordId, linkedRows = null) {
   // Failure to read identities must not be interpreted as a player unlinking.
   const links = linkedRows || (await steamLinks.getSteamIds(discordId)) || [];
   const steamIds = links.map(l => l.steam_id).filter(Boolean);
   if (!steamIds.length) return { level: "none", endorsements: [] };
-  const [rows] = await pool.query(
-    `SELECT level, endorsements FROM bootcamp_licenses WHERE steamid IN (${steamIds.map(() => "?").join(",")})`,
-    steamIds
-  );
+  const rows = (await Promise.all(steamIds.map(async steamId => (await api.player(steamId)).license))).filter(Boolean);
   let best = { level: "none", endorsements: [] };
   for (const row of rows)
-    best = bestLicense(best, { level: row.level, endorsements: parseEndorsements(row.endorsements) });
+    best = bestLicense(best, row);
   return best;
 }
 
-async function syncMemberRoles({ client, pool, steamLinks, config, logger }, discordId) {
+async function syncMemberRoles({ client, api, steamLinks, config, logger }, discordId) {
   const guildId = process.env.GUILD_ID || process.env.DISCORD_GUILD_ID;
   const guilds = guildId
     ? [await client.guilds.fetch(guildId)]
@@ -189,7 +128,7 @@ async function syncMemberRoles({ client, pool, steamLinks, config, logger }, dis
   if (!managed.size)
     return;
 
-  const license = await licenseForDiscord(pool, steamLinks, discordId);
+  const license = await licenseForDiscord(api, steamLinks, discordId);
   const wanted = rolesForLicense(license, roleIds);
 
   for (const guild of guilds) {
@@ -214,48 +153,38 @@ async function syncMemberRoles({ client, pool, steamLinks, config, logger }, dis
   }
 }
 
-async function targetName(pool, type, id) {
-  const table = type === "route" ? "bootcamp_routes" : "bootcamp_drills";
-  const [rows] = await pool.query(`SELECT name, map FROM ${table} WHERE id = ?`, [id]).catch(() => [[]]);
-  return rows[0] ? `${rows[0].name} (${rows[0].map})` : `${type} ${id}`;
-}
-
 function playerUrl(steamid) {
   return `${baseUrl()}/bootcamp.html?steamid=${encodeURIComponent(steamid)}`;
 }
 
-async function postEvent(channel, pool, event) {
+async function postEvent(channel, api, event) {
   if (!channel) return !["record", "pb", "tier_up", "lesson", "license"].includes(event.kind);
-  const name = event.player_name || event.steamid;
-  const player = `[${name}](${playerUrl(event.steamid)})`;
+  const steamId = event.steamId || event.steamid;
+  const name = event.playerName || event.player_name || steamId;
+  const player = `[${name}](${playerUrl(steamId)})`;
+  const targetName = event.targetName || `${event.targetType || event.target_type || "training"} ${event.targetId ?? event.target_id ?? ""}`;
 
   if (event.kind === "record") {
-    const [runs] = await pool.query(
-      "SELECT id FROM bootcamp_runs WHERE route_id = ? AND steamid = ? AND time_ms = ? ORDER BY id DESC LIMIT 1",
-      [event.target_id, event.steamid, event.value_ms]
-    ).catch(() => [[]]);
-    const replay = runs[0] ? `\n[View replay](${baseUrl()}/speedrun-replay.html?source=bootcamp&runId=${encodeURIComponent(runs[0].id)})` : "";
+    const replay = event.replayRunId ? `\n[View replay](${baseUrl()}/speedrun-replay.html?source=bootcamp&runId=${encodeURIComponent(event.replayRunId)})` : "";
     const { EmbedBuilder } = require("discord.js");
     const embed = new EmbedBuilder()
       .setColor(0xffc83d)
       .setTitle("🏁 New Bootcamp route record")
-      .setDescription(`${player} set the record on **${await targetName(pool, "route", event.target_id)}**: **${formatTime(event.value_ms)}**${replay}`)
-      .setTimestamp(new Date(event.created_at || Date.now()));
+      .setDescription(`${player} set the record on **${targetName}**: **${formatTime(event.valueMs ?? event.value_ms)}**${replay}`)
+      .setTimestamp(new Date(event.createdAt || event.created_at || Date.now()));
     await channel.send({ embeds: [embed] });
   } else if (event.kind === "pb") {
-    await channel.send(`${player} set a personal best on **${await targetName(pool, event.target_type, event.target_id)}**: **${formatTime(event.value_ms)}**`);
+    await channel.send(`${player} set a personal best on **${targetName}**: **${formatTime(event.valueMs ?? event.value_ms)}**`);
   } else if (event.kind === "tier_up" && Number(event.tier) >= 1 && Number(event.tier) <= 4) {
     const tier = Number(event.tier);
     await channel.send(
-      `${TIER_EMOJI[tier]} ${player} reached **${TIER_NAMES[tier]}** on ${await targetName(pool, event.target_type, event.target_id)}`
+      `${TIER_EMOJI[tier]} ${player} reached **${TIER_NAMES[tier]}** on ${targetName}`
     );
   } else if (event.kind === "lesson") {
     await channel.send(`📘 ${player} completed a Bootcamp lesson on **${event.map || "a training map"}**.`);
   } else if (event.kind === "license") {
-    const [rows] = await pool.query("SELECT level, endorsements FROM bootcamp_licenses WHERE steamid = ? LIMIT 1", [event.steamid]);
-    if (rows[0]) await postLicense(channel, event.steamid, event.player_name, {
-      level: rows[0].level, endorsements: parseEndorsements(rows[0].endorsements)
-    });
+    const profile = await api.player(steamId);
+    if (profile.license) await postLicense(channel, steamId, name, profile.license);
   }
   return true;
 }
@@ -274,7 +203,7 @@ async function postLicense(channel, steamid, name, next) {
 async function pollBootcampEvents(ctx) {
   if (running) return;
   running = true;
-  const { client, pool, settings, steamLinks, logger = console } = ctx;
+  const { client, api, settings, steamLinks, logger = console } = ctx;
   try {
     if (String(process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED || "").trim().toLowerCase() === "true") {
       try { await announceWeeklyChallenge(ctx); }
@@ -283,40 +212,27 @@ async function pollBootcampEvents(ctx) {
     let lastId = Number(settings?.getNumber?.(LAST_EVENT_KEY, -1) ?? -1);
     if (lastId < 0 || !Number.isFinite(lastId)) {
       // First start: begin at the end of the feed instead of replaying history.
-      const [[row]] = await pool.query("SELECT COALESCE(MAX(id), 0) AS id FROM bootcamp_events");
-      lastId = Number(row?.id || 0);
+      lastId = await api.latestEventId();
       settings?.setNumber?.(LAST_EVENT_KEY, lastId);
       return;
     }
 
-    const [events] = await pool.query(
-      "SELECT * FROM bootcamp_events WHERE id > ? ORDER BY id ASC LIMIT 200",
-      [lastId]
-    );
+    const events = await api.events(lastId, 200);
     if (!events.length) return;
 
     const channel = await findBootcampChannel(client);
-    const catalogue = events.some(event => ["tier_up", "lesson", "record"].includes(event.kind))
-      ? await loadCatalogue(pool) : { drills: [], routes: [], rotation: [] };
-    const touched = new Map();   // steamid -> player name
+    const touched = new Map();   // Steam ID -> player name
 
     for (const event of events) {
-      if (event.kind === "license") continue;
-      if (event.kind === "tier_up" || event.kind === "lesson" || event.kind === "record")
-        touched.set(event.steamid, event.player_name);
+      const steamId = event.steamId;
+      if (!steamId) continue;
+      if (["tier_up", "lesson", "record"].includes(event.kind))
+        await api.recomputeLicense(steamId);
+      touched.set(steamId, event.playerName || "");
     }
 
-    for (const [steamid, name] of touched) {
-      const { previous, next, changed } = await recomputeLicense(pool, steamid, catalogue);
-      const rose = changed && (levelRank(next.level) > levelRank(previous.level) ||
-        next.endorsements.some(e => !previous.endorsements.includes(e)));
-      if (rose) {
-        await pool.query(
-          "INSERT INTO bootcamp_events (kind, steamid, player_name, target_type) VALUES ('license', ?, ?, ?)",
-          [steamid, name || "", next.level]
-        ).catch(() => {});
-      }
-      const linked = (await steamLinks.getDiscordBySteam(steamid)) || [];
+    for (const [steamId] of touched) {
+      const linked = (await steamLinks.getDiscordBySteam(steamId)) || [];
       for (const link of linked)
         await syncMemberRoles(ctx, link.discord_id);
     }
@@ -325,7 +241,7 @@ async function pollBootcampEvents(ctx) {
     // only the undelivered events. Role synchronization above must also succeed
     // before publishing notifications or acknowledging this batch.
     for (const event of events) {
-      const delivered = await postEvent(channel, pool, event);
+      const delivered = await postEvent(channel, api, event);
       if (!delivered) {
         logger.warn?.(`[bootcampWatcher] no notification channel; event ${event.id} remains queued`);
         return;
@@ -340,25 +256,24 @@ async function pollBootcampEvents(ctx) {
   }
 }
 
-async function startBootcampWatcher({ client, pool, config = {}, settings, steamLinks, logger = console }) {
+async function startBootcampWatcher({ client, api, config = {}, settings, steamLinks, logger = console }) {
   if (String(process.env.BOOTCAMP_WATCHER_ENABLED || "").trim().toLowerCase() !== "true") {
     logger.info?.("[bootcampWatcher] disabled");
     return;
   }
-  if (!client || !pool) {
-    logger.warn?.("[bootcampWatcher] missing client or pool");
+  if (!client || !api || !steamLinks) {
+    logger.warn?.("[bootcampWatcher] missing client, website API or Steam link store");
     return;
   }
-  // The plugin creates the tables; without them there is nothing to watch.
   try {
-    await pool.query("SELECT 1 FROM bootcamp_events LIMIT 1");
+    await api.latestEventId();
   } catch (err) {
-    logger.info?.(`[bootcampWatcher] bootcamp_events not available (${err.code || err.message}); not started`);
+    logger.info?.(`[bootcampWatcher] website API unavailable (${err.code || err.message}); not started`);
     return;
   }
 
   const pollMs = Number(process.env.BOOTCAMP_WATCHER_POLL_MS || DEFAULT_POLL_MS);
-  const ctx = { client, pool, config, settings, steamLinks, logger };
+  const ctx = { client, api, config, settings, steamLinks, logger };
   logger.info?.(`[bootcampWatcher] starting, poll=${pollMs}ms`);
   await pollBootcampEvents(ctx);
   interval = setInterval(() => pollBootcampEvents(ctx), pollMs);
@@ -373,7 +288,6 @@ module.exports = {
   startBootcampWatcher,
   stopBootcampWatcher,
   pollBootcampEvents,
-  recomputeLicense,
   licenseForDiscord,
   syncMemberRoles,
   postEvent,

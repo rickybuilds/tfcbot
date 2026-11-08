@@ -18,8 +18,15 @@ when these values are unset.
 
 ## Role synchronization
 
-Set `BOOTCAMP_WATCHER_ENABLED=true` to start polling `bootcamp_events` and sync
-roles. Configure `BOOTCAMP_PERMIT_ROLE_ID`, `BOOTCAMP_LICENSED_ROLE_ID`,
+The Bot reads event, challenge, player and license data through the
+authenticated NoName website API. It does not query Bootcamp tables directly.
+Configure the same high-entropy `BOOTCAMP_DISCORD_API_TOKEN` on the website and
+Bot, and set `NONAME_URL` to the website's API origin on the Bot. The website
+must have `BOOTCAMP_API_ENABLED=true` and the token configured before calls are
+accepted. Do not put the token in source control or the delivery package.
+
+Set `BOOTCAMP_WATCHER_ENABLED=true` to poll the authenticated event feed and
+sync roles. Configure `BOOTCAMP_PERMIT_ROLE_ID`, `BOOTCAMP_LICENSED_ROLE_ID`,
 `BOOTCAMP_PLATINUM_ROLE_ID`, optional `BOOTCAMP_OFFENSE_ROLE_ID`, and optional
 `BOOTCAMP_<CLASS>_ROLE_ID` values. The existing `OFFENSE_ROLE_ID` remains
 separate from the Bootcamp offense-endorsed role.
@@ -30,18 +37,21 @@ platinum members. If it is unset, the configured licensed role is reused.
 endorsement; existing manually granted `OFFENSE_ROLE_ID` is not removed by
 Bootcamp synchronization.
 
-The event cursor is persisted after each successful notification, and failed
-Discord sends or role synchronization leave the event eligible for retry. The
-watcher also announces lesson completions and reads license details from the
-authoritative `bootcamp_licenses` row when delivering a license event. Configure
+The Bot initializes its cursor from the website event cursor endpoint so old
+events are not replayed on first startup. It persists the cursor after each
+successful notification; failed Discord sends, API requests, account-link
+lookups or role synchronization leave the event eligible for retry. Tier
+changes request an authoritative license recomputation through the website API;
+license display and role sync then read the player's current profile. Configure
 an available Bootcamp channel (or a channel with the configured name) before
 enabling the watcher; publishable events remain queued while no channel is
 available.
 
 Weekly challenge posts are separately controlled by
 `BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED=true` and require the watcher to be
-enabled. The watcher stores the last successfully announced challenge ID and
-retries a failed delivery. See `TFC-Bootcamp/docs/weekly-challenges.md` for the
+enabled. Challenge details and standings come from the website API. The
+watcher stores the last successfully announced challenge ID and retries a
+failed delivery. See `TFC-Bootcamp/docs/weekly-challenges.md` for the
 shared challenge schema and scheduling tool.
 
 ## Optional queue enforcement
