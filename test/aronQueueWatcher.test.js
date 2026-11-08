@@ -10,6 +10,9 @@ test('publishes an empty queue and updates the same board as players join', asyn
   const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => data });
   await watcher.poll(); assert.equal(sent.length, 1);
   assert.match(sent[0].embeds[0].data.title, /0\/10/);
+  const embed = sent[0].embeds[0].data;
+  const updated = embed.fields.find(field => field.name === 'Last updated');
+  assert.equal(updated.value, `<t:${Math.floor(Date.parse(embed.timestamp) / 1000)}:T>`);
   data = { ...data, count: 1, players: [{name:'a'}] };
   await watcher.poll(); assert.equal(sent.length, 1);
   assert.match(edits[0].embeds[0].data.title, /1\/10/);

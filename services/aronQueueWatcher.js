@@ -35,13 +35,17 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
       const content = JSON.stringify({ count: queue.count, max: queue.max, players: queue.players });
       if (content === lastContent) return;
       const names = queue.players.map(player => escapeMarkdown(player.name.replace(/[\r\n]/g, " ").slice(0, 100)));
+      const updatedAt = new Date();
       const embed = new EmbedBuilder()
         .setColor(0xed4245)
         .setTitle(`Aron PUGs Player Queue — (${queue.count}/${queue.max})`)
         .setDescription((names.join("\n") || "_empty_").slice(0, 4000))
-        .addFields({ name: "Join Aron PUGs", value: "https://discord.gg/udNgzWfDWa" })
+        .addFields(
+          { name: "Join Aron PUGs", value: "https://discord.gg/udNgzWfDWa" },
+          { name: "Last updated", value: `<t:${Math.floor(updatedAt.getTime() / 1000)}:T>` }
+        )
         .setFooter({ text: MARKER })
-        .setTimestamp();
+        .setTimestamp(updatedAt);
       const payload = { embeds: [embed], allowedMentions: { parse: [] } };
       if (board) {
         try { await board.edit(payload); }
