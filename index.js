@@ -191,6 +191,7 @@ registry.set("addsupport", (m, a) => supporters.execute(m, a, deps));
 
 // Commands with register() entry points
 require("./commands/queue").register(registry, deps);
+require("./commands/bootcamp").register(registry, { pool: mysqlPool, steamLinks });
 require("./commands/eloAdminAdjust").register(registry, deps);
 require("./commands/files").register(registry, deps);
 require("./commands/admin").register(registry, deps);

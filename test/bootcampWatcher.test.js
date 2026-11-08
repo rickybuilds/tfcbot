@@ -100,6 +100,31 @@ test("license role ids come from the environment and reuse the offense role", ()
   delete process.env.BOOTCAMP_ENGINEER_ROLE_ID;
 });
 
+test("issued license roles include custom queue and offense endorsement roles", () => {
+  const prior = Object.fromEntries(["BOOTCAMP_LICENSED_ROLE_ID", "BOOTCAMP_PLATINUM_ROLE_ID"].map(key => [key, process.env[key]]));
+  process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";
+  delete process.env.BOOTCAMP_PLATINUM_ROLE_ID;
+  try {
+    const ids = licenseRoleIds({ roles: {
+      queueRequired: "queue-required",
+      offense: "legacy-offense",
+      bootcampOffense: "bootcamp-offense",
+    } });
+    const licensed = rolesForLicense({ level: "licensed", endorsements: [] }, ids);
+    assert.equal(licensed.has("licensed"), true);
+    assert.equal(licensed.has("queue-required"), true);
+    assert.equal(licensed.has("legacy-offense"), false);
+
+    const endorsed = rolesForLicense({ level: "licensed", endorsements: ["offense"] }, ids);
+    assert.equal(endorsed.has("legacy-offense"), true);
+    assert.equal(endorsed.has("bootcamp-offense"), true);
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
 test("a Steam link lookup failure does not revoke license roles", async () => {
   const original = process.env.BOOTCAMP_LICENSED_ROLE_ID;
   process.env.BOOTCAMP_LICENSED_ROLE_ID = "licensed";

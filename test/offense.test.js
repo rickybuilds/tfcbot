@@ -63,6 +63,39 @@ test("offense role restriction applies only when configured", () => {
   assert.equal(canAddAsOffense(null, config), false);
 });
 
+test("Bootcamp main-queue gate is opt-in and checks Discord queue admission", async () => {
+  const gated = setupQueue({ config: {
+    bootcampQueueGateEnabled: true,
+    roles: { queueRequired: "licensed", admin: "admin" },
+  } });
+  await gated.registry.get("add")(gated.message("unlicensed"));
+  assert.deepEqual(gated.state.queue, []);
+  assert.match(gated.replies.at(-1).text, /license/i);
+
+  await gated.registry.get("add")(gated.message("licensed", ["licensed"]));
+  assert.deepEqual(gated.state.queue.map(entry => entry.id), ["licensed"]);
+
+  const disabled = setupQueue({ config: {
+    bootcampQueueGateEnabled: false,
+    roles: { queueRequired: "licensed" },
+  } });
+  await disabled.registry.get("add")(disabled.message("open"));
+  assert.deepEqual(disabled.state.queue.map(entry => entry.id), ["open"]);
+});
+
+test("Bootcamp offense gate requires the endorsement role only when enabled", async () => {
+  const gated = setupQueue({ config: {
+    bootcampOffenseGateEnabled: true,
+    roles: { bootcampOffense: "offense-endorsement" },
+  } });
+  await gated.registry.get("addoff")(gated.message("unendorsed"));
+  assert.deepEqual(gated.state.offenseQueue, []);
+  assert.match(gated.replies.at(-1).text, /offense endorsement/i);
+
+  await gated.registry.get("addoff")(gated.message("endorsed", ["offense-endorsement"]));
+  assert.deepEqual(gated.state.offenseQueue.map(entry => entry.id), ["endorsed"]);
+});
+
 test("offense assignment rechecks current Elo and drops old ineligible entries", () => {
   const ratings = { high: 2300, boundary: 1000, low: 999, unknown: NaN };
   const result = assignOffensePlayers(Object.keys(ratings).map(player), {

@@ -12,6 +12,7 @@ const {
 const adl = require("../lib/adl");
 const { supporterBadge } = require("../lib/supporters");
 const { queueWinEmblems } = require("../lib/winEmblems");
+const { canJoinQueue, queueGateMessage, offenseGateMessage } = require("../lib/queueGate");
 const {
   offenseCapacity,
   OFFENSE_ELO_LIMIT,
@@ -306,6 +307,9 @@ function register(reg, {
     }
     if (await rejectLocked(message, id)) return;
 
+    if (config.bootcampQueueGateEnabled && !canJoinQueue(message.member, config))
+      return message.reply(queueGateMessage());
+
 	// Stop overfilling
 	if (state.queue.length >= (state.MAX_PLAYERS || 8)) {
 	  //return message.reply(`🚨 Queue is already full (${state.MAX_PLAYERS || 8} players).`);
@@ -370,6 +374,9 @@ function register(reg, {
   const addOffense = async (message) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     const id = message.author.id;
+    if (config.bootcampOffenseGateEnabled && !canJoinQueue(message.member, {
+      roles: { queueRequired: config.roles?.bootcampOffense, admin: config.roles?.admin },
+    })) return replyOffense(message, offenseGateMessage());
     const discordName = message.member?.displayName || message.author.username;
     let currentRating = null;
     try { currentRating = elo.getRating(id, discordName, { createIfMissing: false }); } catch {}
@@ -860,6 +867,11 @@ for (const cmd of OFFENSE_REMOVE_COMMANDS) reg.set(cmd, removeOffense);
         evt,
         `${evt.player}: your Discord link was found, but you must be in the Discord server to queue.`
       );
+      return true;
+    }
+
+    if (config.bootcampQueueGateEnabled && !canJoinQueue(member, config)) {
+      await sendHldsMessage(evt, `${evt.player}: ${queueGateMessage()}`);
       return true;
     }
 

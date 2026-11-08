@@ -37,11 +37,16 @@ module.exports = {
     jail: process.env.JAIL_ROLE_ID,
     // Optional additional !addoff role gate; all players must also have Elo < 1000.
     offense: process.env.OFFENSE_ROLE_ID,
+    // Bootcamp roles are separate from the existing !addoff role policy.
+    queueRequired: process.env.BOOTCAMP_QUEUE_REQUIRED_ROLE_ID || process.env.BOOTCAMP_LICENSED_ROLE_ID || "",
+    bootcampOffense: process.env.BOOTCAMP_OFFENSE_ROLE_ID || "",
   },
 
   // UI / Game
   MAX_BUTTONS: 9,
   MAX_PLAYERS: Number(process.env.MAX_PLAYERS) || 8,
+  bootcampQueueGateEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_QUEUE_GATE_ENABLED || "0")),
+  bootcampOffenseGateEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_OFFENSE_GATE_ENABLED || "0")),
   predictionsEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.PREDICTIONS_ENABLED || "0")),
   pointGamesEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.POINT_GAMES_ENABLED ?? process.env.PREDICTIONS_ENABLED ?? "0")),
   predictionsOwnerId: String(process.env.PREDICTIONS_OWNER_ID || "").trim(),

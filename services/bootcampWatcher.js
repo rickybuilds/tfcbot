@@ -52,7 +52,9 @@ function licenseRoleIds(config = {}) {
     permit: env.BOOTCAMP_PERMIT_ROLE_ID || "",
     licensed: env.BOOTCAMP_LICENSED_ROLE_ID || "",
     platinum: env.BOOTCAMP_PLATINUM_ROLE_ID || "",
+    queueRequired: config?.roles?.queueRequired || env.BOOTCAMP_QUEUE_REQUIRED_ROLE_ID || env.BOOTCAMP_LICENSED_ROLE_ID || "",
     offense: config?.roles?.offense || env.OFFENSE_ROLE_ID || "",
+    bootcampOffense: config?.roles?.bootcampOffense || env.BOOTCAMP_OFFENSE_ROLE_ID || "",
   };
   for (const name of Object.keys(CLASS_IDS)) {
     const id = env[`BOOTCAMP_${name.toUpperCase()}_ROLE_ID`];
@@ -68,9 +70,12 @@ function rolesForLicense(license, roleIds) {
   const rank = levelRank(license?.level || "none");
   if (rank >= 1 && roleIds.permit) wanted.add(roleIds.permit);
   if (rank >= 2 && roleIds.licensed) wanted.add(roleIds.licensed);
+  if (rank >= 2 && roleIds.queueRequired) wanted.add(roleIds.queueRequired);
   if (rank >= 3 && roleIds.platinum) wanted.add(roleIds.platinum);
   for (const e of license?.endorsements || [])
     if (roleIds[e]) wanted.add(roleIds[e]);
+  if ((license?.endorsements || []).includes("offense") && roleIds.bootcampOffense)
+    wanted.add(roleIds.bootcampOffense);
   return wanted;
 }
 
@@ -140,9 +145,9 @@ async function findBootcampChannel(client) {
 }
 
 // Best license across every Steam ID a Discord member has linked.
-async function licenseForDiscord(pool, steamLinks, discordId) {
+async function licenseForDiscord(pool, steamLinks, discordId, linkedRows = null) {
   // Failure to read identities must not be interpreted as a player unlinking.
-  const links = (await steamLinks.getSteamIds(discordId)) || [];
+  const links = linkedRows || (await steamLinks.getSteamIds(discordId)) || [];
   const steamIds = links.map(l => l.steam_id).filter(Boolean);
   if (!steamIds.length) return { level: "none", endorsements: [] };
   const [rows] = await pool.query(
