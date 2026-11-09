@@ -197,6 +197,39 @@ async function postLicense(channel, steamid, name, next) {
   await channel.send(parts.join("\n"));
 }
 
+async function processAccountLinkOutbox(ctx, limit = 20) {
+  if (String(process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED || "").trim().toLowerCase() !== "true") return 0;
+  const { api, steamLinks, logger = console } = ctx;
+  if (typeof steamLinks?.claimBootcampAccountLinkSync !== "function") return 0;
+  if (!Object.values(licenseRoleIds(ctx.config)).some(Boolean)) return 0;
+  let processed = 0;
+  for (let i = 0; i < Math.max(1, Math.min(100, Number(limit) || 20)); i++) {
+    let item;
+    try { item = await steamLinks.claimBootcampAccountLinkSync(); }
+    catch (error) {
+      logger.warn?.(`[bootcampWatcher] account-link outbox claim failed: ${error.message}`);
+      break;
+    }
+    if (!item) break;
+    try {
+      // Recompute through the Website, the authoritative Bootcamp license store,
+      // before assigning Discord roles for the newly linked identities.
+      await api.recomputeLicense(item.steam_id);
+      await syncMemberRoles(ctx, item.discord_id);
+      await steamLinks.completeBootcampAccountLinkSync(item.id);
+      processed++;
+    } catch (error) {
+      const code = error?.code || error?.name || "sync_failed";
+      try { await steamLinks.retryBootcampAccountLinkSync(item.id, item.attempts, code); }
+      catch (retryError) { logger.error?.(`[bootcampWatcher] account-link outbox retry update failed: ${retryError.message}`); }
+      logger.warn?.(`[bootcampWatcher] account-link role sync failed for discord=${item.discord_id}: ${error.message}`);
+      // Preserve ordering; one transient failure should not churn later links.
+      break;
+    }
+  }
+  return processed;
+}
+
 /* ---------------------------------------------------------------------------
    Poll
    --------------------------------------------------------------------------- */
@@ -205,6 +238,7 @@ async function pollBootcampEvents(ctx) {
   running = true;
   const { client, api, settings, steamLinks, logger = console } = ctx;
   try {
+    await processAccountLinkOutbox(ctx);
     if (String(process.env.BOOTCAMP_CHALLENGE_ANNOUNCEMENTS_ENABLED || "").trim().toLowerCase() === "true") {
       try { await announceWeeklyChallenge(ctx); }
       catch (error) { logger.warn?.(`[bootcampWatcher] weekly challenge announcement failed: ${error.message}`); }
@@ -296,4 +330,5 @@ module.exports = {
   formatTime,
   playerUrl,
   announceWeeklyChallenge,
+  processAccountLinkOutbox,
 };

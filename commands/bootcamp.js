@@ -8,6 +8,13 @@ const { challengesEnabled } = require("../services/bootcampChallenge");
 function siteUrl() {
   return String(process.env.NONAME_URL || "https://nonamepickup.servehalflife.com").replace(/\/$/, "");
 }
+function accountLinkUrl() {
+  const value = String(process.env.BOOTCAMP_ACCOUNT_LINK_URL || "").trim();
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch { return ""; }
+}
 
 function register(registry, { api, steamLinks, config = {} }) {
   registry.set("bootcamp", async message => {
@@ -20,7 +27,10 @@ function register(registry, { api, steamLinks, config = {} }) {
       const linked = (await steamLinks.getSteamIds(message.author.id)) || [];
       const embed = new EmbedBuilder().setColor(0x72d8ff).setTitle("TFC Bootcamp license");
       if (!linked.length) {
-        embed.setDescription("No Steam ID is linked to your Discord account. Ask a bot admin to link it with `!linksteam @you STEAM_0:1:12345`, then use `!license` again.");
+        const linkUrl = accountLinkUrl();
+        embed.setDescription(linkUrl
+          ? `No Steam ID is linked to your Discord account. [Link Steam and Discord](${linkUrl}), then use \`!license\` again.`
+          : "No Steam ID is linked to your Discord account. Ask a bot admin to link it with `!linksteam @you STEAM_0:1:12345`, then use `!license` again.");
       } else {
         const license = await licenseForDiscord(api, steamLinks, message.author.id, linked);
         const endorsements = license.endorsements.map(formatEndorsement);
@@ -48,7 +58,10 @@ function register(registry, { api, steamLinks, config = {} }) {
     try {
       const linked = (await steamLinks.getSteamIds(message.author.id)) || [];
       if (!linked.length) {
-        await message.channel.send("Link a Steam ID with `!linksteam`, then use `!learning` to check permit eligibility.");
+        const linkUrl = accountLinkUrl();
+        await message.channel.send(linkUrl
+          ? `Link Steam and Discord at ${linkUrl}, then use \`!learning\` to check permit eligibility.`
+          : "Link a Steam ID with `!linksteam`, then use `!learning` to check permit eligibility.");
         return;
       }
       const license = await licenseForDiscord(api, steamLinks, message.author.id, linked);

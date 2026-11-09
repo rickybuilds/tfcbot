@@ -31,6 +31,22 @@ test("!license explains how an unlinked member can get linked", async () => {
   assert.match(sent[0].embeds[0].data.description, /linksteam/i);
 });
 
+test("!license shows self-service linking only when an HTTPS link URL is configured", async () => {
+  const commands = new Map();
+  const sent = [];
+  const original = process.env.BOOTCAMP_ACCOUNT_LINK_URL;
+  process.env.BOOTCAMP_ACCOUNT_LINK_URL = "https://noname.example/bootcamp.html";
+  try {
+    register(commands, { api: {}, steamLinks: { getSteamIds: async () => [] }, config: {} });
+    await commands.get("license")({ author: { id: "unlinked" }, channel: { send: async value => sent.push(value) } });
+    assert.match(sent[0].embeds[0].data.description, /Link Steam and Discord/);
+    assert.match(sent[0].embeds[0].data.description, /https:\/\/noname\.example\/bootcamp\.html/);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_ACCOUNT_LINK_URL;
+    else process.env.BOOTCAMP_ACCOUNT_LINK_URL = original;
+  }
+});
+
 test("!learning stays disabled until the eligibility flag is enabled", async () => {
   const commands = new Map();
   const sent = [];

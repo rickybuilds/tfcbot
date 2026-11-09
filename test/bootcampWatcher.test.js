@@ -8,6 +8,7 @@ const {
   postEvent,
   playerUrl,
   announceWeeklyChallenge,
+  processAccountLinkOutbox,
 } = require("../services/bootcampWatcher");
 const { canJoinQueue } = require("../lib/queueGate");
 
@@ -199,6 +200,98 @@ test("license roles remain unchanged if account linking is unavailable", async (
     await assert.rejects(syncMemberRoles(ctx, "user"), /link store unavailable/);
     assert.equal(removed, 0);
   } finally { delete process.env.BOOTCAMP_LICENSED_ROLE_ID; }
+});
+
+test("account-link outbox stays disabled by default", async () => {
+  const original = process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+  delete process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+  let claims = 0;
+  try {
+    assert.equal(await processAccountLinkOutbox({ steamLinks: { claimBootcampAccountLinkSync: async () => { claims++; } } }), 0);
+    assert.equal(claims, 0);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+    else process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = original;
+  }
+});
+
+test("account-link outbox remains pending until a license role is configured", async () => {
+  const old = process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+  const oldOffense = process.env.OFFENSE_ROLE_ID;
+  const roleNames = ["PERMIT", "LICENSED", "PLATINUM", "QUEUE_REQUIRED", "OFFENSE", "BOOTCAMP_OFFENSE", "SCOUT", "SNIPER", "SOLDIER", "DEMOMAN", "MEDIC", "HWGUY", "PYRO", "SPY", "ENGINEER"];
+  const originals = new Map(roleNames.map(name => [`BOOTCAMP_${name}_ROLE_ID`, process.env[`BOOTCAMP_${name}_ROLE_ID`]]));
+  process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = "true";
+  for (const key of originals.keys()) delete process.env[key];
+  delete process.env.OFFENSE_ROLE_ID;
+  let claims = 0;
+  try {
+    assert.equal(await processAccountLinkOutbox({ steamLinks: { claimBootcampAccountLinkSync: async () => { claims++; } } }), 0);
+    assert.equal(claims, 0);
+  } finally {
+    if (old === undefined) delete process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+    else process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = old;
+    for (const [key, value] of originals) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (oldOffense === undefined) delete process.env.OFFENSE_ROLE_ID;
+    else process.env.OFFENSE_ROLE_ID = oldOffense;
+  }
+});
+
+test("account-link outbox recomputes the website license, syncs roles, and acknowledges only after success", async () => {
+  const original = process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+  const originalRole = process.env.BOOTCAMP_PERMIT_ROLE_ID;
+  process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = "true";
+  process.env.BOOTCAMP_PERMIT_ROLE_ID = "permit-role";
+  const calls = [];
+  const member = { roles: { cache: new Set(), add: async id => calls.push(["add", id]), remove: async () => {} } };
+  const ctx = {
+    client: mockClient(null, new Map([["guild", { members: { fetch: async id => { calls.push(["member", id]); return member; } } }]])),
+    api: baseApi({ recomputeLicense: async id => { calls.push(["recompute", id]); }, player: async id => { calls.push(["player", id]); return { license: { level: "permit", endorsements: [] } }; } }),
+    steamLinks: {
+      claimBootcampAccountLinkSync: async () => calls.some(row => row[0] === "claim") ? null : (calls.push(["claim"]), { id: 4, discord_id: "discord-user", steam_id: "STEAM_0:1:7", attempts: 1 }),
+      getSteamIds: async id => [{ steam_id: "STEAM_0:1:7" }],
+      completeBootcampAccountLinkSync: async id => calls.push(["complete", id]),
+      retryBootcampAccountLinkSync: async () => { throw new Error("unexpected retry"); }
+    }, logger: { warn() {}, error() {} }
+  };
+  try {
+    assert.equal(await processAccountLinkOutbox(ctx), 1);
+    assert.deepEqual(calls.map(row => row[0]), ["claim", "recompute", "player", "member", "add", "complete"]);
+    assert.deepEqual(calls.at(-1), ["complete", 4]);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+    else process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = original;
+    if (originalRole === undefined) delete process.env.BOOTCAMP_PERMIT_ROLE_ID;
+    else process.env.BOOTCAMP_PERMIT_ROLE_ID = originalRole;
+  }
+});
+
+test("failed account-link role sync returns the outbox item to retry without acknowledging it", async () => {
+  const original = process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+  const originalRole = process.env.BOOTCAMP_PERMIT_ROLE_ID;
+  process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = "true";
+  process.env.BOOTCAMP_PERMIT_ROLE_ID = "permit-role";
+  const calls = [];
+  let claimed = false;
+  try {
+    const processed = await processAccountLinkOutbox({
+      api: baseApi({ recomputeLicense: async () => { const error = new Error("API unavailable"); error.code = "ECONNRESET"; throw error; } }),
+      steamLinks: {
+        claimBootcampAccountLinkSync: async () => claimed ? null : (claimed = true, { id: 9, discord_id: "discord-user", steam_id: "STEAM_0:1:9", attempts: 2 }),
+        completeBootcampAccountLinkSync: async () => calls.push("complete"),
+        retryBootcampAccountLinkSync: async (...args) => calls.push(args)
+      }, logger: { warn() {}, error() {} }
+    });
+    assert.equal(processed, 0);
+    assert.deepEqual(calls, [[9, 2, "ECONNRESET"]]);
+  } finally {
+    if (original === undefined) delete process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED;
+    else process.env.BOOTCAMP_ACCOUNT_LINK_SYNC_ENABLED = original;
+    if (originalRole === undefined) delete process.env.BOOTCAMP_PERMIT_ROLE_ID;
+    else process.env.BOOTCAMP_PERMIT_ROLE_ID = originalRole;
+  }
 });
 
 test("queue gate stays open unless a required role is explicitly configured", () => {
