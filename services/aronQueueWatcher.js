@@ -18,12 +18,18 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
     if (running || !channelId) return;
     running = true;
     try {
-      const queue = await fetchQueue();
-      if (!queue || queue.ok !== true || !Array.isArray(queue.players) ||
-          !Number.isInteger(queue.count) || queue.count !== queue.players.length ||
-          !Number.isInteger(queue.max) || queue.max < 1 ||
-          queue.players.some(player => typeof player?.name !== "string")) {
-        throw new Error("Invalid queue API response");
+      let queue;
+      try {
+        queue = await fetchQueue();
+        if (!queue || queue.ok !== true || !Array.isArray(queue.players) ||
+            !Number.isInteger(queue.count) || queue.count !== queue.players.length ||
+            !Number.isInteger(queue.max) || queue.max < 1 ||
+            queue.players.some(player => typeof player?.name !== "string")) {
+          throw new Error("Invalid queue API response");
+        }
+      } catch (error) {
+        logger.error?.("[aronQueueWatcher] API unavailable:", error.message);
+        queue = null;
       }
       const channel = await client.channels.fetch(channelId);
       if (!channel || typeof channel.send !== "function") throw new Error("Queue channel is unavailable");
@@ -33,14 +39,14 @@ function createAronQueueWatcher({ client, channelId, fetchQueue = async () => {
           message.embeds?.some(embed => embed.footer?.text === MARKER || embed.title?.startsWith(TITLE_PREFIX))) || null;
         checkedHistory = true;
       }
-      const content = JSON.stringify({ count: queue.count, max: queue.max, players: queue.players });
+      const content = queue ? JSON.stringify({ count: queue.count, max: queue.max, players: queue.players }) : "unavailable";
       if (content === lastContent) return;
-      const names = queue.players.map(player => escapeMarkdown(player.name.replace(/[\r\n]/g, " ").slice(0, 100)));
+      const names = queue?.players.map(player => escapeMarkdown(player.name.replace(/[\r\n]/g, " ").slice(0, 100))) || [];
       const updatedAt = new Date();
       const embed = new EmbedBuilder()
         .setColor(0xed4245)
-        .setTitle(`${TITLE_PREFIX}${queue.count}/${queue.max})`)
-        .setDescription((names.join("\n") || "_empty_").slice(0, 4000))
+        .setTitle(`${TITLE_PREFIX}${queue ? `${queue.count}/${queue.max}` : "Unavailable"})`)
+        .setDescription(queue ? (names.join("\n") || "_empty_").slice(0, 4000) : "Lost contact to Aron's PUGs - Check the server, NoNamePUG cannot access their API.")
         .addFields(
           { name: "Join Aron PUGs", value: "https://discord.gg/udNgzWfDWa" },
           { name: "Last updated", value: `<t:${Math.floor(updatedAt.getTime() / 1000)}:D> at <t:${Math.floor(updatedAt.getTime() / 1000)}:T>` }

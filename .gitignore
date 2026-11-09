@@ -176,3 +176,5 @@ docs/elo-monthly-bonus-audit-2026-10-20.md
 
 # Local agent instructions
 /AGENTS.md
+
+!/test/pickupMuteMessages.test.js

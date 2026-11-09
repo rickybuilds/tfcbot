@@ -188,3 +188,12 @@ Actively developed.
 ---
 
 Original development by Ricky.
+
+## Muted message log
+
+Messages blocked by pickup mute, including edits to allowed commands, are recorded
+in `mutedlogs.json` in the bot's working directory. Each entry includes the text,
+UTC log time, and user, server, channel, and message identifiers. The log is
+local runtime data and is not committed or included in the scheduled backups;
+restrict access to it and back it up separately if needed. If logging fails, the
+bot reports the error in its console and still attempts to delete the message.

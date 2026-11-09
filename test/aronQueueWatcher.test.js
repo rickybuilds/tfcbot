@@ -34,15 +34,36 @@ test('recreates a deleted board when fewer than four players are queued', async 
   assert.equal(sends, 2);
 });
 
-test('does not replace a valid board when the API fails or is malformed', async () => {
+test('shows lost contact on the existing board and restores the queue on recovery', async () => {
   let data = { ok: true, count: 4, max: 10, players: Array.from({length: 4}, (_, i) => ({name: String(i)})) };
-  let edits = 0;
-  const channel = { messages: { fetch: async () => [] }, send: async () => ({ edit: async () => edits++ }) };
-  const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => data, logger: { error() {} } });
-  await watcher.poll(); data = { ok: false }; await watcher.poll();
-  assert.equal(edits, 0);
+  const edits = [];
+  const channel = { messages: { fetch: async () => [] }, send: async () => ({ edit: async payload => edits.push(payload) }) };
+  const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => { if (!data) throw new Error('offline'); return data; }, logger: { error() {} } });
+  await watcher.poll();
+  const original = data;
+  data = null; await watcher.poll();
+  assert.match(edits[0].embeds[0].data.description, /lost contact to Aron's PUGs/i);
+  await watcher.poll(); assert.equal(edits.length, 1);
+  data = original; await watcher.poll();
+  assert.match(edits[1].embeds[0].data.title, /4\/10/);
 });
 
+test('shows an outage on startup and reuses that board after restart', async () => {
+  const edits = [];
+  const existing = { author: { id: 'bot' }, embeds: [{ title: 'Aron PUGs Player Queue — (Unavailable)' }], edit: async payload => edits.push(payload) };
+  const channel = { messages: { fetch: async () => [existing] }, send: async () => assert.fail('should reuse the existing board') };
+  const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => { throw new Error('offline'); }, logger: { error() {} } });
+  await watcher.poll();
+  assert.match(edits[0].embeds[0].data.description, /cannot access their API/i);
+});
+
+test('posts an outage when the API is down before any board exists', async () => {
+  const sent = [];
+  const channel = { messages: { fetch: async () => [] }, send: async payload => { sent.push(payload); return {}; } };
+  const watcher = createAronQueueWatcher({ client: { user: { id: 'bot' }, channels: { fetch: async () => channel } }, channelId: '123', fetchQueue: async () => ({ ok: false }), logger: { error() {} } });
+  await watcher.poll();
+  assert.match(sent[0].embeds[0].data.description, /cannot access their API/i);
+});
 
 test('recovers the existing board after a restart even below four players', async () => {
   const edits = [];

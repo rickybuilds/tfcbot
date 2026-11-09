@@ -63,6 +63,7 @@ const { QueueStore } = require("./lib/queueStore");
 const { BanStore }   = require("./lib/banStore");
 const { scheduleDecayIfNeeded } = require("./lib/eloDecay");
 const moderation = require("./commands/moderation");
+const { enforcePickupMuteMessage } = require("./lib/pickupMuteMessages");
 
 // ============================================================================
 // Shared service initialization
@@ -701,41 +702,15 @@ client.on("messageCreate", (message) => {
   }
 });
 
-const ALLOWED_PICKUP_MUTED_MESSAGES = new Set([
-  "!add",
-  "!addadl",
-  "++",
-  "**",
-  "!addoff",
-  "++off",
-]);
-
 function isPickupMuted(discordId) {
   return state.pickupMutedUsers?.has(String(discordId));
-}
-
-function isAllowedPickupMutedMessage(content) {
-  return ALLOWED_PICKUP_MUTED_MESSAGES.has(String(content || "").trim().toLowerCase());
-}
-
-async function enforcePickupMuteMessage(message) {
-  if (!message?.guild || message.author?.bot) return false;
-  if (!isPickupMuted(message.author?.id)) return false;
-  if (isAllowedPickupMutedMessage(message.content)) return false;
-
-  try {
-    await message.delete();
-  } catch (err) {
-    console.warn("[pickup_mute] delete failed:", err.message);
-  }
-  return true;
 }
 
 // Prevent a muted user from posting an allowed command and editing extra text into it.
 client.on("messageUpdate", async (_oldMessage, newMessage) => {
   try {
     if (newMessage.partial) await newMessage.fetch();
-    await enforcePickupMuteMessage(newMessage);
+    await enforcePickupMuteMessage(newMessage, state.pickupMutedUsers);
   } catch (err) {
     console.warn("[pickup_mute] edited-message enforcement failed:", err.message);
   }
@@ -778,7 +753,7 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    if (await enforcePickupMuteMessage(message)) return;
+    if (await enforcePickupMuteMessage(message, state.pickupMutedUsers)) return;
 
     const raw = (message.content || "").trim();
     if (!raw) return;
