@@ -383,6 +383,7 @@ state.predictions = predictions;
 matchesStore.predictions = predictions;
 registry.set("pred", (message, args) => predictions.handleAdminCommand(message, args));
 require("./predictions/bank").register(registry,predictions);
+require("./predictions/refund").register(registry,predictions);
 if (config.pointGamesEnabled) {
   const { PointGames } = require("./predictions/games");
   const handlePointGameInteraction = require("./predictions/gameCommands").register(registry, new PointGames(predictions.store), { casinoChannelId: config.channels.casino });
