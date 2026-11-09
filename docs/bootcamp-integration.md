@@ -13,8 +13,14 @@ when these values are unset.
   player to an administrator-managed `!linksteam` link.
 - `!learning` checks the authoritative Website license and reports whether the
   player has the Learner's permit required for learning pugs. It is disabled
-  unless `BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED=true`. This is an eligibility
-  check only; the Bot does not currently run a separate learning-pug queue.
+  unless `BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED=true`.
+- `!learning join`, `!learning leave`, and `!learning status` manage a separate,
+  durable waitlist. Joining rechecks the Learner's permit; the waitlist is stored
+  beside existing Steam/Discord identities in SQLite and excludes accounts that
+  have since unlinked. `!learning list` and `!learning clear` are restricted to
+  configured organizers or admins. This waitlist never enters the competitive
+  pug queue or starts a match automatically; an organizer schedules the
+  learning session and clears signups afterward.
 - `!challenge` shows the active weekly route or drill challenge and its
   standings. It remains disabled until `BOOTCAMP_CHALLENGES_ENABLED=true`.
 - `!season` shows active training season standings from the Website API. It
@@ -81,6 +87,22 @@ unchanged when these flags are false.
 
 The optional `!learning` command is separately gated by
 `BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED=false` by default.
+
+The signup waitlist is separately disabled by default. To enable it, configure a
+dedicated channel and, optionally, the organizer role:
+
+```dotenv
+BOOTCAMP_LEARNING_QUEUE_ENABLED=false
+BOOTCAMP_LEARNING_QUEUE_CHANNEL_ID=
+BOOTCAMP_LEARNING_QUEUE_SIZE=8
+BOOTCAMP_LEARNING_ORGANIZER_ROLE_ID=
+```
+
+Only `!learning join`, `leave`, `status`, `list`, and `clear` in that channel use
+the waitlist. Joining requires a current linked Steam ID and at least the
+Learner's permit; the size is configurable from 2 to 32. Filling the waitlist
+notifies the configured organizer role. It is an organizer-managed signup list,
+not an automatic matchmaker.
 
 Enable role synchronization and verify linked accounts, role assignment,
 Discord `!add`, HLDS `!add`, admin bypass, and offense selection in a test guild

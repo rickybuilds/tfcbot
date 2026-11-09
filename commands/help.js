@@ -49,7 +49,9 @@ function register(reg, { config }) {
       value:
         "`!bootcamp` — Open the training hub\n" +
         "`!license` — Show your linked Steam IDs, license and endorsements\n" +
-        "`!learning` — Check Learner's permit eligibility (feature flag required)\n" +
+        "`!learning` — Check Learner's permit eligibility\n" +
+        "`!learning join/leave/status` — Manage the optional learning-pug waitlist\n" +
+        "`!learning list/clear` — Organizer view and session reset for the waitlist\n" +
         "`!challenge` — Show the active weekly training challenge\n" +
         "`!season` — Show current training season standings\n" +
         "`!cosign @player` — Mentor co-sign (mentor role and feature flag required)",

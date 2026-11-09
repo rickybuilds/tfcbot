@@ -16,6 +16,102 @@ function accountLinkUrl() {
   } catch { return ""; }
 }
 
+async function handleLearningQueue(message, args, { api, steamLinks, config }) {
+  const channelId = String(config?.channels?.learningQueue || "").trim();
+  if (!config?.bootcampLearningQueueEnabled) {
+    await message.channel.send("The learning-pug waitlist is not enabled.");
+    return;
+  }
+  if (!channelId) {
+    await message.channel.send("The learning-pug waitlist is not fully configured yet.");
+    return;
+  }
+  if (String(message.channel?.id || "") !== channelId) {
+    await message.channel.send(`Use the learning-pug waitlist in <#${channelId}>.`);
+    return;
+  }
+
+  const action = String(args[0] || "").toLowerCase();
+  if (action === "leave") {
+    const removed = await steamLinks.leaveBootcampLearningQueue(message.author.id);
+    await message.channel.send(removed.changes
+      ? "You left the learning-pug waitlist."
+      : "You are not on the learning-pug waitlist.");
+    return;
+  }
+
+  if (action === "list" || action === "clear") {
+    if (!isLearningQueueOrganizer(message, config)) {
+      await message.channel.send("Only configured learning-pug organizers can manage the waitlist.");
+      return;
+    }
+    if (action === "clear") {
+      const result = await steamLinks.clearBootcampLearningQueue();
+      await message.channel.send(`Learning-pug waitlist cleared (${Number(result.changes) || 0} signups removed).`);
+      return;
+    }
+    const rows = await steamLinks.getBootcampLearningQueue();
+    const lines = rows.slice(0, 32).map((row, index) =>
+      `**${index + 1}.** <@${row.discord_id}>${row.display_name ? ` · ${String(row.display_name).slice(0, 48)}` : ""}`);
+    await message.channel.send(rows.length
+      ? `**Learning-pug waitlist (${rows.length})**\n${lines.join("\n")}${rows.length > lines.length ? `\n…and ${rows.length - lines.length} more.` : ""}`
+      : "The learning-pug waitlist is empty.");
+    return;
+  }
+
+  if (action === "status") {
+    const rows = await steamLinks.getBootcampLearningQueue();
+    const position = rows.findIndex(row => String(row.discord_id) === String(message.author.id));
+    await message.channel.send(position >= 0
+      ? `You are **${position + 1}/${rows.length}** on the learning-pug waitlist.`
+      : "You are not on the learning-pug waitlist. Use `!learning join` to sign up.");
+    return;
+  }
+
+  if (action !== "join") {
+    await message.channel.send("Use `!learning join`, `!learning leave`, or `!learning status`. Organizers can use `!learning list` or `!learning clear`.");
+    return;
+  }
+
+  const linked = (await steamLinks.getSteamIds(message.author.id)) || [];
+  if (!linked.length) {
+    const linkUrl = accountLinkUrl();
+    await message.channel.send(linkUrl
+      ? `Link Steam and Discord at ${linkUrl}, then use \`!learning join\` again.`
+      : "Link a Steam ID with `!linksteam`, then use `!learning join` again.");
+    return;
+  }
+  const license = await licenseForDiscord(api, steamLinks, message.author.id, linked);
+  if (levelRank(license.level) < levelRank("permit")) {
+    await message.channel.send("You need a Learner's permit before joining learning pugs. Complete a bronze map-tour quiz on the Bootcamp server first.");
+    return;
+  }
+
+  const steamId = linked.find(row => Number(row.is_primary) === 1)?.steam_id || linked[0].steam_id;
+  const before = await steamLinks.getBootcampLearningQueue();
+  const existed = before.some(row => String(row.discord_id) === String(message.author.id));
+  const size = Number(config.bootcampLearningQueueSize) || 8;
+  const result = await steamLinks.joinBootcampLearningQueue(message.author.id, steamId, Math.floor(Date.now() / 1000), size);
+  const rows = await steamLinks.getBootcampLearningQueue();
+  const position = rows.findIndex(row => String(row.discord_id) === String(message.author.id));
+  if (position < 0) {
+    await message.channel.send("The learning-pug waitlist is full. Please try again after an organizer schedules a session.");
+    return;
+  }
+  await message.channel.send(`You're **${position + 1}/${size}** on the learning-pug waitlist. An organizer will post when a session is scheduled.`);
+  if (!existed && Number(result.changes) === 1 && before.length < size && rows.length >= size) {
+    const roleId = String(config.roles?.bootcampLearningOrganizer || "").trim();
+    await message.channel.send(`${roleId ? `<@&${roleId}> ` : ""}The learning-pug waitlist reached ${size} players and is ready for an organizer to schedule.`);
+  }
+}
+
+function isLearningQueueOrganizer(message, config) {
+  const roles = message.member?.roles?.cache;
+  const adminRole = String(config.roles?.admin || "").trim();
+  const organizerRole = String(config.roles?.bootcampLearningOrganizer || "").trim();
+  return Boolean(roles?.has && ((adminRole && roles.has(adminRole)) || (organizerRole && roles.has(organizerRole))));
+}
+
 function register(registry, { api, steamLinks, config = {} }) {
   registry.set("bootcamp", async message => {
     const url = `${siteUrl()}/bootcamp.html`;
@@ -50,7 +146,15 @@ function register(registry, { api, steamLinks, config = {} }) {
     }
   });
 
-  registry.set("learning", async message => {
+  registry.set("learning", async (message, args = []) => {
+    if (["join", "leave", "status", "list", "clear"].includes(String(args[0] || "").toLowerCase())) {
+      try { await handleLearningQueue(message, args, { api, steamLinks, config }); }
+      catch (error) {
+        console.error("[bootcamp learning queue] operation failed:", error);
+        await message.channel.send("Could not update the learning-pug waitlist right now. Please try again shortly.");
+      }
+      return;
+    }
     if (String(process.env.BOOTCAMP_LEARNING_ELIGIBILITY_ENABLED || "").trim().toLowerCase() !== "true") {
       await message.channel.send("Learning-pug eligibility checks are not enabled.");
       return;

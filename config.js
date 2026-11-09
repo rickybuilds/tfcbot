@@ -10,6 +10,7 @@ module.exports = {
     casino: String(process.env.CASINO_CHANNEL_ID || "").trim(),
     odds: process.env.ODDS_CHANNEL_ID,
     pickup: process.env.PICKUP_CHANNEL_ID,
+    learningQueue: String(process.env.BOOTCAMP_LEARNING_QUEUE_CHANNEL_ID || "").trim(),
     aronPickup: String(process.env.ARON_PICKUP_CHANNEL_ID || "").trim(),
     clips: process.env.PICKUP_CLIPS_CHANNEL_ID,
     eloAdmin: process.env.ELO_ADMIN_CHANNEL_ID,
@@ -42,6 +43,7 @@ module.exports = {
     queueRequired: process.env.BOOTCAMP_QUEUE_REQUIRED_ROLE_ID || process.env.BOOTCAMP_LICENSED_ROLE_ID || "",
     bootcampOffense: process.env.BOOTCAMP_OFFENSE_ROLE_ID || "",
     bootcampMentor: process.env.BOOTCAMP_MENTOR_ROLE_ID || "",
+    bootcampLearningOrganizer: process.env.BOOTCAMP_LEARNING_ORGANIZER_ROLE_ID || "",
   },
 
   // UI / Game
@@ -49,6 +51,11 @@ module.exports = {
   MAX_PLAYERS: Number(process.env.MAX_PLAYERS) || 8,
   bootcampQueueGateEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_QUEUE_GATE_ENABLED || "0")),
   bootcampOffenseGateEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_OFFENSE_GATE_ENABLED || "0")),
+  bootcampLearningQueueEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_LEARNING_QUEUE_ENABLED || "0")),
+  bootcampLearningQueueSize: (() => {
+    const size = Number(process.env.BOOTCAMP_LEARNING_QUEUE_SIZE || 8);
+    return Number.isInteger(size) && size >= 2 && size <= 32 ? size : 8;
+  })(),
   bootcampMentorCosignEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.BOOTCAMP_MENTOR_COSIGN_ENABLED || "0")),
   predictionsEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.PREDICTIONS_ENABLED || "0")),
   pointGamesEnabled: /^(?:1|true|yes|on)$/i.test(String(process.env.POINT_GAMES_ENABLED ?? process.env.PREDICTIONS_ENABLED ?? "0")),
