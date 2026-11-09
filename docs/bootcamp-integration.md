@@ -17,6 +17,8 @@ when these values are unset.
   check only; the Bot does not currently run a separate learning-pug queue.
 - `!challenge` shows the active weekly route or drill challenge and its
   standings. It remains disabled until `BOOTCAMP_CHALLENGES_ENABLED=true`.
+- `!season` shows active training season standings from the Website API. It
+  remains disabled until `BOOTCAMP_SEASONS_ENABLED=true`.
 - `!cosign @player` records a mentor's optional learning-pug attestation. It is
   disabled unless `BOOTCAMP_MENTOR_COSIGN_ENABLED=true` and
   `BOOTCAMP_MENTOR_ROLE_ID` are configured. The target needs a primary linked

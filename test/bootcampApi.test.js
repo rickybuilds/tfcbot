@@ -46,6 +46,14 @@ test("Bootcamp API client records mentor co-signs through the authenticated webs
   await assert.rejects(api.cosignLicense("STEAM_0:1:4", "not-a-discord-id"), /Invalid mentor Discord ID/);
 });
 
+test("Bootcamp API client loads the public active season endpoint", async () => {
+  const calls = [];
+  const client = { get: async (url, options) => { calls.push({ url, options }); return { data: { season: null, standings: [] } }; } };
+  const api = createBootcampApi({ baseUrl: "https://example.test", client });
+  assert.deepEqual(await api.season(), { season: null, standings: [] });
+  assert.equal(calls[0].url, "https://example.test/api/bootcamp/seasons/current");
+});
+
 test("Bot runtime Bootcamp commands and watcher never query Bootcamp tables directly", () => {
   const root = path.join(__dirname, "..");
   for (const file of ["services/bootcampWatcher.js", "services/bootcampChallenge.js", "commands/bootcamp.js"]) {

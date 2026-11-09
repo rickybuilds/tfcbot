@@ -124,6 +124,29 @@ function register(registry, { api, steamLinks, config = {} }) {
       await message.channel.send("Could not load the Bootcamp challenge right now. Please try again shortly.");
     }
   });
+
+  registry.set("season", async message => {
+    if (String(process.env.BOOTCAMP_SEASONS_ENABLED || "").trim().toLowerCase() !== "true") {
+      await message.channel.send("Bootcamp season standings are not enabled.");
+      return;
+    }
+    try {
+      const { season, standings = [] } = await api.season();
+      if (!season) {
+        await message.channel.send("There is no active Bootcamp season right now.");
+        return;
+      }
+      const rows = standings.slice(0, 10).map(row =>
+        `**${row.rank}.** ${row.playerName || row.steamId} · ${Number(row.points)} points · ${Number(row.objectives)} objectives`);
+      const embed = new EmbedBuilder().setColor(0x72d8ff).setTitle(`TFC Bootcamp season — ${season.title}`)
+        .setDescription(rows.length ? rows.join("\n") : "No tier improvements have been recorded this season yet.")
+        .setFooter({ text: `${season.startsAt.slice(0, 10)} to ${season.endsAt.slice(0, 10)} UTC` });
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error("[bootcamp season] lookup failed:", error);
+      await message.channel.send("Could not load Bootcamp season standings right now. Please try again shortly.");
+    }
+  });
 }
 
 module.exports = { register };

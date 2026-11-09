@@ -57,6 +57,10 @@ function createBootcampApi({
     async challenge() {
       const response = await client.get(`${basePath}/challenge/current`, requestOptions({}));
       return response.data;
+    },
+    async season() {
+      const response = await client.get(`${basePath}/seasons/current`, requestOptions({}));
+      return response.data;
     }
   };
 }

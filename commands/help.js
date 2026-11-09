@@ -51,6 +51,7 @@ function register(reg, { config }) {
         "`!license` — Show your linked Steam IDs, license and endorsements\n" +
         "`!learning` — Check Learner's permit eligibility (feature flag required)\n" +
         "`!challenge` — Show the active weekly training challenge\n" +
+        "`!season` — Show current training season standings\n" +
         "`!cosign @player` — Mentor co-sign (mentor role and feature flag required)",
     });
 
