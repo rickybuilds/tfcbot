@@ -57,7 +57,7 @@ class PredictionsService {
     this.rosterSchedules.delete(snapshot.serverKey);
     return market;
   }
-  applyRosterChange({matchId,nextSnapshot,applyMatchWrites,context=this.context("terms","system","match terms changed"),replaceAfterSubstitution=false}) {
+  applyRosterChange({matchId,nextSnapshot,applyMatchWrites,context=this.context("terms","system","match terms changed")}) {
     return this.store.atomic(()=>{
       const m=this.store.latest(matchId);
       if(!m){applyMatchWrites();return null;}
@@ -66,12 +66,6 @@ class PredictionsService {
       applyMatchWrites();
       if(m.settlement_version>0){this.store.markReview(m.id,"historical roster/terms change");return this.store.market(m.id);}
       if(m.state==="void")return m;
-      if(replaceAfterSubstitution&&!m.observed_result&&!m.result){
-        this.store.voidMarket({marketId:m.id,context});
-        const next=this.store.createMarket(this.snapshotWithOdds(nextSnapshot),context);
-        this.db.prepare("UPDATE prediction_markets SET phase=?,phase_evidence=?,live_at=? WHERE id=?").run(m.phase,m.phase_evidence,m.live_at,next.id);
-        return this.store.market(next.id);
-      }
       if(m.phase==="unknown"||m.state==="review_required"){
         this.store.markReview(m.id,"terms changed with uncertain match phase");return this.store.market(m.id);
       }

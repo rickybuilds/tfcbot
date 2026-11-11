@@ -176,7 +176,6 @@ async function run(message, args, deps) {
 
   const originalRow = { ...dbMatch };
   await state.predictions?.prepareTermsChange(matchId);
-  const previousMarketId = state.predictions?.store.latest(matchId)?.id;
   const verifiedLock = state.lockedPlayers?.get(String(newId));
   if (verifiedLock && String(verifiedLock) !== String(matchId)) throw new Error("Incoming player became locked to another match; retry substitution");
 
@@ -257,7 +256,7 @@ async function run(message, args, deps) {
 	}
   const nextRow = { ...originalRow, blue_ids: JSON.stringify(newBlueIds), red_ids: JSON.stringify(newRedIds), offense_ids: nextOffenseIds };
   const market = require("../predictions/integration").commitMatchTerms({
-    db: elo.db, predictions: state.predictions, row: originalRow, next: nextRow, replaceAfterSubstitution: true,
+    db: elo.db, predictions: state.predictions, row: originalRow, next: nextRow,
     write: () => elo.db.prepare("UPDATE matches SET blue_ids=?,red_ids=?,team_scenarios=?,offense_ids=? WHERE match_id=?").run(nextRow.blue_ids,nextRow.red_ids,teamScenarioState,nextOffenseIds,matchId),
   });
 	if (state?.lockedPlayers) {
@@ -363,7 +362,6 @@ if (captainsMatch) {
 }
 
 
-  if (previousMarketId && previousMarketId !== market?.id) await state.predictions.refreshCard(previousMarketId);
   if (market) await state.predictions.refreshCard(market.id);
   // Confirmation in pickup channel
   await message.channel.send(

@@ -54,44 +54,6 @@ test("captain substitution keeps team assignment and atomically rolls back locks
  db.exec("DROP TRIGGER injected");await require("../commands/sub").run(message,[ids[0],"999999999999999","MATCH1"],deps);
  assert.deepEqual(JSON.parse(db.prepare("SELECT blue_ids FROM matches").get().blue_ids),["999999999999999",...ids.slice(1,4)]);assert.equal(s.store.account("spectator").balance,1000);
 });
-test("pregame substitution disables the old prediction card and posts a separate updated card",async t=>{
- process.env.ADMIN_ROLE_ID="admin";process.env.PICKUP_CHANNEL_ID="pickup";
- const {s,ids,m,message,deps}=setup(t),edits=[],sent=[];
- const original={id:"original",channelId:"pickup",edit:async payload=>{edits.push(payload);return original;}};
- const channel={id:"pickup",messages:{fetch:async()=>original},send:async payload=>{sent.push(payload);return {id:"replacement",channelId:"pickup"};}};
- message.guild.channels.cache.set("pickup",channel);
- s.client={channels:{fetch:async()=>channel}};
- s.bindMessage(m.id,original);
- s.queueCardPublication(m.id,"pickup",{embeds:[{title:"Original teams"}]});
- await require("../commands/sub").run(message,[ids[0],"999999999999999","MATCH1"],deps);
- assert.equal(s.store.account("spectator").balance,1000);
- assert.ok(edits.some(p=>p.content.includes("voided")&&p.components[0].components[0].data.disabled));
- assert.equal(edits[0].embeds[0].title,"Original teams");
- assert.equal(sent.length,1);assert.match(sent[0].embeds[0].title,/Match Updated/);
- assert.notEqual(s.store.latest("MATCH1").id,m.id);
-});
-for(const phase of ["live","unknown"]) test(`substitution with ${phase} phase refunds and opens a new market until all eight arrive`,async t=>{
- process.env.ADMIN_ROLE_ID="admin";const {s,db,ids,m,message,deps}=setup(t);
- const incoming="999999999999999", steamIds=[incoming,...ids.slice(1)].map((_,i)=>`STEAM_0:1:${i}`);
- db.exec("CREATE TABLE player_steam_ids(discord_id TEXT,steam_id TEXT)");
- [incoming,...ids.slice(1)].forEach((id,i)=>db.prepare("INSERT INTO player_steam_ids VALUES (?,?)").run(id,steamIds[i]));
- s.queryServerPhase=async()=>({phase});
- s.queryServerRoster=async()=>({complete:true,mapName:"shutdown2",steamIds:steamIds.slice(0,7)});
- await require("../commands/sub").run(message,[ids[0],incoming,"MATCH1"],deps);
- const next=s.store.latest("MATCH1");assert.notEqual(next.id,m.id);assert.equal(s.store.market(m.id).state,"void");
- assert.equal(s.store.account("spectator").balance,1000);assert.equal(next.state,"open");assert.equal(next.closes_at,null);
- await s.reconcileServer("east");assert.equal(s.store.market(next.id).closes_at,null);
- s.queryServerRoster=async()=>({complete:true,mapName:"shutdown2",steamIds});await s.reconcileServer("east");
- assert.equal(s.store.market(next.id).closes_at,121000);assert.equal(s.store.assertAccounting(),true);
-});
-test("substitution replaces an unsettled market frozen for phase review",async t=>{
- process.env.ADMIN_ROLE_ID="admin";const {s,ids,m,message,deps}=setup(t);
- s.store.markReview(m.id,"terms changed with uncertain match phase");
- s.queryServerPhase=async()=>({phase:"unknown"});
- await require("../commands/sub").run(message,[ids[0],"999999999999999","MATCH1"],deps);
- assert.equal(s.store.market(m.id).state,"void");assert.equal(s.store.account("spectator").balance,1000);
- assert.equal(s.store.latest("MATCH1").state,"open");assert.equal(s.store.latest("MATCH1").revision,2);
-});
 test("shuffle resets the final teams; stale original snapshots cannot overwrite a newer edit",async t=>{
  const {s,db,ids,message,deps}=setup(t);
  const scenarios={version:1,selected:1,scenarios:[{blue:ids.slice(0,4),red:ids.slice(4)},{blue:ids.slice(4),red:ids.slice(0,4)}]};
