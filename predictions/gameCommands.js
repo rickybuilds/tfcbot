@@ -1,6 +1,6 @@
 "use strict";
 const amount=s=>/^[1-9]\d*$/.test(s||'')?Number(s):NaN;
-function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
+function register(registry,games,{clock=Date.now,casinoChannelId='',rouletteRevealDelay=1200}={}){
  const respond=(m,content)=>m.channel.send({content,allowedMentions:{parse:[]}});
  const wrap=(fn,casinoOnly=false)=>async (m,args)=>{
   if(!m.guild)return;
@@ -19,9 +19,10 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   await respond(m,`🎁 <@${r.senderId}> gave <@${r.recipientId}> **${r.points} points**.`);
  }));
  registry.set('roulette',wrap(async(m,args,context)=>{
+  if(!args.length||args.length===1&&args[0].toLowerCase()==='table')return m.channel.send(require('./roulettePanel').table());
   if(args.length!==2)return respond(m,'Usage: !roulette <red|black|odd|even|low|high|0-36> <points>');
   const r=games.roulette({guildId:m.guild.id,userId:m.author.id,pick:args[0],stake:amount(args[1]),context});
-  await respond(m,`🎰 <@${m.author.id}> bet ${r.stake} on ${r.pick}. The wheel landed on **${r.number} ${r.color}** — **${r.returned} points returned**.`);
+  await m.channel.send(require('./roulettePanel').result(r,m.author.id));
  },true));
  registry.set('coinflip',wrap(async(m,args,context)=>{
   if(args.length!==2)return respond(m,'Usage: !coinflip <heads|tails> <points>');
@@ -126,6 +127,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   await m.channel.send({content:`⚔️ <@${m.author.id}> challenged <@${opponent.id}> for ${amount(args[1])} points. The challenge expires <t:${Math.floor(r.expiresAt/1000)}:R>. Both players need enough points when accepted.`,allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:3,label:'Accept Duel',custom_id:`point-duel:accept:${m.id}`},{type:2,style:4,label:'Decline Duel',custom_id:`point-duel:decline:${m.id}`}]}]});
  },true));
  return async function handleInteraction(i){
+  if(await require('./roulettePanel').handle(i,games,{casinoChannelId,clock,delay:rouletteRevealDelay}))return true;
   const bj=require('./blackjackPanel');
   if(await bj.handleModal(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
   if(await bj.handle(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
