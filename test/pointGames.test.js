@@ -37,8 +37,8 @@ test("Discord games accept commands and display roulette result without exposing
  const registry=new Map(),messages=[];register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});
  const msg={id:'1',guild:{id:'g'},author:{id:'a'},channel:{id:'casino',send:async p=>messages.push(p)}};
  await registry.get('roulette')(msg,['red','10']);
- assert.match(JSON.stringify(messages[0]),/green/i);assert.match(JSON.stringify(messages[0]),/0 points returned/i);
- assert.doesNotMatch(JSON.stringify(messages[0]),/balance/i);assert.equal(store.account('a').balance,990);
+ assert.match(messages[0].content,/green/i);assert.match(messages[0].content,/0 points returned/i);
+ assert.doesNotMatch(messages[0].content,/balance/i);assert.equal(store.account('a').balance,990);
 });
 test("expired duels do not transfer points",t=>{
  const {store,games}=setup(t);games.challenge({guildId:'g',userId:'a',opponentId:'b',stake:10,context:ctx('d')});
@@ -188,6 +188,6 @@ test('each casino game works in the configured channel',async t=>{
  register(registry,games,{casinoChannelId:'casino',clock:()=>1000});
  const msg={id:'901',guild:{id:'g'},author:{id:'1'},channel:{id:'casino',send:async p=>outputs.push(p)},mentions:{users:{first:()=>({id:'2',bot:false})}}};
  await registry.get('roulette')(msg,['0','10']);msg.id='902';await registry.get('coinflip')(msg,['heads','10']);msg.id='903';await registry.get('duel')(msg,['<@2>','10']);
- assert.equal(outputs.length,3);assert.match(JSON.stringify(outputs[0]),/roulette/i);assert.match(outputs[1].content,/heads/i);assert.equal(outputs[2].components[0].components.length,2);
+ assert.equal(outputs.length,3);assert.match(outputs[0].content,/wheel/i);assert.match(outputs[1].content,/heads/i);assert.equal(outputs[2].components[0].components.length,2);
  assert.equal(store.assertAccounting(),true);
 });
