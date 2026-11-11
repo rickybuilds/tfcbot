@@ -55,3 +55,19 @@ test('blackjack panel presents a settled round in an embed',()=>{
  for(const expected of ['Dealer','19','<@123>','18','loss','100','Round settled']) assert.ok(text.includes(expected),expected);
  assert.deepEqual(result.allowedMentions,{parse:[]});
 });
+
+
+test('joining a blackjack seat updates the table without a confirmation message',async t=>{
+ const {games,ctx}=setup(t);const round=games.blackjackOpen({guildId:'g',channelId:'casino',context:ctx('open')});
+ const {handleModal}=require('../predictions/blackjackPanel');let deferred=0,refreshed;
+ const interaction={customId:`point-bj:stake:${round.id}:1`,id:'modal',guildId:'g',channelId:'casino',user:{id:'player'},isModalSubmit:()=>true,fields:{getTextInputValue:()=> '100'},deferUpdate:async()=>{deferred++;},reply:async()=>{throw new Error('unexpected confirmation');}};
+ assert.equal(await handleModal(interaction,games,{casinoChannelId:'casino',clock:()=>1001,refresh:async r=>{refreshed=r;}}),true);
+ assert.equal(deferred,1);assert.equal(refreshed.seats[0].user_id,'player');assert.equal(refreshed.seats[0].stake,100);
+});
+
+test('invalid blackjack seat wagers still receive a private error',async t=>{
+ const {games,ctx}=setup(t);const round=games.blackjackOpen({guildId:'g',channelId:'casino',context:ctx('open')});
+ const {handleModal}=require('../predictions/blackjackPanel');let reply;
+ const interaction={customId:`point-bj:stake:${round.id}:1`,id:'modal',guildId:'g',channelId:'casino',user:{id:'player'},isModalSubmit:()=>true,fields:{getTextInputValue:()=> 'invalid'},deferUpdate:async()=>{throw new Error('unexpected update');},reply:async payload=>{reply=payload;}};
+ await handleModal(interaction,games,{casinoChannelId:'casino',clock:()=>1001});assert.equal(reply.ephemeral,true);assert.ok(reply.content);
+});
