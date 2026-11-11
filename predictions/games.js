@@ -99,7 +99,7 @@ class PointGames {
      if(b.working==='off'||b.working==='auto'&&round.state!=='point')continue;
      if(sum===7){this.store.entry(ctx,{kind:'house_collection',amount:b.stake,entryKey:`place-loss:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});}
      else if(sum===b.number){const numerator=b.number===4||b.number===10?9:7,denominator=b.number===6||b.number===8?6:5,profit=Math.floor(b.stake*numerator/denominator);
-      if(profit){this.store.change(b.user_id,profit,ctx,{kind:'game_payout',entryKey:`place-profit:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});this.store.entry(ctx,{kind:'house_funding',amount:profit,entryKey:`place-funding:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});}
+      if(profit){this.store.change(b.user_id,profit,ctx,{profit,kind:'game_payout',entryKey:`place-profit:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});this.store.entry(ctx,{kind:'house_funding',amount:profit,entryKey:`place-funding:${b.user_id}:${b.number}`,metadata:{game:'craps',roundId:round.id,number:b.number}});}
       placePayouts.push({userId:b.user_id,number:b.number,profit});
      }
     }
@@ -108,7 +108,7 @@ class PointGames {
    if(outcome){
     for(const b of this.store.db.prepare("SELECT * FROM point_craps_bets WHERE round_id=? AND status='active'").all(round.id)){
      const returned=outcome==='push'&&b.pick==='dont'?b.stake:b.pick===outcome?b.stake*2:0;
-     if(returned)this.store.change(b.user_id,returned,ctx,{kind:'game_payout',entryKey:`payout:${b.user_id}`,metadata:{game:'craps',roundId:round.id,outcome}});
+     if(returned)this.store.change(b.user_id,returned,ctx,{profit:Math.max(0,returned-b.stake),kind:'game_payout',entryKey:`payout:${b.user_id}`,metadata:{game:'craps',roundId:round.id,outcome}});
      const diff=returned-b.stake;if(diff)this.store.entry(ctx,{kind:diff>0?'house_funding':'house_collection',amount:Math.abs(diff),entryKey:`house:${b.user_id}`,metadata:{game:'craps',roundId:round.id}});
     }
     this.store.db.prepare("UPDATE point_craps_bets SET status='settled' WHERE round_id=? AND status='active'").run(round.id);
@@ -134,7 +134,7 @@ class PointGames {
  }
  play(user,stake,returned,ctx,game,metadata){
   this.store.change(user,-stake,ctx,{kind:"game_stake",entryKey:"stake",metadata:{game,...metadata}});
-  if(returned)this.store.change(user,returned,ctx,{kind:"game_payout",entryKey:"payout",metadata:{game,...metadata}});
+  if(returned)this.store.change(user,returned,ctx,{profit:Math.max(0,returned-stake),kind:"game_payout",entryKey:"payout",metadata:{game,...metadata}});
   const diff=returned-stake;
   if(diff>0)this.store.entry(ctx,{kind:"house_funding",amount:diff,entryKey:"house",metadata:{game}});
   if(diff<0)this.store.entry(ctx,{kind:"house_collection",amount:-diff,entryKey:"house",metadata:{game}});
@@ -202,7 +202,7 @@ class PointGames {
    // Both players must still be able to cover their wager when accepted.
    if(this.store.ensureAccount(winner,ctx).balance<d.stake||this.store.ensureAccount(loser,ctx).balance<d.stake)throw new Error('Both players need enough available points');
    this.store.change(loser,-d.stake,ctx,{kind:'duel_loss',entryKey:'loss',metadata:{challengeId}});
-   this.store.change(winner,d.stake,ctx,{kind:'duel_win',entryKey:'win',metadata:{challengeId}});
+   this.store.change(winner,d.stake,ctx,{profit:d.stake,kind:'duel_win',entryKey:'win',metadata:{challengeId}});
    this.store.db.prepare("UPDATE point_game_duels SET status='settled' WHERE id=?").run(challengeId);
    return {winner,loser,stake:d.stake};
   });

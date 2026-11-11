@@ -19,7 +19,7 @@ function settle(g,r,ctx){
   else if(dbTotal>21||p>dbTotal){result='win';returned=h.stake*2;}
   else if(p===dbTotal){result='push';returned=h.stake;}
   else result='loss';
-  if(returned)g.store.change(h.user_id,returned,ctx,{kind:'game_payout',entryKey:`payout:${r.id}:${h.id}`,metadata:{game:'blackjack',roundId:r.id,result}});
+  if(returned)g.store.change(h.user_id,returned,ctx,{profit:Math.max(0,returned-h.stake),kind:'game_payout',entryKey:`payout:${r.id}:${h.id}`,metadata:{game:'blackjack',roundId:r.id,result}});
   const delta=returned-h.stake;if(delta>0)g.store.entry(ctx,{kind:'house_funding',amount:delta,entryKey:`house:${h.id}`,metadata:{game:'blackjack',roundId:r.id}});if(delta<0)g.store.entry(ctx,{kind:'house_collection',amount:-delta,entryKey:`house:${h.id}`,metadata:{game:'blackjack',roundId:r.id}});
   g.store.db.prepare('UPDATE point_blackjack_hands SET state=\'settled\',result=? WHERE id=?').run(result,h.id);
  }

@@ -45,7 +45,7 @@ function settle(g,round,dice,ctx){
     if(sum===7||sum===b.number&&dice[0]!==dice[1])returned=0;
     else if(sum===b.number&&dice[0]===dice[1]){
      const profit=b.stake*([4,10].includes(b.number)?7:9);
-     g.store.change(b.user_id,profit,ctx,{kind:'game_payout',entryKey:`wager-profit:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id}});
+     g.store.change(b.user_id,profit,ctx,{profit,kind:'game_payout',entryKey:`wager-profit:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id}});
      g.store.entry(ctx,{kind:'house_funding',amount:profit,entryKey:`wager-fund:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id}});
      out.push({userId:b.user_id,kind:b.kind,number:b.number,stake:b.stake,profit});
     }
@@ -62,7 +62,7 @@ function settle(g,round,dice,ctx){
    else if(sum===b.number)returned=b.kind==='come'?b.stake*2:0;
   }
   if(returned===null)continue;
-  if(returned)g.store.change(b.user_id,returned,ctx,{kind:'game_payout',entryKey:`wager-pay:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id,kind:b.kind}});
+  if(returned)g.store.change(b.user_id,returned,ctx,{profit:Math.max(0,returned-b.stake),kind:'game_payout',entryKey:`wager-pay:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id,kind:b.kind}});
   const difference=returned-b.stake;if(difference)g.store.entry(ctx,{kind:difference>0?'house_funding':'house_collection',amount:Math.abs(difference),entryKey:`wager-house:${b.id}`,metadata:{game:'craps',roundId:round.id,wagerId:b.id}});
   g.store.db.prepare("UPDATE point_craps_wagers SET status='settled' WHERE id=?").run(b.id);
   out.push({userId:b.user_id,kind:b.kind,number:b.number,stake:b.stake,returned});

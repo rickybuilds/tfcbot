@@ -18,7 +18,7 @@ function settle(g,round,sum,ctx){
  if(sevenOut||completed){
   for(const bet of fireBets){
    const multiplier=count===6?1000:count===5?250:count===4?25:0,returned=bet.stake*multiplier;
-   if(returned)g.store.change(bet.user_id,returned,ctx,{kind:'game_payout',entryKey:`fire-pay:${bet.id}`,metadata:{game:'craps',roundId:round.id,wagerId:bet.id,points:count}});
+   if(returned)g.store.change(bet.user_id,returned,ctx,{profit:Math.max(0,returned-bet.stake),kind:'game_payout',entryKey:`fire-pay:${bet.id}`,metadata:{game:'craps',roundId:round.id,wagerId:bet.id,points:count}});
    const delta=returned-bet.stake;if(delta)g.store.entry(ctx,{kind:delta>0?'house_funding':'house_collection',amount:Math.abs(delta),entryKey:`fire-house:${bet.id}`,metadata:{game:'craps',roundId:round.id,wagerId:bet.id}});
    db.prepare("UPDATE point_craps_wagers SET status='settled' WHERE id=?").run(bet.id);results.push({userId:bet.user_id,kind:'fire',stake:bet.stake,returned});
   }

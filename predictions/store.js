@@ -52,6 +52,41 @@ class PredictionStore {
     const n=this.db.prepare("UPDATE prediction_accounts SET balance=balance+?,updated_at=? WHERE discord_id=? AND balance+? BETWEEN 0 AND 9007199254740991").run(amount,ctx.now,String(id),amount);
     if(!n.changes)throw new Error("Insufficient funds or unsafe balance");
     this.entry(ctx,{...details,accountId:String(id),amount});
+    if(amount>0&&details.profit>0)this.repayLoan(id,Math.min(amount,details.profit),ctx,details.entryKey);
+  }
+  loanStatus(id) {
+    id=String(id);let wagered=0n,held=0n,principal=0n,interest=0n;
+    for(const t of this.db.prepare("SELECT amount,kind,metadata FROM prediction_transactions WHERE account_id=? AND (kind='game_stake' OR kind='game_payout')").safeIntegers(true).iterate(id)){
+      if(t.kind==='game_stake')wagered-=t.amount;
+      else if(t.metadata&&JSON.parse(t.metadata).refund===true)wagered-=t.amount;
+    }
+    for(const t of this.db.prepare("SELECT stake FROM point_craps_bets WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_places WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_wagers WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_blackjack_seats WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_blackjack_hands WHERE user_id=? AND state IN ('active','stood','bust','blackjack')").safeIntegers(true).iterate(id,id,id,id,id))held+=t.stake;
+    for(const loan of this.db.prepare('SELECT principal_remaining,interest_remaining FROM point_loans WHERE user_id=?').safeIntegers(true).iterate(id)){principal+=loan.principal_remaining;interest+=loan.interest_remaining;}
+    const eligible=wagered>held?wagered-held:0n,limit=eligible/4n,max=BigInt(Number.MAX_SAFE_INTEGER);
+    if(principal>max||interest>max)throw new Error('Unsafe loan balance');
+    return {wagered:eligible.toString(),limit:Number(limit>max?max:limit),principal:Number(principal),interest:Number(interest)};
+  }
+  issueLoan(id,amount,ctx){
+    if(!Number.isSafeInteger(amount)||amount<1)throw new Error('Loan amount must be a positive whole number');
+    return this.operation(ctx,`loan:${id}:${amount}`,()=>{
+      const status=this.loanStatus(id),interest=Math.ceil(amount/10);
+      if(amount>status.limit-status.principal)throw new Error(`Loan exceeds the limit: ${Math.max(0,status.limit-status.principal)} points available`);
+      this.db.prepare('INSERT INTO point_loans(user_id,principal_remaining,interest_remaining,created_at,operation_key) VALUES (?,?,?,?,?)').run(String(id),amount,interest,ctx.now,ctx.operationKey);
+      this.change(id,amount,ctx,{kind:'loan_advance',entryKey:'loan-advance'});
+      this.entry(ctx,{kind:'house_funding',amount,entryKey:'loan-funding',metadata:{game:'loan'}});
+      return {...this.loanStatus(id),amount,interestAdded:interest};
+    });
+  }
+  repayLoan(id,profit,ctx,key){
+    if(!Number.isSafeInteger(profit)||profit<=0)return 0;
+    let remaining=profit,repaid=0;
+    for(const loan of this.db.prepare('SELECT * FROM point_loans WHERE user_id=? AND (principal_remaining>0 OR interest_remaining>0) ORDER BY id').all(String(id))){
+      const p=Math.min(remaining,loan.principal_remaining);remaining-=p;const i=Math.min(remaining,loan.interest_remaining);remaining-=i;repaid+=p+i;
+      this.db.prepare('UPDATE point_loans SET principal_remaining=principal_remaining-?,interest_remaining=interest_remaining-? WHERE id=?').run(p,i,loan.id);
+      if(!remaining)break;
+    }
+    if(repaid){this.change(id,-repaid,ctx,{kind:'loan_repayment',entryKey:`loan-repayment:${key}`});this.entry(ctx,{kind:'house_collection',amount:repaid,entryKey:`loan-collection:${key}`,metadata:{game:'loan'}});}
+    return repaid;
   }
   createMarket(snapshot,ctx,ruleVersion=3) {
     const s=validSnapshot(snapshot);
@@ -136,7 +171,7 @@ class PredictionStore {
       const version=m.settlement_version+1;let house=0;
       for(const [user,entitlement] of Object.entries(allocation.credits)){
         const amount=Math.max(0,entitlement-(paid[user]||0));
-        if(amount){this.change(user,amount,ctx,{kind:correction?"correction":"settlement",marketId:id,version,entryKey:`credit:${user}`});paid[user]=(paid[user]||0)+amount;house+=amount;}
+        if(amount){const bet=bets.find(b=>b.discord_id===user),oldPaid=paid[user]||0,profit=bet?Math.max(0,oldPaid+amount-bet.stake)-Math.max(0,oldPaid-bet.stake):0;this.change(user,amount,ctx,{profit,kind:correction?"correction":"settlement",marketId:id,version,entryKey:`credit:${user}`});paid[user]=(paid[user]||0)+amount;house+=amount;}
       }
       const funding=correction?house:(allocation.houseFunding||0);
       if(funding)this.entry(ctx,{kind:"house_funding",amount:funding,marketId:id,version,entryKey:"house"});

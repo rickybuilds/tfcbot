@@ -72,6 +72,11 @@ function initializeSchema(db) {
       doubled INTEGER NOT NULL DEFAULT 0, split_aces INTEGER NOT NULL DEFAULT 0,
       UNIQUE(round_id,seat,hand_no)
     );
+    CREATE TABLE IF NOT EXISTS point_loans (
+      id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, principal_remaining INTEGER NOT NULL, interest_remaining INTEGER NOT NULL,
+      created_at INTEGER NOT NULL, operation_key TEXT NOT NULL UNIQUE
+    );
+    CREATE INDEX IF NOT EXISTS point_loans_user ON point_loans(user_id,id);
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,
