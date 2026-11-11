@@ -63,7 +63,7 @@ const { rankFromRating } = require("../lib/elo");
 
 /* --------------------------- streak bonus check --------------------------- */
 const { WinStreakStore } = require("../lib/winstreak");
-const { WINNER_BONUS_MULTIPLIER, WINNER_BONUS_PERCENT } = require("../lib/modeElo");
+const { WINNER_BONUS_MULTIPLIER, formatBonusAnnouncement } = require("../lib/modeElo");
 
 function eligibleStreakPlayers(players, elo) {
   const STREAK_TRIGGER_WINS = Number(process.env.STREAK_TRIGGER_WINS || 5);
@@ -943,15 +943,7 @@ async function finalizeMatch(
   }
 
   if (bonus) {
-    let reason = bonus.triggeredBy?.includes("ADL Mode") ? "ADL Mode"
-                : bonus.type === "WINNER_ONLY" ? "streak"
-                : "special rule";
-
-    await channel.send({
-	  content:
-		`🔥 **BONUS ELO ENABLED** (triggered by ${reason})\n` +
-		`👀 Winners receive **${WINNER_BONUS_PERCENT}% extra Elo** before performance allocation. Losers take regular Elo losses.`
-	});
+    await channel.send({ content: formatBonusAnnouncement(bonus) });
   }
 
   // 🔒 Lock server
