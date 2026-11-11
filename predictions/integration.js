@@ -1,13 +1,13 @@
 "use strict";
 // Recheck after Discord awaits, then make match writes and financial transitions
 // one synchronous unit. No network or in-memory mutation belongs in write().
-function commitMatchTerms({db,predictions,row,next,write,context}) {
+function commitMatchTerms({db,predictions,row,next,write,context,replaceAfterSubstitution=false}) {
   const apply=()=>{
     const current=db.prepare("SELECT * FROM matches WHERE match_id=?").get(String(row.match_id));
     for(const field of ["blue_ids","red_ids","offense_ids","map_name","server_name","status"]){
       if(!current||current[field]!==row[field])throw new Error("Match changed while command was pending; retry");
     }
-    if(predictions)return predictions.applyRosterChange({matchId:row.match_id,nextSnapshot:predictions.snapshotFromRow(next),applyMatchWrites:write,context});
+    if(predictions)return predictions.applyRosterChange({matchId:row.match_id,nextSnapshot:predictions.snapshotFromRow(next),applyMatchWrites:write,context,replaceAfterSubstitution});
     write();return null;
   };
   return db.inTransaction?apply():db.transaction(apply).immediate();
