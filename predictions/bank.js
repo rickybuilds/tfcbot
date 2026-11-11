@@ -9,7 +9,7 @@ function buildStatement(service,user){
   const store=service.store;
   return store.atomic(()=>{
     const account=store.ensureAccount(user,service.context("bank",user));
-    const held=store.db.prepare("SELECT stake FROM prediction_bets WHERE discord_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_bets WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_places WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_wagers WHERE user_id=? AND status='active'").all(user,user,user,user).reduce((total,row)=>total+BigInt(row.stake),0n);
+    const held=store.db.prepare("SELECT stake FROM prediction_bets WHERE discord_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_bets WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_places WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_craps_wagers WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_blackjack_seats WHERE user_id=? AND status='active' UNION ALL SELECT stake FROM point_blackjack_hands WHERE user_id=? AND state IN ('active','stood','bust','blackjack')").all(user,user,user,user,user,user).reduce((total,row)=>total+BigInt(row.stake),0n);
     const progress=store.bettingProgress(user);
     const bets=store.db.prepare(`SELECT b.*,m.match_id,m.revision,m.state,m.closes_at,
       json_extract(m.snapshot,'$.mapName') AS map_name FROM prediction_bets b

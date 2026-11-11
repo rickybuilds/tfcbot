@@ -34,6 +34,21 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   const cards=hand=>hand.map(card=>({1:'A',11:'J',12:'Q',13:'K'}[card]||String(card))).join(', ');
   await respond(m,`🃏 <@${m.author.id}> bet ${r.stake} on ${r.pick}. Player: **${cards(r.player)}** (${r.playerTotal}); Banker: **${cards(r.banker)}** (${r.bankerTotal}). Result: **${r.outcome}** — **${r.returned} points returned**.`);
  },true));
+ const bjTimers=new Map();
+ const scheduleBj=r=>{const previous=bjTimers.get(r?.id);if(previous)clearTimeout(previous);bjTimers.delete(r?.id);if(!r||!['joining','playing'].includes(r.state))return;const delay=Math.max(0,r.deadline-clock()),timer=setTimeout(async()=>{try{const result=games.blackjackExpire({roundId:r.id,expectedDeadline:r.deadline,context:{operationKey:`blackjack-expire:${r.id}:${r.deadline}`,actorId:'system',now:clock()}});await refreshBj(result);scheduleBj(result);}catch(e){console.error('[blackjack timer]',e);}},delay);bjTimers.set(r.id,timer);timer.unref?.();};
+ const refreshBj=async r=>{const ch=registry.client?.channels?.cache?.get(String(r.channel_id));if(ch&&r.message_id){const msg=await ch.messages.fetch(r.message_id).catch(()=>null);if(msg)await msg.edit(require('./blackjackPanel').panel(r)).catch(()=>null);}};
+ const recoverBj=()=>{for(const r of games.store.db.prepare("SELECT id FROM point_blackjack_rounds WHERE state IN ('joining','playing')").all()){const round=games.blackjackStatusById(r.id);if(round){scheduleBj(round);if(round.deadline<=clock())void Promise.resolve().then(async()=>{const result=games.blackjackExpire({roundId:round.id,expectedDeadline:round.deadline,context:{operationKey:`blackjack-expire:${round.id}:${round.deadline}`,actorId:'system',now:clock()}});await refreshBj(result);scheduleBj(result);}).catch(e=>console.error('[blackjack recovery]',e));}}};
+ registry.set('blackjack',async(m,args)=>{
+  if(!m.guild||!casinoChannelId||String(m.channel?.id)!==String(casinoChannelId))return;
+  const context={operationKey:`game:${m.id}`,actorId:String(m.author.id),now:clock()};
+  if(args.length)return respond(m,'Use `!blackjack` to open or view the shared table.');
+  try{
+   const current=games.blackjackStatus({guildId:m.guild.id,channelId:m.channel.id});if(current){scheduleBj(current);await refreshBj(current);await respond(m,'A blackjack table is already open above.');return;}
+   const round=games.blackjackOpen({guildId:m.guild.id,channelId:m.channel.id,context});const message=await m.channel.send(require('./blackjackPanel').panel(round));
+   const saved=games.blackjackSetMessage({roundId:round.id,messageId:message.id,context:{operationKey:`blackjack-message:${message.id}`,actorId:String(m.author.id),now:clock()}});scheduleBj(saved);
+  }catch(e){await respond(m,/Blackjack table is already open|Point games are paused/.test(e.message||'')?`Unable to open blackjack: ${e.message}`:'Unable to open blackjack right now. Please try again.');}
+ });
+ if(typeof registry.client?.once==='function')registry.client.once('clientReady',recoverBj);else recoverBj();
  const crapsButton=id=>[{type:1,components:[{type:2,style:1,label:'Roll Dice',custom_id:`point-craps:roll:${id}`}]}];
  const crapsText=r=>{
   const hits=r.placePayouts||[],shown=hits.slice(0,10).map(p=>`<@${p.userId}> +${p.profit} points on ${p.number}`);
@@ -111,6 +126,9 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   await m.channel.send({content:`⚔️ <@${m.author.id}> challenged <@${opponent.id}> for ${amount(args[1])} points. The challenge expires <t:${Math.floor(r.expiresAt/1000)}:R>. Both players need enough points when accepted.`,allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:3,label:'Accept Duel',custom_id:`point-duel:accept:${m.id}`},{type:2,style:4,label:'Decline Duel',custom_id:`point-duel:decline:${m.id}`}]}]});
  },true));
  return async function handleInteraction(i){
+  const bj=require('./blackjackPanel');
+  if(await bj.handleModal(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
+  if(await bj.handle(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
   if(await require('./crapsPanel').handle(i,games,casinoChannelId,clock,crapsText))return true;
   const craps=/^point-craps:roll:(\d+)$/.exec(String(i.customId||''));
   if(craps&&i.isButton()&&i.guildId){

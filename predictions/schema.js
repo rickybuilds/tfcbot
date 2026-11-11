@@ -53,6 +53,25 @@ function initializeSchema(db) {
       made_mask INTEGER NOT NULL DEFAULT 0, started INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(guild_id,channel_id)
     );
+    CREATE TABLE IF NOT EXISTS point_blackjack_rounds (
+      id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
+      state TEXT NOT NULL CHECK(state IN ('joining','playing','settled','cancelled')),
+      created_at INTEGER NOT NULL, deadline INTEGER NOT NULL, shoe TEXT NOT NULL, shoe_pos INTEGER NOT NULL DEFAULT 0,
+      dealer_cards TEXT NOT NULL DEFAULT '[]', current_seat INTEGER, result TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS point_blackjack_active ON point_blackjack_rounds(guild_id,channel_id) WHERE state IN ('joining','playing');
+    CREATE TABLE IF NOT EXISTS point_blackjack_seats (
+      round_id INTEGER NOT NULL, seat INTEGER NOT NULL CHECK(seat BETWEEN 1 AND 5), user_id TEXT NOT NULL,
+      stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 500), status TEXT NOT NULL CHECK(status IN ('active','settled','refunded')),
+      PRIMARY KEY(round_id,seat), UNIQUE(round_id,user_id)
+    );
+    CREATE TABLE IF NOT EXISTS point_blackjack_hands (
+      id INTEGER PRIMARY KEY, round_id INTEGER NOT NULL, user_id TEXT NOT NULL, seat INTEGER NOT NULL,
+      hand_no INTEGER NOT NULL DEFAULT 1, cards TEXT NOT NULL, stake INTEGER NOT NULL CHECK(stake BETWEEN 1 AND 1000),
+      state TEXT NOT NULL CHECK(state IN ('active','stood','bust','blackjack','settled')), result TEXT,
+      doubled INTEGER NOT NULL DEFAULT 0, split_aces INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(round_id,seat,hand_no)
+    );
     CREATE TABLE IF NOT EXISTS prediction_transactions (
       id INTEGER PRIMARY KEY, account_id TEXT, amount INTEGER NOT NULL CHECK(typeof(amount)='integer'), kind TEXT NOT NULL,
       market_id INTEGER, bet_id INTEGER, operation_key TEXT NOT NULL, entry_key TEXT NOT NULL,

@@ -9,6 +9,14 @@ class PointGames {
  }
  stake(n){if(!Number.isSafeInteger(n)||n<1||n>this.maxStake)throw new Error(`Stake must be a whole number from 1 to ${this.maxStake}`);}
  checkPause(){if(this.store.metadata('paused','0')==='1')throw new Error('Point games are paused');}
+ blackjackOpen(args){return require('./blackjack').open(this,args);}
+ blackjackJoin(args){return require('./blackjack').join(this,args);}
+ blackjackDeal(args){return require('./blackjack').deal(this,args);}
+ blackjackAction(args){return require('./blackjack').action(this,args);}
+ blackjackStatus(args){return require('./blackjack').status(this,args);}
+ blackjackStatusById(args){return require('./blackjack').statusById(this,args);}
+ blackjackExpire(args){return require('./blackjack').expire(this,args);}
+ blackjackSetMessage(args){return require('./blackjack').setMessage(this,args);}
  crapsStatus({guildId,channelId}){return this.store.db.prepare("SELECT * FROM point_craps_rounds WHERE guild_id=? AND channel_id=? AND state IN ('open','point')").get(String(guildId),String(channelId));}
  crapsWager(args){return require('./crapsExtra').wager(this,args);}
  crapsWorking(args){return require('./crapsExtra').working(this,args);}
