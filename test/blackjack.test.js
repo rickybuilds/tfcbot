@@ -37,7 +37,7 @@ test('a playing hand auto-stands when its 60-second turn expires',t=>{
 test('multiple players take turns by seat and cannot act for another player',t=>{
  const {store,games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o',1000,'p1')});shoe(games,r.id,[10,9,8,7,6,5,4,3,2,2,10,8]);
  for(let seat=1;seat<=5;seat++)r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:`p${seat}`,seat,stake:100,context:ctx(`j${seat}`,1000,`p${seat}`)});
- r=games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'p1',context:ctx('d')});assert.equal(r.seats.length,5);assert.equal(r.current_seat,1);const first=r.seats[0].hands[0];
+ assert.equal(r.state,'playing');assert.equal(r.seats.length,5);assert.equal(r.current_seat,1);const first=r.seats[0].hands[0];
  assert.throws(()=>games.blackjackAction({roundId:r.id,guildId:'g',channelId:'c',userId:'p2',handId:first.id,action:'stand',context:ctx('wrong',1001,'p2')}),/hand owner/i);
  r=games.blackjackAction({roundId:r.id,guildId:'g',channelId:'c',userId:'p1',handId:first.id,action:'stand',context:ctx('s1',1001,'p1')});assert.equal(r.current_seat,2);assert.equal(store.assertAccounting(),true);
 });
@@ -70,4 +70,13 @@ test('invalid blackjack seat wagers still receive a private error',async t=>{
  const {handleModal}=require('../predictions/blackjackPanel');let reply;
  const interaction={customId:`point-bj:stake:${round.id}:1`,id:'modal',guildId:'g',channelId:'casino',user:{id:'player'},isModalSubmit:()=>true,fields:{getTextInputValue:()=> 'invalid'},deferUpdate:async()=>{throw new Error('unexpected update');},reply:async payload=>{reply=payload;}};
  await handleModal(interaction,games,{casinoChannelId:'casino',clock:()=>1001});assert.equal(reply.ephemeral,true);assert.ok(reply.content);
+});
+
+
+test('the fifth seat deals automatically and replaying the join does not deal twice',t=>{
+ const {games,store,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('open',1000,'opener')});shoe(games,r.id,[10,9,8,7,6,5,4,3,2,2,10,8]);const oldDeadline=r.deadline;
+ for(let seat=1;seat<=4;seat++){r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:`p${seat}`,seat,stake:100,context:ctx(`join${seat}`,1000,`p${seat}`)});assert.equal(r.state,'joining');}
+ const args={roundId:r.id,guildId:'g',channelId:'c',userId:'p5',seat:5,stake:100,context:ctx('join5',1001,'p5')};r=games.blackjackJoin(args);
+ assert.equal(r.state,'playing');assert.equal(r.seats.length,5);assert.ok(r.seats.every(s=>s.hands.length===1&&s.hands[0].cards.length===2));assert.equal(r.current_seat,1);assert.equal(r.deadline,61001);
+ assert.deepEqual(games.blackjackJoin(args),r);const stale=games.blackjackExpire({roundId:r.id,expectedDeadline:oldDeadline,context:ctx('old-timer',oldDeadline,'system')});assert.equal(stale.current_seat,1);assert.equal(store.assertAccounting(),true);
 });
