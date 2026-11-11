@@ -42,5 +42,16 @@ test('multiple players take turns by seat and cannot act for another player',t=>
  r=games.blackjackAction({roundId:r.id,guildId:'g',channelId:'c',userId:'p1',handId:first.id,action:'stand',context:ctx('s1',1001,'p1')});assert.equal(r.current_seat,2);assert.equal(store.assertAccounting(),true);
 });
 test('!blackjack opens a five-seat public casino table only once',async t=>{
- const {games}=setup(t),registry=new Map(),sent=[];require('../predictions/gameCommands').register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});const msg={id:'open-msg',guild:{id:'g'},author:{id:'a'},channel:{id:'casino',send:async p=>{sent.push(p);return {id:'table-msg'};}}};await registry.get('blackjack')(msg,[]);await registry.get('blackjack')(msg,[]);assert.equal(sent.length,2);assert.equal(sent[0].components[0].components.length,5);assert.match(sent[0].content,/60 seconds|closes/);assert.match(sent[1].content,/already open/i);
+ const {games}=setup(t),registry=new Map(),sent=[];require('../predictions/gameCommands').register(registry,games,{clock:()=>1000,casinoChannelId:'casino'});const msg={id:'open-msg',guild:{id:'g'},author:{id:'a'},channel:{id:'casino',send:async p=>{sent.push(p);return {id:'table-msg'};}}};await registry.get('blackjack')(msg,[]);await registry.get('blackjack')(msg,[]);assert.equal(sent.length,2);assert.equal(sent[0].components[0].components.length,5);assert.match(sent[0].embeds[0].description,/closes/);assert.match(sent[1].content,/already open/i);
+});
+
+
+test('blackjack panel presents a settled round in an embed',()=>{
+ const {panel}=require('../predictions/blackjackPanel');
+ const result=panel({id:1,state:'settled',dealerCards:[{rank:10,suit:'♣'},{rank:9,suit:'♦'}],seats:[{seat:2,user_id:'123',hands:[{hand_no:1,cards:[{rank:10,suit:'♥'},{rank:8,suit:'♠'}],state:'settled',result:'loss',stake:100}]}]});
+ assert.equal(result.content,null);
+ assert.match(result.embeds[0].title,/Blackjack/);
+ const text=JSON.stringify(result.embeds[0]);
+ for(const expected of ['Dealer','19','<@123>','18','loss','100','Round settled']) assert.ok(text.includes(expected),expected);
+ assert.deepEqual(result.allowedMentions,{parse:[]});
 });

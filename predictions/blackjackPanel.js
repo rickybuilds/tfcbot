@@ -8,16 +8,18 @@ function panel(r){
  if(r.state==='joining'){
   const buttons=[];for(let seat=1;seat<=5;seat++){const s=r.seats.find(x=>x.seat===seat);buttons.push({type:2,style:s?2:1,label:s?`Seat ${seat}: taken`:`Seat ${seat}`,custom_id:bid(r.id,'seat',seat),disabled:!!s});}components.push({type:1,components:buttons});
   const seated=r.seats.length>0;components.push({type:1,components:[{type:2,style:3,label:'Deal now',custom_id:bid(r.id,'deal'),disabled:!seated},{type:2,style:2,label:'Wait for players',custom_id:bid(r.id,'wait'),disabled:!seated}]});
-  return {content:`🃏 **Blackjack table** — seats open · ${r.seats.length}/5 joined · closes <t:${Math.floor(r.deadline/1000)}:R>\n${r.seats.map(s=>`Seat ${s.seat}: <@${s.user_id}> · ${s.stake} points`).join('\n')||'Choose a seat and enter your wager privately (1–500 points).'}`,components,allowedMentions:{parse:[]}};
+  return {content:null,embeds:[{color:0x57F287,title:'🃏 Blackjack table',description:`**Seats open** · ${r.seats.length}/5 joined · closes <t:${Math.floor(r.deadline/1000)}:R>\n\n${r.seats.map(s=>`**Seat ${s.seat}** · <@${s.user_id}> · ${s.stake} points`).join('\n')||'Choose a seat and enter your wager privately (1–500 points).'}`}],components,allowedMentions:{parse:[]}};
  }
  const dealer=r.dealerCards||[],hands=r.seats.flatMap(s=>s.hands.map(h=>({seat:s.seat,user:s.user_id,h})));
  if(r.state==='playing'){
   const hand=r.seats.find(s=>s.seat===r.current_seat)?.hands.find(h=>h.state==='active'),buttons=hand?[{type:2,style:1,label:'Hit',custom_id:bid(r.id,'hit',hand.id)},{type:2,style:2,label:'Stand',custom_id:bid(r.id,'stand',hand.id)},{type:2,style:1,label:'Double',custom_id:bid(r.id,'double',hand.id),disabled:hand.cards.length!==2||hand.doubled===1},{type:2,style:3,label:'Split',custom_id:bid(r.id,'split',hand.id),disabled:hand.cards.length!==2||hand.hand_no!==1||hand.cards[0].rank!==hand.cards[1].rank}]:[];if(buttons.length)components.push({type:1,components:buttons});
  }
  const dealerShown=r.state==='playing'?`${face(dealer[0])} · 🂠`:`${dealer.map(face).join(' · ')} (${score(dealer)})`;
- const lines=hands.map(({seat,user,h})=>`Seat ${seat} <@${user}> · Hand ${h.hand_no}: ${h.cards.map(face).join(' · ')} (${score(h.cards)}) · ${h.state}${h.result?` — ${h.result}`:''} · ${h.stake} points`);
-  const result=r.state==='settled'?`\n**Round settled** — dealer ${score(dealer)}.`:r.state==='cancelled'?'\nNo players joined. The table closed without a deal.':'';
- return {content:`🃏 **Blackjack**\nDealer: ${dealerShown}${r.state==='playing'?` · <@${r.seats.find(s=>s.seat===r.current_seat)?.user_id}> to act`:''}\n${lines.join('\n')}${result}`,components,allowedMentions:{parse:[]}};
+ const lines=hands.map(({seat,user,h})=>`**Seat ${seat} · <@${user}> · Hand ${h.hand_no}**\n${h.cards.map(face).join(' · ')}  **(${score(h.cards)})** · ${h.result||h.state} · ${h.stake} points`);
+ const result=r.state==='settled'?`**Round settled** — dealer ${score(dealer)}.`:r.state==='cancelled'?'No players joined. The table closed without a deal.':'';
+ const turn=r.state==='playing'?`\n<@${r.seats.find(s=>s.seat===r.current_seat)?.user_id}> to act`:'';
+ const description=[r.state==='cancelled'?'':`**Dealer**\n${dealerShown}${turn}`,lines.join('\n\n'),result].filter(Boolean).join('\n\n');
+ return {content:null,embeds:[{color:0x57F287,title:'🃏 Blackjack',description}],components,allowedMentions:{parse:[]}};
 }
 async function handle(i,games,{casinoChannelId,clock=Date.now,refresh,schedule}){
  const m=/^point-bj:(\d+):(seat|deal|wait|hit|stand|double|split)(?::(\d+))?$/.exec(String(i.customId||''));if(!m)return false;
