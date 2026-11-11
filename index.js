@@ -390,6 +390,9 @@ if (config.pointGamesEnabled) {
   });
 }
 client.on("interactionCreate", interaction => {
+  if (String(interaction.customId || "").startsWith("point-loan:")) {
+    require("./predictions/loan").handleInteraction(interaction,predictions).catch(() => console.error("[loans] interaction failure"));
+  }
   if (String(interaction.customId || "").startsWith("pred:")) {
     predictions.handleInteraction(interaction).catch(() => console.error("[predictions] interaction failure"));
   }

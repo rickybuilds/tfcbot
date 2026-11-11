@@ -72,6 +72,10 @@ function initializeSchema(db) {
       doubled INTEGER NOT NULL DEFAULT 0, split_aces INTEGER NOT NULL DEFAULT 0,
       UNIQUE(round_id,seat,hand_no)
     );
+    CREATE TABLE IF NOT EXISTS point_loan_offers (
+      id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, user_id TEXT NOT NULL, owner_id TEXT NOT NULL,
+      amount INTEGER NOT NULL, interest INTEGER NOT NULL, expires_at INTEGER NOT NULL, status TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS point_loans (
       id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, principal_remaining INTEGER NOT NULL, interest_remaining INTEGER NOT NULL,
       created_at INTEGER NOT NULL, operation_key TEXT NOT NULL UNIQUE
