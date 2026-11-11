@@ -21,6 +21,11 @@ test('blackjack double draws once, then dealer resolves the hand',t=>{
 test('expired empty blackjack table closes without a deal',t=>{
  const {games,ctx}=sequence(t,Array(52).fill(0));const r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o')});const closed=games.blackjackExpire({roundId:r.id,expectedDeadline:r.deadline,context:ctx('expire',r.deadline,'system')});assert.equal(closed.state,'cancelled');
 });
+test('only the user who opened the table can deal early',t=>{
+ const {games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o',1000,'opener')});shoe(games,r.id,[10,9,8,7]);r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:'seated',seat:1,stake:100,context:ctx('j',1001,'seated')});
+ assert.throws(()=>games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'seated',context:ctx('wrong-deal',1002,'seated')}),/opened the blackjack table/i);
+ r=games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'opener',context:ctx('owner-deal',1002,'opener')});assert.equal(r.state,'playing');
+});
 test('split holds a second wager, plays both hands in order, and settles each hand',t=>{
  const {store,games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o')});shoe(games,r.id,[8,8,10,7,10,2,3]);r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:'a',seat:1,stake:500,context:ctx('j')});
  r=games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'a',context:ctx('d')});let h=r.seats[0].hands[0];r=games.blackjackAction({roundId:r.id,guildId:'g',channelId:'c',userId:'a',handId:h.id,action:'split',stake:500,context:ctx('split')});assert.equal(r.seats[0].hands.length,2);assert.equal(store.account('a').balance,0);assert.equal(store.assertAccounting(),true);
@@ -30,7 +35,7 @@ test('a playing hand auto-stands when its 60-second turn expires',t=>{
  const {games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o')});shoe(games,r.id,[10,7,9,8]);r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:'a',seat:1,stake:50,context:ctx('j')});r=games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'a',context:ctx('d')});const timed=games.blackjackExpire({roundId:r.id,expectedDeadline:r.deadline,context:ctx('timeout',r.deadline,'system')});assert.equal(timed.state,'settled');
 });
 test('multiple players take turns by seat and cannot act for another player',t=>{
- const {store,games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o')});shoe(games,r.id,[10,9,8,7,6,5,4,3,2,2,10,8]);
+ const {store,games,ctx}=setup(t);let r=games.blackjackOpen({guildId:'g',channelId:'c',context:ctx('o',1000,'p1')});shoe(games,r.id,[10,9,8,7,6,5,4,3,2,2,10,8]);
  for(let seat=1;seat<=5;seat++)r=games.blackjackJoin({roundId:r.id,guildId:'g',channelId:'c',userId:`p${seat}`,seat,stake:100,context:ctx(`j${seat}`,1000,`p${seat}`)});
  r=games.blackjackDeal({roundId:r.id,guildId:'g',channelId:'c',userId:'p1',context:ctx('d')});assert.equal(r.seats.length,5);assert.equal(r.current_seat,1);const first=r.seats[0].hands[0];
  assert.throws(()=>games.blackjackAction({roundId:r.id,guildId:'g',channelId:'c',userId:'p2',handId:first.id,action:'stand',context:ctx('wrong',1001,'p2')}),/hand owner/i);

@@ -9,7 +9,7 @@ Add blackjack as a public, shared casino-channel game alongside the bot's existi
 - `!blackjack` opens one public table message in the configured casino channel.
 - The table has five seats. Joining an open seat opens a private Discord modal for the player's wager; initial wager is 1–500 points and must be affordable.
 - On a successful join, that seat is occupied and its button is disabled for everyone else.
-- A seated player can choose **Deal now** to start with one player. Otherwise, the join window lasts 60 seconds and then closes and deals automatically.
+- The player who opened the table with `!blackjack` can choose **Deal now**, even if they have not taken a seat. Otherwise, the join window lasts 60 seconds and then closes and deals automatically.
 - If no one joins before the window closes, the table closes without dealing.
 - Initial hand wager maximum is 500 points. A split creates a second hand with an additional wager up to 500, so total exposure can reach 1,000 points if affordable.
 - Each player controls only their own hand. Actions and dealer resolution are shown in the same casino channel; no threads or game channels are created.

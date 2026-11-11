@@ -14,7 +14,7 @@
 
 - Use the configured casino channel only.
 - A table has five seats and accepts 1–500 points per initial hand.
-- The opening window is 60 seconds; a seated player can deal early.
+- The opening window is 60 seconds; only the player who opened the table can deal early (whether seated or not), and the timer auto-deals.
 - Split adds a second wager up to 500, with total exposure at most 1,000 per player for the initial hand plus one split hand.
 - Persist active state and account for all held blackjack stakes in bank/escrow accounting.
 - No threads, extra channels, cash betting, or more than one active table per guild/channel.

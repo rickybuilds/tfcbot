@@ -54,7 +54,7 @@ function initializeSchema(db) {
       active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(guild_id,channel_id)
     );
     CREATE TABLE IF NOT EXISTS point_blackjack_rounds (
-      id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
+      id INTEGER PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, opener_id TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL CHECK(state IN ('joining','playing','settled','cancelled')),
       created_at INTEGER NOT NULL, deadline INTEGER NOT NULL, shoe TEXT NOT NULL, shoe_pos INTEGER NOT NULL DEFAULT 0,
       dealer_cards TEXT NOT NULL DEFAULT '[]', current_seat INTEGER, result TEXT
@@ -85,6 +85,7 @@ function initializeSchema(db) {
   `);
   if(!db.prepare('PRAGMA table_info(point_craps_places)').all().some(c=>c.name==='working'))db.exec("ALTER TABLE point_craps_places ADD COLUMN working TEXT NOT NULL DEFAULT 'auto'");
   if(!db.prepare('PRAGMA table_info(point_craps_rounds)').all().some(c=>c.name==='roll_version'))db.exec('ALTER TABLE point_craps_rounds ADD COLUMN roll_version INTEGER NOT NULL DEFAULT 0');
+  if(!db.prepare('PRAGMA table_info(point_blackjack_rounds)').all().some(c=>c.name==='opener_id'))db.exec("ALTER TABLE point_blackjack_rounds ADD COLUMN opener_id TEXT NOT NULL DEFAULT ''");
   const version=db.prepare("SELECT value FROM prediction_meta WHERE key='schema_version'").get().value;
   if(version==="1"){
     // V1's fixed CHECK prevents earned limits above 250. Keep every bet ID and
