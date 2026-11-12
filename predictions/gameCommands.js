@@ -48,6 +48,7 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
    const saved=games.blackjackSetMessage({roundId:round.id,messageId:message.id,context:{operationKey:`blackjack-message:${message.id}`,actorId:String(m.author.id),now:clock()}});scheduleBj(saved);
   }catch(e){await respond(m,/Blackjack table is already open|Point games are paused/.test(e.message||'')?`Unable to open blackjack: ${e.message}`:'Unable to open blackjack right now. Please try again.');}
  });
+ registry.set('bj',registry.get('blackjack'));
  if(typeof registry.client?.once==='function')registry.client.once('clientReady',recoverBj);else recoverBj();
  const crapsButton=id=>[{type:1,components:[{type:2,style:1,label:'Roll Dice',custom_id:`point-craps:roll:${id}`}]}];
  const crapsText=r=>{
