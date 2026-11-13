@@ -8,7 +8,7 @@ const os = require("os");
 
 const { isOwnParserUrl } = require("./noNameParser");
 
-const PICKUP_REPLAY_URL = "https://nonamepickup.servehalflife.com/pickup-replay.html";
+const PICKUP_REPLAY_URL = "https://nonamepickup.servehalflife.com/match.html";
 
 function buildPickupReplayLinks(matchId, readyRounds = []) {
   if (!matchId || matchId === "N/A" || !Array.isArray(readyRounds)) return null;
@@ -16,9 +16,9 @@ function buildPickupReplayLinks(matchId, readyRounds = []) {
   const encodedMatchId = encodeURIComponent(String(matchId));
   const links = [1, 2]
     .filter(round => readyRounds.includes(round))
-    .map(round => `[Round ${round}](${PICKUP_REPLAY_URL}?matchId=${encodedMatchId}&round=${round})`);
+    .map(round => `[Round ${round}](${PICKUP_REPLAY_URL}?id=${encodedMatchId}&round=${round}#map-vision)`);
 
-  return links.length ? `Watch Replay: ${links.join(" • ")}` : null;
+  return links.length ? `Match Overview Replay: ${links.join(" • ")}` : null;
 }
 
 /**
