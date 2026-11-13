@@ -224,6 +224,20 @@ if (!isAuto) {
     }
 
     const serverKey = determineServerKey(serverInput);
+    let replayRounds = [];
+    try {
+      replayRounds = elo.db.prepare(`
+        SELECT round_number
+        FROM pickup_replay_recordings
+        WHERE match_id=? AND server_key=?
+          AND observed_state='ready' AND stopped_at IS NOT NULL
+        ORDER BY round_number
+      `).all(String(matchId), serverKey)
+        .map(row => Number(row.round_number))
+        .filter(round => round === 1 || round === 2);
+    } catch (replayErr) {
+      console.warn(`[!report] Could not confirm replay availability for ${matchId}:`, replayErr.message);
+    }
     console.log("[!report server resolution]", {
       matchId,
       dbServer: dbMatch?.server_name,
@@ -283,6 +297,7 @@ if (!isAuto) {
         },
         tfcstats: { url: tfcUrl },
         hampalyzer: { url: hampUrl },
+        replayRounds,
       });
       cleanupResult(zipResult);
     }

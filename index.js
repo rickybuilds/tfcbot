@@ -49,6 +49,7 @@ const {
 } = require("./services/hldsLogs");
 const { attachAutoRecap }      = require("./services/autoRecap");
 const { runCasualLogs } = require("./services/hldsCasualLogs");
+const { isAdmin } = require("./lib/guards");
 const { startSpeedrunWatcher } = require("./services/speedrunWatcher");
 const { startAronQueueWatcher } = require("./services/aronQueueWatcher");
 const { EloShadowService } = require("./services/eloShadow");
@@ -801,6 +802,10 @@ client.on("messageCreate", async (message) => {
 
     // 👇 your custom !logs command
   if (command === "logs") {
+    if (!isAdmin(message)) {
+      return message.reply("❌ You don’t have permission to use this command.");
+    }
+
     const mapName = args.join(" ").trim();
 
     if (!mapName) {
