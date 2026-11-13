@@ -8,6 +8,7 @@ const path = require("path");
 const { downloadAndUploadLogs } = require("./hldsTransfer");
 const { runRconCommand } = require("./rconClient");
 const { PickupReplayRecorder } = require("./pickupReplayRecorder");
+const { PickupReplayDelivery } = require("./pickupReplayDelivery");
 const {
   postCleanFirstPickupClips,
   postLiveCleanPickupClip,
@@ -174,6 +175,14 @@ function attachAutoRecap(ctx, options = {}) {
     db: ctx.matchesStore.db,
     runRconCommand: rconCommand,
     enabled: config.pickupRecordingEnabled,
+  });
+  const delivery = options.delivery || new PickupReplayDelivery({
+    db: ctx.matchesStore.db,
+    servers: rconCfg,
+    isBusy: serverKey => {
+      const match = armed.get(serverKey);
+      return Boolean(match?.mapStartTime && !match.done && match.half < 2);
+    },
   });
   const eventQueues = new Map();
 
@@ -832,6 +841,7 @@ const capPlayer = evt.player || "unknown";
 		).catch?.(() => {});
 	  }
 
+      if (completedRound === 2) delivery.begin(a.serverKey, a.matchId);
 	  try {
 		await recorder.stop(a.serverKey, a.matchId, completedRound);
 	  } catch (err) {
@@ -1040,6 +1050,11 @@ await sendRecapWithDemos(client, logsChannel, {
 
     clearLiveState(a.serverKey);
     a.done = true;
+    try {
+      delivery.enqueue(a.serverKey, a.matchId);
+    } catch (error) {
+      console.error(`[replay-delivery] Could not queue ${a.matchId}:`, error.message);
+    }
     return; // skip default embed
 
   } else {
@@ -1103,6 +1118,11 @@ await sendRecapWithDemos(client, logsChannel, {
 
     clearLiveState(a.serverKey);
     a.done = true;
+    try {
+      delivery.enqueue(a.serverKey, a.matchId);
+    } catch (error) {
+      console.error(`[replay-delivery] Could not queue ${a.matchId}:`, error.message);
+    }
 
 
 // ⏳ small delay to let !report finish updating DB
