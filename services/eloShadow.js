@@ -724,18 +724,18 @@ class EloShadowService {
     }
 
     const attempts = this._attemptCount(matchId);
-    if (!this._localImportReady(matchId)) {
-      if (attempts >= this.maxAttempts) return this._finalizeFallback(matchId, "stats_import_timeout");
-      this._scheduleRetry(matchId, "waiting_for_stats_import");
-      return { retrying: true, reason: "waiting_for_stats_import" };
-    }
-
     try {
+      if (!this._localImportReady(matchId)) {
+        if (attempts >= this.maxAttempts) return await this._finalizeFallback(matchId, "stats_import_timeout");
+        this._scheduleRetry(matchId, "waiting_for_stats_import");
+        return { retrying: true, reason: "waiting_for_stats_import" };
+      }
+
       const roster = this._loadMatch(matchId);
       const payload = await this._fetchPerformance(matchId);
       const mapping = this._mapScores(roster, payload);
       if (!mapping.ready) {
-        if (attempts >= this.maxAttempts) return this._finalizeFallback(matchId, mapping.reason);
+        if (attempts >= this.maxAttempts) return await this._finalizeFallback(matchId, mapping.reason);
         this._scheduleRetry(matchId, mapping.reason);
         return { retrying: true, reason: mapping.reason };
       }
