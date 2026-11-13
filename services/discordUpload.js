@@ -14,8 +14,10 @@ function buildPickupReplayLinks(matchId, readyRounds = []) {
   if (!matchId || matchId === "N/A" || !Array.isArray(readyRounds)) return null;
 
   const encodedMatchId = encodeURIComponent(String(matchId));
+  // Round 2 is the standard full-match replay. Manual !report may run before
+  // replay readiness is reflected in the recording table, so always link it.
   const links = [1, 2]
-    .filter(round => readyRounds.includes(round))
+    .filter(round => round === 2 || readyRounds.includes(round))
     .map(round => `[Round ${round}](${PICKUP_REPLAY_URL}?id=${encodedMatchId}&round=${round}#map-vision)`);
 
   return links.length ? `Match Overview Replay: ${links.join(" • ")}` : null;
