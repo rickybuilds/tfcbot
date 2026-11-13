@@ -269,8 +269,10 @@ class PickupReplayRecorder {
         const stopped = await this._stop(serverKey, identity);
         return { ok: true, reconciledAction: "stop", ...stopped };
       }
+      // Idle describes the current recorder, not the historical artifact.
+      // Preserve a previous READY acknowledgment across bot restarts.
       const observed = status.state === "idle" && row.desired_state === "stopped"
-        ? "already_stopped"
+        ? (row.observed_state === "ready" && row.stopped_at != null ? "ready" : "already_stopped")
         : status.state;
       this._update(serverKey, identity, { observed_state: observed, last_response: status.raw, last_error: null });
       this._log("info", "reconciled", { serverKey, ...identity, observedState: observed, desiredState: row.desired_state });

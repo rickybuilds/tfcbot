@@ -28,12 +28,16 @@ class PickupReplayDelivery {
     this.logger = logger;
     this.running = false;
     this.activeRecaps = new Set();
-    if (!enabled) return;
+    if (!enabled) {
+      logger.log("[replay-delivery] disabled; PICKUP_DELIVERY_ENABLED must be true or 1");
+      return;
+    }
     db.exec(`CREATE TABLE IF NOT EXISTS pickup_replay_delivery_jobs (
       server_key TEXT NOT NULL, match_id TEXT NOT NULL, phase TEXT NOT NULL DEFAULT 'upload',
       attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0,
       last_error TEXT, updated_at INTEGER NOT NULL,
       PRIMARY KEY(server_key,match_id));`);
+    logger.log("[replay-delivery] enabled; polling durable jobs every 30 seconds");
     this.timer = setInterval(() => this.tick().catch(err => logger.error("[replay-delivery]", err.message)), 30000);
     this.timer.unref();
     setImmediate(() => this.tick().catch(err => logger.error("[replay-delivery]", err.message)));
