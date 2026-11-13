@@ -14,8 +14,16 @@ function sshCommand(host, user, port, command) {
     "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${process.env.PICKUP_DELIVERY_KNOWN_HOSTS || path.join(os.homedir(), ".ssh", "known_hosts")}`,
     "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", `${user}@${host}`, command];
   return new Promise((resolve, reject) => execFile("ssh", args, { timeout: 15 * 60 * 1000, maxBuffer: 256 * 1024, windowsHide: true }, (error, stdout, stderr) => {
-    if (error) reject(new Error(`Delivery SSH failed: ${String(stderr || error.message).slice(-1500)}`));
-    else resolve(stdout);
+    if (error) {
+      const kind = error.code === 255 ? "SSH transport failed" : "command failed";
+      const failure = new Error(`Delivery ${kind} (exit=${error.code ?? "none"}, signal=${error.signal || "none"}, killed=${!!error.killed}): ` +
+        `stdout=${JSON.stringify(String(stdout || "").slice(-500))}; stderr=${JSON.stringify(String(stderr || "").slice(-500))}; ` +
+        `detail=${JSON.stringify(String(error.message).slice(-250))}`);
+      failure.code = error.code;
+      failure.signal = error.signal;
+      failure.killed = error.killed;
+      reject(failure);
+    } else resolve(stdout);
   }));
 }
 
@@ -110,10 +118,17 @@ class PickupReplayDelivery {
             this.logger.log(`[replay-delivery] ${job.match_id}: details ready`);
           }
         } catch (error) {
-          const delay = Math.min(15 * 60000, 30000 * 2 ** Math.min(job.attempts, 5));
-          this.db.prepare("UPDATE pickup_replay_delivery_jobs SET attempts=attempts+1,next_attempt=?,last_error=?,updated_at=? WHERE server_key=? AND match_id=?")
-            .run(Date.now() + delay, error.message.slice(0, 2000), Date.now(), job.server_key, job.match_id);
-          this.logger.error(`[replay-delivery] ${job.match_id}: ${error.message}; retry queued`);
+          // Only the web helper reserves these exits for expected, temporary states.
+          const waiting = job.phase === "import" && !error.signal && !error.killed && [73, 75].includes(error.code);
+          const delay = waiting ? 30000 : Math.min(15 * 60000, 30000 * 2 ** Math.min(job.attempts, 5));
+          this.db.prepare("UPDATE pickup_replay_delivery_jobs SET attempts=attempts+?,next_attempt=?,last_error=?,updated_at=? WHERE server_key=? AND match_id=?")
+            .run(waiting ? 0 : 1, Date.now() + delay, error.message.slice(0, 2000), Date.now(), job.server_key, job.match_id);
+          if (waiting) {
+            const reason = error.code === 73 ? "maintenance busy" : "details pending";
+            this.logger.log(`[replay-delivery] ${job.match_id}: ${reason}; retry in ${delay / 1000}s; ${error.message}`);
+          } else {
+            this.logger.error(`[replay-delivery] ${job.match_id}: ${error.message}; retry in ${delay / 1000}s`);
+          }
         }
       }
     } finally { this.running = false; }

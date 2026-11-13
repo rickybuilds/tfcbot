@@ -11,6 +11,8 @@ The bot saves a finalize job at round-two completion, before stopping the record
 
 New uploads defer during active matches on pickup servers sharing the configured SSH host. Once started, uploads are never stopped, and the next match is never blocked. Upload receipts allow safe retry. Successful delivery advances to import after 35 seconds; web failures retry import without requesting another upload. Jobs survive restarts in `pickup_replay_delivery_jobs` in the matches-store SQLite database.
 
+Web-helper exits 73 (maintenance lock busy) and 75 (requested rounds still pending) retry after 30 seconds without increasing the failure backoff. Other failures retain exponential backoff. Failure logs and stored job errors include the exit code, signal, killed flag and bounded tails of stdout/stderr. Install the updated web helper to distinguish lock contention from worker failures; older helpers return a generic exit 1 for lock contention.
+
 Disable independent game-server upload timers when enabling this feature. Leave web maintenance cron enabled for recovery. Only bot-tracked pickup matches participate in the busy check; tracking-only skill servers are excluded. Servers sharing a machine must use the same SSH host string for grouping.
 
 No production keys, timers, service settings or environment values are changed by installing this code.
