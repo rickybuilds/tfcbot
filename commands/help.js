@@ -58,6 +58,7 @@ function register(reg, { config }) {
 
     // ---------------- Admin Commands ----------------
     if (admin) {
+      if (config.pointGamesEnabled) emb.addFields({ name: "⚙️ Casino Admin", value: "`!fixbj` — Cancel the open blackjack table in this channel and refund all outstanding wagers." });
       emb.addFields(
         {
           name: "⚙️ Queue & Match Control",

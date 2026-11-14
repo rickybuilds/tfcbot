@@ -1,6 +1,6 @@
 "use strict";
 const amount=s=>/^[1-9]\d*$/.test(s||'')?Number(s):NaN;
-function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
+function register(registry,games,{clock=Date.now,casinoChannelId='',adminRoleId=''}={}){
  const respond=(m,content)=>m.channel.send({content,allowedMentions:{parse:[]}});
  const wrap=(fn,casinoOnly=false)=>async (m,args)=>{
   if(!m.guild)return;
@@ -49,6 +49,21 @@ function register(registry,games,{clock=Date.now,casinoChannelId=''}={}){
   }catch(e){await respond(m,/Blackjack table is already open|Point games are paused/.test(e.message||'')?`Unable to open blackjack: ${e.message}`:'Unable to open blackjack right now. Please try again.');}
  });
  registry.set('bj',registry.get('blackjack'));
+ registry.set('fixbj',async(m,args)=>{
+  if(!m.guild)return;
+  if(!adminRoleId||!m.member?.roles?.cache?.has(String(adminRoleId)))return respond(m,'Only admins can use `!fixbj`.');
+  if(!casinoChannelId||String(m.channel?.id)!==String(casinoChannelId))return respond(m,`Use \`!fixbj\` in <#${casinoChannelId}>.`);
+  if(args.length)return respond(m,'Usage: `!fixbj`');
+  const context={operationKey:`game:${m.id}`,actorId:String(m.author.id),now:clock()};
+  try{
+   const result=games.blackjackCancel({guildId:m.guild.id,channelId:m.channel.id,context});
+   if(!result)return respond(m,'No open blackjack table was found in this channel.');
+   const timer=bjTimers.get(result.id);if(timer)clearTimeout(timer);bjTimers.delete(result.id);
+   const cancelled={...games.blackjackStatusById(result.id),...result};
+   await refreshBj(cancelled);
+   await respond(m,`🃏 Blackjack table **${result.id}** cancelled. Refunded **${result.refundedPoints} points** across **${result.refundedPlayers} wagers**.`);
+  }catch(e){await respond(m,/Point games are paused/.test(e.message||'')?`Unable to cancel blackjack: ${e.message}`:'Unable to cancel blackjack right now. Please try again.');}
+ });
  if(typeof registry.client?.once==='function')registry.client.once('clientReady',recoverBj);else recoverBj();
  const crapsButton=id=>[{type:1,components:[{type:2,style:1,label:'Roll Dice',custom_id:`point-craps:roll:${id}`}]}];
  const crapsText=r=>{

@@ -16,7 +16,8 @@ function panel(r){
  }
  const dealerShown=r.state==='playing'?`${face(dealer[0])} · 🂠`:`${dealer.map(face).join(' · ')} (${score(dealer)})`;
  const lines=hands.map(({seat,user,h})=>`**Seat ${seat} · <@${user}> · Hand ${h.hand_no}**\n${h.cards.map(face).join(' · ')}  **(${score(h.cards)})** · ${h.result||h.state} · ${h.stake} points`);
- const result=r.state==='settled'?`**Round settled** — dealer ${score(dealer)}.`:r.state==='cancelled'?'No players joined. The table closed without a deal.':'';
+ const cancelResult=r.state==='cancelled'?JSON.parse(r.result||'{}'):null;
+ const result=r.state==='settled'?`**Round settled** — dealer ${score(dealer)}.`:cancelResult?.reason==='admin_cancelled'?`**Table cancelled by an admin** — ${cancelResult.refundedPoints||0} points refunded across ${cancelResult.refundedPlayers||0} wagers.`:r.state==='cancelled'?'No players joined. The table closed without a deal.':'';
  const turn=r.state==='playing'?`\n<@${r.seats.find(s=>s.seat===r.current_seat)?.user_id}> to act`:'';
  const description=[r.state==='cancelled'?'':`**Dealer**\n${dealerShown}${turn}`,lines.join('\n\n'),result].filter(Boolean).join('\n\n');
  return {content:null,embeds:[{color:0x57F287,title:'🃏 Blackjack',description}],components,allowedMentions:{parse:[]}};

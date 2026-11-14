@@ -385,7 +385,7 @@ require("./predictions/refund").register(registry,predictions);
 require("./predictions/loan").register(registry,predictions);
 if (config.pointGamesEnabled) {
   const { PointGames } = require("./predictions/games");
-  const handlePointGameInteraction = require("./predictions/gameCommands").register(registry, new PointGames(predictions.store), { casinoChannelId: config.channels.casino });
+  const handlePointGameInteraction = require("./predictions/gameCommands").register(registry, new PointGames(predictions.store), { casinoChannelId: config.channels.casino, adminRoleId: config.roles.admin });
   client.on("interactionCreate", interaction => {
     handlePointGameInteraction(interaction).catch(() => console.error("[point games] interaction failure"));
   });

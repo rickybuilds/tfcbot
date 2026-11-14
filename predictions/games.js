@@ -15,6 +15,7 @@ class PointGames {
  blackjackAction(args){return require('./blackjack').action(this,args);}
  blackjackStatus(args){return require('./blackjack').status(this,args);}
  blackjackStatusById(args){return require('./blackjack').statusById(this,args);}
+ blackjackCancel(args){return require('./blackjack').cancel(this,args);}
  blackjackExpire(args){return require('./blackjack').expire(this,args);}
  blackjackSetMessage(args){return require('./blackjack').setMessage(this,args);}
  crapsStatus({guildId,channelId}){return this.store.db.prepare("SELECT * FROM point_craps_rounds WHERE guild_id=? AND channel_id=? AND state IN ('open','point')").get(String(guildId),String(channelId));}
