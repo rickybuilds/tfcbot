@@ -1,5 +1,5 @@
 "use strict";
-const { PermissionFlagsBits: P } = require("discord.js");
+const { PermissionFlagsBits: P, EmbedBuilder } = require("discord.js");
 const crypto = require("crypto");
 function privateChannel(channel, allowed, botId) {
   if (!channel?.guildId || !allowed.size) return false;
@@ -35,9 +35,22 @@ function startHltvReviewAlerts(client, env = process.env) {
         const url = new URL("/admin/hltv-review", env.HLTV_REVIEW_BASE_URL);
         if (url.protocol !== "https:") throw new Error("HTTPS review URL required");
         if (row.demo_id) url.searchParams.set("demo", row.demo_id);
-        if (!["manual_flag", "player_report", "analyzer_finding", "storage_low_disk"].includes(row.kind)) throw new Error("Unknown alert kind");
+        const titles = {
+          manual_flag: "HLTV Review — Manual Flag",
+          player_report: "HLTV Review — Player Report",
+          analyzer_finding: "HLTV Review — Analyzer Finding",
+          storage_low_disk: "HLTV Storage — Low Disk Space"
+        };
+        if (!Object.hasOwn(titles, row.kind)) throw new Error("Unknown alert kind");
         // No notes, allegations, player data or automatic mentions in Discord.
-        await channel.send({ content: `HLTV private review: ${row.kind}\nDemo ${row.demo_id}\n${url.href}\nAlert ${row.id}`,
+        const embed = new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle(titles[row.kind])
+          .setFooter({ text: `Alert ID: ${row.id}` })
+          .setTimestamp();
+        if (row.demo_id) embed.addFields({ name: "Demo", value: String(row.demo_id), inline: false });
+        embed.addFields({ name: "Links", value: `[View HLTV Review](${url.href})`, inline: false });
+        await channel.send({ embeds: [embed],
           allowedMentions: { parse: [] } });
         db.prepare("UPDATE hltv_alerts SET sent_at=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?").run(Date.now(), row.id, row.lease);
       } catch (error) {
