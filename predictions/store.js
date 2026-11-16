@@ -79,7 +79,9 @@ class PredictionStore {
   }
   repayLoan(id,profit,ctx,key){
     if(!Number.isSafeInteger(profit)||profit<=0)return 0;
-    let remaining=profit,repaid=0;
+    // Take 10% of winning profit, rounded down to whole points.
+    let remaining=Math.floor(profit/10),repaid=0;
+    if(!remaining)return 0;
     for(const loan of this.db.prepare('SELECT * FROM point_loans WHERE user_id=? AND (principal_remaining>0 OR interest_remaining>0) ORDER BY id').all(String(id))){
       const p=Math.min(remaining,loan.principal_remaining);remaining-=p;const i=Math.min(remaining,loan.interest_remaining);remaining-=i;repaid+=p+i;
       this.db.prepare('UPDATE point_loans SET principal_remaining=principal_remaining-?,interest_remaining=interest_remaining-? WHERE id=?').run(p,i,loan.id);

@@ -37,7 +37,7 @@ function buildStatement(service,user){
       `Held in active bets: **${points(held)} points**`,
       `Total points: **${points(BigInt(account.balance)+held)}**`,
       `Bet limit: **${points(progress.limit)} points** · ${progress.settledGames} settled games bet on`,
-      `Loan: **${points(loan.principal)} principal + ${points(loan.interest)} interest** · ${points(Math.max(0,loan.limit-loan.principal))} points available to borrow${loan.principal||loan.interest?" · winning profit automatically repays your loan":""}`,
+      `Loan: **${points(loan.principal)} principal + ${points(loan.interest)} interest** · ${points(Math.max(0,loan.limit-loan.principal))} points available to borrow${loan.principal||loan.interest?" · 10% of winning profit (rounded down to whole points) automatically repays your loan":""}`,
       "", "🎲 **Last 5 bets**",betLines.join("\n")||"No bets yet.",
       "", "🎮 **Last 5 settled games played — player rewards**",playerLines.join("\n")||"No settled prediction games played yet.",
       "", "Returns include your stake; net is profit/loss. Player rewards are separate. Points are separate from ELO."].join("\n");

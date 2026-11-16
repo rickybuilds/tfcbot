@@ -16,7 +16,7 @@ function register(registry,service){registry.set('loan',async(message,args)=>{
    return service.store.db.prepare('SELECT * FROM point_loan_offers WHERE id=?').get(id);
   });
   if(offer.status!=='pending'||now>=offer.expires_at)return send({content:'This loan offer is no longer pending.',allowedMentions:{parse:[]}});
-  return send({content:`🏦 **Loan offer for <@${user}>**\nBorrow: **${fmt(offer.amount)} points** · Interest (10%, rounded up): **${fmt(offer.interest)} points**\nTotal to repay: **${fmt(BigInt(offer.amount)+BigInt(offer.interest))} points**\nFuture casino, duel, and prediction winning profit automatically repays the loan, principal first. Your returned stake is not taken.\nThe loan is issued only if you accept. Offer expires <t:${Math.floor(offer.expires_at/1000)}:R>.`,components:[{type:1,components:[{type:2,style:3,label:'Accept loan',custom_id:`point-loan:accept:${id}`},{type:2,style:4,label:'Decline',custom_id:`point-loan:decline:${id}`}]}],allowedMentions:{parse:[],users:[user]}});
+  return send({content:`🏦 **Loan offer for <@${user}>**\nBorrow: **${fmt(offer.amount)} points** · Interest (10%, rounded up): **${fmt(offer.interest)} points**\nTotal to repay: **${fmt(BigInt(offer.amount)+BigInt(offer.interest))} points**\n10% of future casino, duel, and prediction winning profit (rounded down to whole points) automatically repays the loan, principal first. Your returned stake is not taken.\nThe loan is issued only if you accept. Offer expires <t:${Math.floor(offer.expires_at/1000)}:R>.`,components:[{type:1,components:[{type:2,style:3,label:'Accept loan',custom_id:`point-loan:accept:${id}`},{type:2,style:4,label:'Decline',custom_id:`point-loan:decline:${id}`}]}],allowedMentions:{parse:[],users:[user]}});
  }catch(e){return send({content:/^Loan exceeds the limit/.test(e.message)?e.message:'Unable to offer loan. Check the amount and try again.',allowedMentions:{parse:[]}});}
  });}
 async function handleInteraction(i,service){
@@ -32,7 +32,7 @@ async function handleInteraction(i,service){
    const status=match[1]==='accept'?'accepted':'declined';service.store.db.prepare('UPDATE point_loan_offers SET status=? WHERE id=?').run(status,offer.id);
    return {offer,status};
   });
-  await i.update({content:`🏦 <@${result.offer.user_id}> **${result.status}** the loan offer${result.status==='accepted'?` for **${fmt(result.offer.amount)} points**, with **${fmt(result.offer.interest)} points** interest. Winning profit automatically repays the loan.`:'.'}`,components:[],allowedMentions:{parse:[]}});
+  await i.update({content:`🏦 <@${result.offer.user_id}> **${result.status}** the loan offer${result.status==='accepted'?` for **${fmt(result.offer.amount)} points**, with **${fmt(result.offer.interest)} points** interest. 10% of winning profit (rounded down to whole points) automatically repays the loan.`:'.'}`,components:[],allowedMentions:{parse:[]}});
  }catch(e){const safe=/^(Loan exceeds the limit|Loan offer is unavailable|Only the player offered|This loan offer|Loan terms changed)/.test(e.message||'')?e.message:'Unable to process this loan offer. Please try again.';if(i.replied||i.deferred)await i.followUp({content:safe,ephemeral:true}).catch(()=>{});else await i.reply({content:safe,ephemeral:true});}
  return true;
 }
