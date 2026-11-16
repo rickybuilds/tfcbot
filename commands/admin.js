@@ -249,6 +249,7 @@ if (!isAuto) {
 
     // 🟦 1️⃣ Fetch HLTV demos
     const zipResult = await fetchAndZipRecentDemos({
+      matchId,
       mapName: mapNow,
       lookback: 12,
       requiredCount: 2,

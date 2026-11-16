@@ -940,6 +940,7 @@ try {
   const hltvServerKey = a.serverKey;
   try {
     zipResult = await fetchAndZipRecentDemos({
+      matchId: a.matchId,
       mapName: mapNow,
       lookback: 12,
       requiredCount: 2,

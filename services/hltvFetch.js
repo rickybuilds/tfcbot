@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const archiver = require("archiver");
+const { createHandoff, finalizeDemo, publishHandoff } = require("./hltvHandoff");
 
 /* -------------------------------------------------------------------------- */
 /* 🌍 Multi-server aware config                                               */
@@ -99,20 +100,33 @@ async function fetchAndZipRecentDemos(opts = {}) {
       .sort((a, b) => (b.modifyTime || 0) - (a.modifyTime || 0))
       .slice(0, requiredCount);
 
-    const workdir = tmpDir(`hltv-${server}`);
+    let handoff = null;
+    try { handoff = createHandoff(opts); } catch (error) {
+      // Registry failure must never break existing Discord delivery.
+      console.error("[HLTV registry] handoff unavailable:", error.message);
+    }
+    const workdir = handoff?.dir || tmpDir(`hltv-${server}`);
     const downloaded = [];
     for (const f of chosenFiles) {
+      if (path.basename(f.name) !== f.name || f.name.includes("\\")) throw new Error("Unsafe remote demo filename");
       const remotePath = `${cfg.hltvDir}/${f.name}`;
       const localPath = path.join(workdir, f.name);
-      await sftp.fastGet(remotePath, localPath);
+      await sftp.fastGet(remotePath, localPath + ".part");
+      fs.renameSync(localPath + ".part", localPath);
+      try { finalizeDemo(handoff, localPath, f); } catch (error) {
+        console.error("[HLTV registry] registration deferred; original retained:", error.message);
+      }
       downloaded.push({ remotePath, filename: f.name, localPath });
     }
 
     const zipPath = path.join(workdir, `hltv_${chosenMap}_${Date.now()}.zip`);
     await zipFiles(downloaded.map(d => d.localPath), zipPath);
+    try { publishHandoff(handoff); } catch (error) {
+      console.error("[HLTV registry] manifest publication deferred; original retained:", error.message);
+    }
 
     await sftp.end();
-    return { zipPath, demos: downloaded, map: chosenMap, tmpDir: workdir, server };
+    return { zipPath, demos: downloaded, map: chosenMap, tmpDir: workdir, server, retained: Boolean(handoff) };
   } catch (err) {
     try { await sftp.end(); } catch {}
     throw err;
@@ -136,6 +150,11 @@ function zipFiles(files, targetZipPath) {
 
 function cleanupResult(result) {
   if (!result?.tmpDir) return;
+  if (result.retained) {
+    // Only the ZIP is transient. Raw demos/manifests belong to retention now.
+    try { if (result.zipPath) fs.unlinkSync(result.zipPath); } catch {}
+    return;
+  }
   try { fs.rmSync(result.tmpDir, { recursive: true, force: true }); } catch {}
 }
 
