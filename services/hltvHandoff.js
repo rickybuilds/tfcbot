@@ -18,6 +18,7 @@ function createHandoff(opts, env = process.env) {
   if (!Number.isSafeInteger(minimum) || minimum < 0 || free.bavail * free.bsize < minimum) throw new Error("HLTV storage headroom unavailable");
   const dir = path.join(incoming, crypto.randomUUID());
   fs.mkdirSync(dir, { mode: 0o700 });
+  console.log(`[HLTV registry] Retaining original downloads for match ${opts.matchId} (${opts.server || "east"}) in ${dir}`);
   return { root, dir, manifest: { version: 1, match_id: String(opts.matchId), server: opts.server || "east", map: opts.mapName || null, demos: [] } };
 }
 function finalizeDemo(handoff, localPath, remote, env = process.env) {
@@ -36,5 +37,9 @@ function finalizeDemo(handoff, localPath, remote, env = process.env) {
 function publishHandoff(handoff) {
   if (!handoff || !handoff.manifest.demos.length) return;
   fs.renameSync(path.join(handoff.dir, "pending.json"), path.join(handoff.dir, "ready.json"));
+  console.log(`[HLTV registry] Published ${handoff.manifest.demos.length} retained demos for match ${handoff.manifest.match_id}`);
 }
-module.exports = { createHandoff, finalizeDemo, publishHandoff };
+function logCollectionStatus(env = process.env, logger = console) {
+  logger.log(`[HLTV registry] Collection ${env.HLTV_REGISTRY_ENABLED === "true" ? "enabled" : "disabled"}; storage=${env.HLTV_STORAGE_ROOT || "not configured"}; awaiting existing match recap downloads`);
+}
+module.exports = { createHandoff, finalizeDemo, publishHandoff, logCollectionStatus };

@@ -444,6 +444,7 @@ registry.set(emilio.name.toLowerCase(), emilioHandler);
 
 client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  require("./services/hltvHandoff").logCollectionStatus();
   require("./services/hltvReviewAlerts").startHltvReviewAlerts(client);
   startAronQueueWatcher({ client, channelId: config.channels.aronPickup });
   try { await predictions.initialize(); } catch (error) {
