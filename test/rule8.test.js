@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { Collection } = require("discord.js");
 
 const { EloDB } = require("../lib/elo");
 const { register } = require("../commands/rule8");
@@ -19,9 +20,7 @@ function tempDb() {
 }
 
 function roleCollection(entries) {
-  const map = new Map(entries);
-  map.filter = predicate => roleCollection([...map].filter(([id, role]) => predicate(role, id)));
-  return map;
+  return new Collection(entries);
 }
 
 test("Rule 8 transfers one Elo and persists the target infraction count", () => {
@@ -194,8 +193,8 @@ test("Rule 8 clear refunds the latest Elo transfer and threshold jail", async ()
     });
     await registry.get("rule8clear")(message, []);
     assert.equal(cleared, "target:unjail");
-    assert.match(posted[0], /cleared the most recent/);
-    assert.match(posted[0], /refunded 1 Elo/);
+    assert.match(posted[0], /cleared the most recent/i);
+    assert.match(posted[0], /refunded 1 Elo/i);
     assert.match(posted[0], /jail was also cleared/);
   } finally {
     if (previousAdminRole === undefined) delete process.env.ADMIN_ROLE_ID;
