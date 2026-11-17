@@ -121,6 +121,7 @@ EOFcat >> .gitignore << 'EOF'
 /scripts/
 !/scripts/
 !/scripts/checkHltvSources.js
+!/scripts/recoverHltvSources.js
 
 speedrun-replay.html
 speedrun-replay.css

@@ -19,7 +19,8 @@ test("handoff is opt-in and completed files survive legacy ZIP cleanup", t => {
   assert.equal(createHandoff({matchId:"1"},{}),null);
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"hltv-handoff-"));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
-  const handoff=createHandoff({matchId:"match1",server:"east",mapName:"2fort"},{HLTV_REGISTRY_ENABLED:"true",HLTV_STORAGE_ROOT:root,HLTV_MIN_DISK_FREE_BYTES:"0"});
+  const handoff=createHandoff({matchId:"match1",server:"east",mapName:"2fort"},{HLTV_REGISTRY_ENABLED:"true",HLTV_STORAGE_ROOT:root,HLTV_MIN_DISK_FREE_BYTES:"0",HLTV_FRIENDLY_DEMO_NAMES_ENABLED:"true"});
+  assert.match(path.basename(handoff.dir),/^match1-2fort-east-/);
   const local=path.join(handoff.dir,"round.dem");fs.writeFileSync(local,"complete");
   assert.throws(()=>finalizeDemo(handoff,local,{size:999,name:"round.dem",modifyTime:1}));
   assert.equal(fs.existsSync(path.join(handoff.dir,"ready.json")),false);
@@ -81,4 +82,19 @@ test("download verification rejects changed bytes and collection uses only one f
   const workdirs=fs.readdirSync(path.join(root,"incoming")).length;data.write("other\0",16);
   await assert.rejects(fetchAndZipRecentDemos({matchId:"wrong",server:"east",mapName:"schtop",requiredCount:1}),/wrong_map/);
   assert.equal(downloads,1);assert.equal(fs.readdirSync(path.join(root,"incoming")).length,workdirs);
+});
+
+test("source recovery retains old bytes, uses readable folders and never downloads a linked source twice",async t=>{
+  const fs=require("fs"),os=require("os"),path=require("path"),{recoverSourceFile}=require("../services/hltvSourceRecovery");
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"hltv-recovery-"));t.after(()=>{const safe=fs.realpathSync(root);assert.equal(path.dirname(safe),fs.realpathSync(os.tmpdir()));assert(path.basename(safe).startsWith("hltv-recovery-"));fs.rmSync(safe,{recursive:true,force:true});});
+  const remote=completedDemo(),old=Buffer.from(remote.subarray(0,560));old.writeInt32LE(0,540);const filename=path.join(root,"old.dem");fs.writeFileSync(filename,old);
+  let link=null,downloads=0,input;
+  const registry={db:{prepare:()=>({get:()=>link})},storage:{root,verify:()=>({path:filename,size:old.length}),freeBytes:()=>10000},minFreeBytes:0,
+    recoverFinalizedSource:(id,data)=>{input=data;link={recovered_demo_id:"new",run_id:"run"};return {demo_id:"new",run_id:"run",existing:false};}};
+  const sftp={stat:async()=>({size:remote.length,modifyTime:1,isFile:true}),get:async(name,dst,options)=>Buffer.from(remote.subarray(options.readStreamOptions.start,options.readStreamOptions.end+1)),fastGet:async(name,dst)=>{downloads++;fs.writeFileSync(dst,remote);}};
+  const original={id:"old-id",match_id:"DZW8NE",map:"schtop",server:"central"};
+  remote.writeInt32LE(0,540);assert.equal((await recoverSourceFile(registry,sftp,original,"source.dem")).skipped,true);assert.equal(downloads,0);
+  remote.writeInt32LE(576,540);const result=await recoverSourceFile(registry,sftp,original,"source.dem");assert.equal(result.downloaded,true);assert.equal(downloads,1);assert.match(input.storage_key,/DZW8NE-schtop-central-recovery/);
+  assert.deepEqual(fs.readFileSync(filename),old);assert.deepEqual(fs.readFileSync(path.join(root,input.storage_key)),remote);
+  assert.equal((await recoverSourceFile(registry,sftp,original,"source.dem")).existing,true);assert.equal(downloads,1);
 });

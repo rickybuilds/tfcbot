@@ -19,6 +19,26 @@ The script loads the existing bot `.env`, registry database and per-server SFTP 
 
 These checks validate container finalization only, not log pairing, full packet decoding, parser compatibility or firing accuracy. No directory entries or demo content are fabricated to make analysis pass.
 
+## Recover originals confirmed finalized
+
+Update both the website and bot repositories first. On the shared server run:
+
+```sh
+flock -n /var/lib/noname-hltv-worker/worker.lock node /root/tfcbot/scripts/recoverHltvSources.js --apply
+```
+
+Use `--match DZW8NE` to restrict recovery to one match, or `--api-root /var/www/tfcbot/api` to name the API checkout explicitly (that is the default). The script reads bot SFTP credentials and API storage/analysis settings without changing either `.env`. Both must point at the same private registry/storage. API upstream and statistics must be enabled for the queued work. The command selects at most 100 available originals whose latest analysis failed, excluding replacement artifacts. It does not run the decoder or send Discord uploads; successful imports are explicitly queued for the existing worker.
+
+Append `--analyze` to process those specific recovery jobs serially in the same locked command, ahead of unrelated queued games. This explicitly runs the existing upstream worker, with its configured resource limits and production alert settings; no Discord recap uploads are sent. Already terminal jobs are reported without falling through to another game. Without this option, cron processes the queued recovery jobs normally.
+
+For each unfinished local capture, it checks the exact original filename on the configured server, retrieves the finalized version once into a separate private match/map/server folder, verifies source stability and the downloaded directory, then asks the API registry to verify the original byte prefix. The only permitted prefix difference is the four-byte directory offset in the header, with extra data appended to the original capture. A filename/map match alone is insufficient. Different or truncated prefixes fail closed and remain available for inspection.
+
+The registry transaction creates a new demo/checksum, a persistent analysis hold and one recovery link/run; original bytes, IDs, checksums, reviews, assignments and holds remain unchanged. The stronger retention class and expiry are preserved on the recovered version. Review details link both versions. Re-running a completed recovery returns its existing link/run without another download or analysis hold. If interrupted after a completed download but before registration, the same deterministic recovery path is verified and reused. Existing `.part` files are never silently overwritten; inspect them before retrying. Disk headroom must cover the configured reserve plus the new file. This one-time recovery download is explicit; routine collection still has only one full download per demo.
+
+Recovered paths look like `incoming/DZW8NE-schtop-central-recovery-<original-id>/DZW8NE-schtop-recovered.dem`. Old UUID folders are not renamed because manifests, evidence and active workflows reference their storage keys. For readable authenticated downloads after log pairing, enable `HLTV_FRIENDLY_DEMO_NAMES_ENABLED=true` in the website API `.env`; verified downloads then use `DZW8NE-schtop-round-2.dem`. Unpaired recordings use an explicit `unpaired` name. This naming flag defaults off and never establishes a log round from timestamp order.
+
+Set the same `HLTV_FRIENDLY_DEMO_NAMES_ENABLED=true` in the bot `.env` for future routine collection folders named `<match>-<map>-<server>-<uuid>`. The UUID suffix avoids collisions; original remote filenames stay inside those folders for source lookup. This bot setting also defaults off and takes effect after restarting the bot. Existing folders are left untouched. Verified round labels are applied to authenticated downloads rather than guessing a round for local files before log pairing.
+
 ## Prevent new premature downloads
 
 After inspecting and validating original sources, add to `/root/tfcbot/.env`:

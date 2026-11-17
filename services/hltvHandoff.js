@@ -16,7 +16,9 @@ function createHandoff(opts, env = process.env) {
   const free = fs.statfsSync(root);
   const minimum = Number(env.HLTV_MIN_DISK_FREE_BYTES || 10737418240);
   if (!Number.isSafeInteger(minimum) || minimum < 0 || free.bavail * free.bsize < minimum) throw new Error("HLTV storage headroom unavailable");
-  const dir = path.join(incoming, crypto.randomUUID());
+  const safe = value => String(value || "unknown").replace(/[^A-Za-z0-9_-]/g,"_").slice(0,50);
+  const prefix = env.HLTV_FRIENDLY_DEMO_NAMES_ENABLED === "true" ? `${safe(opts.matchId)}-${safe(opts.mapName)}-${safe(opts.server || "east")}-` : "";
+  const dir = path.join(incoming, prefix + crypto.randomUUID());
   fs.mkdirSync(dir, { mode: 0o700 });
   console.log(`[HLTV registry] Retaining original downloads for match ${opts.matchId} (${opts.server || "east"}) in ${dir}`);
   return { root, dir, manifest: { version: 1, match_id: String(opts.matchId), server: opts.server || "east", map: opts.mapName || null, demos: [] } };
