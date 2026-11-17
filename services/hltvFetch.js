@@ -7,6 +7,7 @@ const path = require("path");
 const os = require("os");
 const archiver = require("archiver");
 const { createHandoff, finalizeDemo, publishHandoff } = require("./hltvHandoff");
+const { finalizationConfig, waitForFinalized, verifyDownloaded, sameStat } = require("./hltvFinalization");
 
 /* -------------------------------------------------------------------------- */
 /* 🌍 Multi-server aware config                                               */
@@ -47,6 +48,7 @@ async function fetchAndZipRecentDemos(opts = {}) {
   } = opts;
 
   const cfg = getSftpConfig(server);
+  const finalization = finalizationConfig();
   if (!cfg.host || !cfg.username || !cfg.hltvDir) {
     throw new Error("Missing HL_* env vars (HL_SSH_HOST / USER / HL_REMOTE_HLTV_DIR)");
   }
@@ -100,6 +102,17 @@ async function fetchAndZipRecentDemos(opts = {}) {
       .sort((a, b) => (b.modifyTime || 0) - (a.modifyTime || 0))
       .slice(0, requiredCount);
 
+    // Only small header/directory ranges are read while waiting. The full demo
+    // still follows the single existing download used for Discord and retention.
+    if (finalization.enabled) {
+      for (const file of chosenFiles) {
+        if (path.basename(file.name) !== file.name || file.name.includes("\\")) throw new Error("Unsafe remote demo filename");
+        console.log(`[HLTV] Waiting for finalized recording: ${file.name}`);
+        file.finalized = await waitForFinalized(sftp, `${cfg.hltvDir}/${file.name}`, chosenMap, finalization);
+        file.size = file.finalized.size; file.modifyTime = file.finalized.modifyTime;
+      }
+    }
+
     let handoff = null;
     try { handoff = createHandoff(opts); } catch (error) {
       // Registry failure must never break existing Discord delivery.
@@ -112,6 +125,10 @@ async function fetchAndZipRecentDemos(opts = {}) {
       const remotePath = `${cfg.hltvDir}/${f.name}`;
       const localPath = path.join(workdir, f.name);
       await sftp.fastGet(remotePath, localPath + ".part");
+      if (f.finalized?.finalized === true) {
+        verifyDownloaded(localPath + ".part", f.finalized);
+        if (!sameStat(f.finalized, await sftp.stat(remotePath))) throw new Error("HLTV_SOURCE_CHANGED_DURING_DOWNLOAD");
+      }
       fs.renameSync(localPath + ".part", localPath);
       try { finalizeDemo(handoff, localPath, f); } catch (error) {
         console.error("[HLTV registry] registration deferred; original retained:", error.message);
@@ -159,4 +176,4 @@ function cleanupResult(result) {
 }
 
 /* -------------------------------------------------------------------------- */
-module.exports = { fetchAndZipRecentDemos, cleanupResult };
+module.exports = { fetchAndZipRecentDemos, cleanupResult, getSftpConfig };

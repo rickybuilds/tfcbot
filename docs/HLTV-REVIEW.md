@@ -14,7 +14,7 @@ Keep `HLTV_ALERTS_ENABLED=false` during validation. When enabled, bot polls only
 
 Website operations, cleanup safeguards, authorization, deployment, backup and parser contract are documented in `nonamepickup-web/docs/HLTV-REVIEW.md` and `HLTV-ANALYZER-CONTRACT.md`. All cleanup is owned by that subsystem and disabled by default. Do not add another raw-demo cleanup cron. The external GoldSrc parser/viewer is not bundled; there are no detectors or fabricated findings. Manual review works while analysis is unsupported.
 
-On an interrupted ZIP, `pending.json` and originals remain private; stop the bot, inspect and backfill the local manifest with the website CLI. `.part` files or failed-upload ZIPs need operator review. The bot's three-second close buffer and downloaded-size validation do not prove the remote recording stopped; validate real recordings before rollout.
+On an interrupted ZIP, `pending.json` and originals remain private; stop the bot, inspect and backfill the local manifest with the website CLI. `.part` files or failed-upload ZIPs need operator review. The bot's three-second close buffer and downloaded-size validation do not prove the remote recording stopped. See [HLTV recording finalization](HLTV-FINALIZATION.md) for the opt-in finalization guard and read-only original-source checks.
 
 Test: `node --test test/hltvReview.test.js`. Full bot tests remain `npm test`.
 

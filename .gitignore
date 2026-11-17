@@ -119,6 +119,8 @@ EOFcat >> .gitignore << 'EOF'
 # Private Speedrun Viewer
 /assets/maps/
 /scripts/
+!/scripts/
+!/scripts/checkHltvSources.js
 
 speedrun-replay.html
 speedrun-replay.css
