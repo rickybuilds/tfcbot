@@ -191,7 +191,7 @@ function getPlayerLastGames(database, playerId, now = Math.floor(Date.now() / 10
       const mvpRows = database
         .prepare(
           `SELECT match_id, mvp_player_key, steam_id
-           FROM match_round_mvps
+           FROM canonical_match_mvps
            WHERE match_id IN (${placeholders})`
         )
         .all(...rows.map(row => row.match_id));
@@ -204,7 +204,7 @@ function getPlayerLastGames(database, playerId, now = Math.floor(Date.now() / 10
       }
     }
   } catch (error) {
-    // Older databases may not have link or MVP tables yet.
+    // Older databases may not have links or the website's canonical MVP view yet.
     console.warn("[lastplayer] MVP lookup unavailable:", error.message);
   }
 
