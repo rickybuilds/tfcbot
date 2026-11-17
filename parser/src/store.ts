@@ -45,7 +45,14 @@ export class MatchStore {
       catch (error: any) { if (error.code !== 'ENOENT') throw error; }
       try { await rename(stage, directory); }
       catch (error) { if (movedOld) await rename(backup, directory); throw error; }
-      if (movedOld) await rm(backup, { recursive: true, force: true });
+      if (movedOld) {
+        // A replacement must not erase the only raw bytes behind an older
+        // HLTV observation. Keep the complete prior manifest and result in a
+        // private, non-listable history directory.
+        const history = join(this.root, '.history', result.matchId);
+        await mkdir(history, { recursive: true, mode: 0o700 });
+        await rename(backup, join(history, randomUUID()));
+      }
     } finally { await rm(stage, { recursive: true, force: true }); }
   }
 }

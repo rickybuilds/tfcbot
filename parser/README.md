@@ -37,7 +37,7 @@ The bot defaults to `http://127.0.0.1:3210`. Set `NONAME_PARSER_URL` if needed, 
 
 The importer also populates the website's existing tables: `match_stat_imports`, `match_rounds`, `match_player_stats`, `match_player_round_stats`, `match_player_classes`, `match_player_weapons`, `match_kill_events`, `match_cap_events`, `match_flag_events` and `match_round_mvps`. It adds missing columns transactionally without modifying official match scores or ratings. New SG projections are `match_sentry_round_stats` and `match_sentry_lives`. Those tables are ready for the existing website to expose; this change does not add SG controls to that website.
 
-Reimporting a match replaces that match's projections and complete result atomically, without duplicating events or deleting independent TFCStats flag rows. Older matches retain their data and legacy provenance. Old SG history cannot be reconstructed when its source logs no longer exist.
+Reimporting a match replaces that match's projections and complete result atomically, without duplicating events or deleting independent TFCStats flag rows. The prior private raw logs, manifest, and result are retained under the parser data root at `.history/<match ID>/<UUID>/`; this directory is excluded from normal match listing and should be included in private backups. Older matches retain their data and legacy provenance. Old SG history cannot be reconstructed when its source logs no longer exist.
 
 SG rows are keyed by match, player, round and `observed_team` (the logged numeric team color), so a player changing teams within a round retains both histories. Life numbers restart for each observed team. `team_name` remains the original match roster's Team A/B identity.
 
