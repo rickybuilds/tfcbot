@@ -22,6 +22,18 @@ function addAimFindingFields(embed,findings){
   for(const finding of findings.slice(0,10)){const field=formatAimFinding(finding);if(used+field.name.length+field.value.length>5800)break;embed.addFields(field);used+=field.name.length+field.value.length;shown++;}
   return shown;
 }
+function hltvTime(seconds){const total=Math.max(0,Number(seconds)||0),minutes=Math.floor(total/60),whole=Math.floor(total%60),millis=Math.round((total-Math.floor(total))*1000);return `${String(minutes).padStart(2,"0")}:${String(whole).padStart(2,"0")}.${String(millis).padStart(3,"0")}`;}
+function formatHltvAnalysisNotification(data,reviewUrl){
+  if(!data||!['completed_empty','candidates_found','failed'].includes(data.outcome))throw new Error("Invalid HLTV analysis notification");
+  const url=new URL(reviewUrl);if(url.protocol!=="https:")throw new Error("HTTPS review URL required");if(!/^\d{17,20}$/.test(String(data.demo_id||""))&&typeof data.demo_id!=="string")throw new Error("Invalid HLTV demo identity");
+  url.searchParams.set("demo",String(data.demo_id));if(data.outcome==="candidates_found"&&data.candidates?.[0]?.kind)url.searchParams.set("tab",data.candidates[0].kind==="snap"?"Snaps":"Wall-Track");
+  const failed=data.outcome==="failed",candidate=data.outcome==="candidates_found",embed=new EmbedBuilder().setColor(failed?0xed4245:candidate?0xfaa61a:0x57f287).setTitle(`NN//TFC · HLTV ANALYSIS ${failed?"FAILED":"COMPLETE"}`).setTimestamp().setFooter({text:`Run ${String(data.run_id||"unknown").slice(0,80)}`});
+  embed.addFields({name:"Match / map",value:`${escapeMarkdown(String(data.match_id||"Unknown match"))} / ${escapeMarkdown(String(data.map||"Unknown map"))}`,inline:false},{name:"Status",value:failed?"Analysis Failed":candidate?"Candidates Found":"Completed — No Candidates",inline:true});
+  if(failed){embed.addFields({name:"Failure",value:`${String(data.failure_code||"upstream_failed").slice(0,80)} · ${escapeMarkdown(String(data.failure_message||"Analysis failed")).slice(0,700)}`,inline:false},{name:"Next action",value:`${escapeMarkdown(String(data.next_action||"Inspect the Investigation Console and retry when ready.")).slice(0,700)}${data.retryable?"": "\nRetry is not currently indicated."}`,inline:false});}
+  else {embed.addFields({name:"Wall-track",value:String(Number(data.wall_track_count)||0),inline:true},{name:"Snaps",value:String(Number(data.snap_count)||0),inline:true});if(candidate){const rows=Array.isArray(data.candidates)?data.candidates:[],shown=[];for(const item of rows.slice(0,7)){const label=item.kind==="snap"?"Snap":"Wall-track",name=escapeMarkdown(String(item.player_name||"Identity unavailable")).slice(0,80),duration=Number.isFinite(item.duration_seconds)?` · Duration ${Number(item.duration_seconds).toFixed(2)}s`:"";shown.push(`${name} — ${label}\n\`${hltvTime(item.time_seconds)}\`${duration}`);}let value=shown.join("\n\n")||"No candidate details were recorded.",total=Math.max(rows.length,Number(data.candidate_count)||0);if(total>shown.length)value+=`\n\n… and ${total-shown.length} additional candidate event(s) available in the console.`;embed.addFields({name:"Candidate Events",value,inline:false});}}
+  embed.addFields({name:"Review",value:`[Open Investigation Console](${url.href})\nAutomated candidates require human review; they are not cheating verdicts.`,inline:false});
+  return {embeds:[embed],allowedMentions:{parse:[]}};
+}
 function suppressLegacyGapAlert(db,row){
   if(row.kind!=="aim_gap_review")return false;
   db.prepare("INSERT OR IGNORE INTO hltv_alert_suppressions(alert_id,reason,created_at) VALUES(?,'Single-round gap rule retired; quiet website marker only',?)").run(row.id,Date.now());
@@ -47,10 +59,11 @@ function startHltvReviewAlerts(client, env = process.env) {
     running = true;
     let db;
     try {
-      const channel = await client.channels.fetch(env.HLTV_REVIEW_ALERT_CHANNEL_ID, { force: true });
-      if (!privateChannel(channel, allowed, client.user.id) || !channel.isTextBased() || channel.isThread()) throw new Error("Alert channel privacy check failed");
+      const reviewChannel = await client.channels.fetch(env.HLTV_REVIEW_ALERT_CHANNEL_ID, { force: true });
+      if (!privateChannel(reviewChannel, allowed, client.user.id) || !reviewChannel.isTextBased() || reviewChannel.isThread()) throw new Error("Alert channel privacy check failed");
       db = require("better-sqlite3")(env.HLTV_REGISTRY_DB, { fileMustExist: true, timeout: 5000 });
       db.exec("CREATE TABLE IF NOT EXISTS hltv_alert_suppressions(alert_id TEXT PRIMARY KEY REFERENCES hltv_alerts(id),reason TEXT NOT NULL,created_at INTEGER NOT NULL)");
+      db.exec("CREATE TABLE IF NOT EXISTS hltv_analysis_notifications(alert_id TEXT PRIMARY KEY REFERENCES hltv_alerts(id),run_id TEXT NOT NULL UNIQUE REFERENCES hltv_upstream_runs(id),outcome TEXT NOT NULL,data_json TEXT NOT NULL,created_at INTEGER NOT NULL)");
       const row = db.transaction(() => {
         const job = db.prepare("SELECT * FROM hltv_alerts WHERE sent_at IS NULL AND id NOT IN(SELECT alert_id FROM hltv_alert_suppressions) AND attempts<12 AND next_attempt<=? AND (lease_until IS NULL OR lease_until<?) ORDER BY created_at LIMIT 1").get(Date.now(), Date.now());
         if (!job) return null;
@@ -60,6 +73,8 @@ function startHltvReviewAlerts(client, env = process.env) {
       }).immediate();
       if (!row) return;
       if(suppressLegacyGapAlert(db,row))return;
+      const normalChannelId=String(env.HLTV_ANALYSIS_CHANNEL_ID||"").trim(),channel=row.kind==="hltv_analysis_complete"&&normalChannelId?await client.channels.fetch(normalChannelId,{force:true}):reviewChannel;
+      if(channel!==reviewChannel&&(!channel?.isTextBased?.()||channel.isThread?.()))throw new Error("Analysis channel is not text-based");
       try {
         const url = new URL("/admin/hltv-review", env.HLTV_REVIEW_BASE_URL);
         if (url.protocol !== "https:") throw new Error("HTTPS review URL required");
@@ -72,6 +87,12 @@ function startHltvReviewAlerts(client, env = process.env) {
           hit_evidence_review:"HLTV Review — Sampled Hit Evidence",
           storage_low_disk: "HLTV Storage — Low Disk Space"
         };
+        if(row.kind.startsWith("hltv_analysis_")){
+          const payloadRow=db.prepare("SELECT data_json FROM hltv_analysis_notifications WHERE alert_id=?").get(row.id);
+          if(!payloadRow)throw new Error("Missing HLTV analysis notification payload");
+          const payload=JSON.parse(payloadRow.data_json),reviewUrl=new URL("/admin/hltv-review",env.HLTV_REVIEW_BASE_URL);
+          await channel.send(formatHltvAnalysisNotification(payload,reviewUrl.href));
+        } else {
         if (!Object.hasOwn(titles, row.kind)) throw new Error("Unknown alert kind");
         // No free-form notes, allegations or automatic mentions in Discord.
         const embed = new EmbedBuilder()
@@ -92,6 +113,7 @@ function startHltvReviewAlerts(client, env = process.env) {
         embed.addFields({ name: "Links", value: `[View HLTV Review](${url.href})`, inline: false });
         await channel.send({ embeds: [embed],
           allowedMentions: { parse: [] } });
+        }
         db.prepare("UPDATE hltv_alerts SET sent_at=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?").run(Date.now(), row.id, row.lease);
       } catch (error) {
         db.prepare("UPDATE hltv_alerts SET attempts=attempts+1,next_attempt=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?").run(Date.now() + Math.min(3600000, 30000 * 2 ** Math.min(row.attempts, 7)), row.id, row.lease);
@@ -103,4 +125,4 @@ function startHltvReviewAlerts(client, env = process.env) {
   const timer = setInterval(() => void drain(), 30000); timer.unref();
   return () => clearInterval(timer);
 }
-module.exports = { privateChannel, startHltvReviewAlerts,formatGapFinding,formatAimFinding,suppressLegacyGapAlert,addAimFindingFields };
+module.exports = { privateChannel, startHltvReviewAlerts,formatGapFinding,formatAimFinding,suppressLegacyGapAlert,addAimFindingFields,formatHltvAnalysisNotification };
