@@ -65,6 +65,7 @@ function register(reg, { config }) {
           value:
             "`!clear` — Reset queue + cancel votes\n" +
             "`!addplayer @user` / `!removeplayer @user` — Manage queue manually\n" +
+            "`!addcap @user` — Add or mark a player as captain (max 2)\n" +
             "`!kick @user` — Kick player from queue\n" +
             "`!fv` — Start map/server vote\n" +
             "`!cancelvote` — Cancel active vote\n" +

@@ -550,23 +550,28 @@ function register(reg, {
     try { reg.persistQueueSoon?.(); } catch {}
   };
 
-  const addplayer = async (message) => {
+  const addplayer = async (message, asCaptain = false) => {
     if (String(message.channel?.id) !== String(config.channels.pickup)) return;
     if (!isAdmin(message)) return;
 	const target = message.mentions?.users?.first();
-	if (!target) return message.channel.send("Usage: `!addplayer @user`");
+	if (!target) return message.channel.send(asCaptain ? "Usage: `!addcap @user`" : "Usage: `!addplayer @user`");
 
-	if (state.isVotingInProgress || state.vote) {
+	if (state.isVotingInProgress || state.vote || (asCaptain && flowActive())) {
 	  return message.channel.send(
 		"🚫 Cannot add players while a vote is in progress."
 	  );
 	}
 
-	if (state.queue.length >= (state.MAX_PLAYERS || 8)) {
+	if (state.queue.length >= (state.MAX_PLAYERS || 8) &&
+      !(asCaptain && state.queue.some(p => String(p.id) === String(target.id)))) {
 	  return message.channel.send(
 		`🚨 Queue is already full (${state.MAX_PLAYERS || 8} players).`
 	  );
 	}
+    if (asCaptain) {
+      if (await rejectLocked(message, target.id)) return;
+      if (await rejectBanned(message, target.id, text => target.send(text))) return;
+    }
 
     const ban = banStore?.getBan(target.id);
     if (ban) {
@@ -588,14 +593,23 @@ function register(reg, {
       if (m?.displayName) display = m.displayName;
     } catch {}
     const existing = state.queue.find(p => String(p.id) === String(target.id));
+    if (asCaptain) {
+      // Recheck after the Discord lookup: another command may have changed the queue.
+      if (flowActive()) return;
+      if (!existing && state.queue.length >= (state.MAX_PLAYERS || 8)) return;
+      if (!existing?.captain && state.queue.filter(p => p.captain).length >= 2) {
+        return message.channel.send("🚫 There are already two captains in the queue.");
+      }
+    }
     const nameSeed = existing?.name || display;
     try { elo.getRating(target.id, nameSeed, { createIfMissing: true }); } catch {}
     display = getStoredPlayerName(elo, target.id, nameSeed);
     if (!existing) {
-      state.queue.push({ id: target.id, name: display, lastSeenAt: now() });
+      state.queue.push({ id: target.id, name: display, lastSeenAt: now(), ...(asCaptain ? { captain: true } : {}) });
     } else {
       existing.name = display;
       existing.lastSeenAt = now();
+      if (asCaptain) existing.captain = true;
     }
     removeFromOffense(state, target.id);
     await postQueueBoard(message.channel, state, elo, privacy);
@@ -687,7 +701,7 @@ function register(reg, {
   reg.set("remove", remove);
   reg.set("status", status);
   reg.set("clear", clear);
-  reg.set("addplayer", addplayer);
+  reg.set("addplayer", (msg) => addplayer(msg));
   reg.set("removeplayer", removeplayer);
   reg.set("filltest", filltest);
   reg.set("setqueue", setqueue);
@@ -697,7 +711,9 @@ function register(reg, {
 // aliases
 reg.set("++", (msg) => add(msg, false));
 reg.set("add", (msg) => add(msg, false));
-reg.set("addcap", (msg) => add(msg, false, true));
+reg.set("addcap", (msg) => msg.mentions?.users?.first()
+  ? addplayer(msg, true)
+  : add(msg, false, true));
 reg.set("++cap", (msg) => add(msg, false, true));
 reg.set("**cap", (msg) => add(msg, false, true));
 reg.set("--", remove);

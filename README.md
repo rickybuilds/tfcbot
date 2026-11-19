@@ -39,6 +39,11 @@ Paper Scissors; ties repeat and the winner picks first. The resulting rosters
 are the teams used for the match and its ELO result. With fewer than two
 captains, the normal ELO balance remains active.
 
+Admins can use `!addcap @player` in the pickup channel to add a player as a
+captain or mark someone already queued. This uses the same `ADMIN_ROLE_ID`
+restriction as `!addplayer`, respects the two-captain limit, and is blocked
+during voting. Without a mention, `!addcap` still volunteers yourself.
+
 ## Full-time offense
 
 Players can join the next pickup as a dedicated extra attacker with `!addoff`,

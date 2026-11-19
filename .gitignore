@@ -188,3 +188,5 @@ game-details-maintenance.lock
 parser/upstream/test/__snapshots__/parser.test.ts.snap
 parser/upstream/test/__snapshots__/parser-stats.test.ts.snap
 parser/upstream/test/__snapshots__/parser-events.test.ts.snap
+
+!/test/addcap.test.js
