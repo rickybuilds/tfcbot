@@ -14,6 +14,7 @@ const {
   DEFAULT_OFFENSE_MAX_PER_TEAM,
   MAX_OFFENSE_PER_TEAM_LIMIT,
 } = require("../lib/offense");
+const hltvPolicySettings = require("../services/hltvPolicySettings");
 
 function isAdmin(message, config) {
   try {
@@ -69,6 +70,7 @@ function register(registry, deps) {
     "vote:spinner_duration": 4,
     [TEAM1_STARTS_SETTING]: DEFAULT_TEAM1_STARTS,
     [OFFENSE_MAX_PER_TEAM_SETTING]: DEFAULT_OFFENSE_MAX_PER_TEAM,
+    "aim_review:evidence_gap_points": hltvPolicySettings.DEFAULT,
   };
 
   const SETTINGS_CHANNEL = config.channels.settings || ""; // 👈 from .env
@@ -92,6 +94,7 @@ function register(registry, deps) {
         { name: "Tiebreaker Spinner (sec)",   value: String(settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])), inline: true },
         { name: "Team 1 Starts", value: settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING]), inline: true },
         { name: "Full-time Offense / Team", value: String(settings.getNumber(OFFENSE_MAX_PER_TEAM_SETTING, DEFAULTS[OFFENSE_MAX_PER_TEAM_SETTING])), inline: true },
+        { name: "HLTV Evidence Gap (pts)", value: String(hltvPolicySettings.getEvidenceGapPoints()), inline: true },
         { name: "Settings Channel",      value: SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_", inline: false },
       )
       .setFooter({ text: "Use !set <key> <value> (admin only)" })
@@ -112,6 +115,7 @@ function register(registry, deps) {
         `• Tiebreaker Spinner (sec): ${settings.getNumber("vote:spinner_duration", DEFAULTS["vote:spinner_duration"])}\n` +
         `• Team 1 Starts: ${settings.getString(TEAM1_STARTS_SETTING, DEFAULTS[TEAM1_STARTS_SETTING])}\n` +
         `• Full-time Offense / Team: ${settings.getNumber(OFFENSE_MAX_PER_TEAM_SETTING, DEFAULTS[OFFENSE_MAX_PER_TEAM_SETTING])}\n` +
+        `• HLTV Evidence Gap (pts): ${hltvPolicySettings.getEvidenceGapPoints()}\n` +
         `• Settings Channel: ${SETTINGS_CHANNEL ? `<#${SETTINGS_CHANNEL}>` : "_not set_"}`);
     } else {
       const dm = await message.author.createDM();
@@ -142,6 +146,7 @@ function register(registry, deps) {
       "vote:spinner_duration",
       TEAM1_STARTS_SETTING,
       OFFENSE_MAX_PER_TEAM_SETTING,
+      "aim_review:evidence_gap_points",
     ]);
     if (!allowed.has(key)) return message.channel.send("Unknown key.");
 
@@ -230,6 +235,12 @@ function register(registry, deps) {
         return message.channel.send(`\`${OFFENSE_MAX_PER_TEAM_SETTING}\` must be 0–${MAX_OFFENSE_PER_TEAM_LIMIT} (0 disables full-time offense).`);
       }
       settings.setNumber(key, n);
+    } else if (key === "aim_review:evidence_gap_points") {
+      n = Number(val);
+      if (!Number.isFinite(n) || n < 0 || n > 100) return message.channel.send("`aim_review:evidence_gap_points` must be 0–100 percentage points.");
+      try { hltvPolicySettings.setEvidenceGapPoints(n); }
+      catch { return message.channel.send("HLTV registry settings are unavailable; no change was saved."); }
+      savedValue = n;
     } else if (key === "vote:spinner_duration") {
       n = Number(val);
       if (!Number.isFinite(n) || n < 1 || n > 15) return message.channel.send("`vote:spinner_duration` must be 1–15 seconds.");
