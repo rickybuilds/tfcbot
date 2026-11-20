@@ -72,9 +72,26 @@ function register(registry,games,{clock=Date.now,casinoChannelId='',adminRoleId=
   const extra=(r.wagerResults||[]).map(x=>`<@${x.userId}> ${x.kind}${x.number?' '+x.number:''}: ${x.profit!=null?`+${x.profit} profit (bet stays)`: `${x.returned} returned`}`);
   return `🎲 Rolled **${r.dice.join(' + ')} = ${r.sum}**. ${r.outcome?`Round settled: **${r.outcome==='push'?"12 — pass loses, don't pass pushes":r.outcome+' wins'}**.`:`Point is **${r.point}**; roll again!`}${payouts}${extra.length?` Wagers: ${extra.slice(0,10).join('; ')}${extra.length>10?`; and ${extra.length-10} more`:''}.`:''}${r.fireInPlay?` Fire points made: ${r.firePoints.length?r.firePoints.join(', '):'none'}.`:''}${r.nextRoundId?' Active wagers carry over; automatic place bets are off until a new point is set.':''}`;
  };
- registry.set('craps',wrap(async(m,args,context)=>{
+ const felt=require('./crapsFelt'),classic=require('./crapsPanel');
+ const renderCraps=table=>felt.board(games,table,classic.panel().components.slice(0,3),crapsText);
+ const refreshCraps=(table,channel)=>felt.refresh(games,table,channel,()=>renderCraps(table));
+ const crapsCommand=wrap(async(m,args,context)=>{
   const [action,...rest]=args,table={guildId:m.guild.id,channelId:m.channel.id,userId:m.author.id,context};
-  if(action==='table'&&!rest.length)return m.channel.send(require('./crapsPanel').panel());
+  if(action==='table'&&!rest.length){
+   const existingId=games.store.metadata(felt.tableKey(table));
+   if(existingId && m.channel.messages?.fetch){
+    let existing;
+    try { existing=await m.channel.messages.fetch(existingId); }
+    catch(error){ if(error.code!==10008)throw error; }
+    if(existing){
+     await refreshCraps(table,m.channel);
+     return respond(m,`🎲 The craps table is already open: ${existing.url}`);
+    }
+   }
+   const message=await m.channel.send(renderCraps(table));
+   if(message?.id)games.store.setMetadata(felt.tableKey(table),message.id);
+   return;
+  }
   if(action==='join'&&rest.length===2){
    const r=games.crapsJoin({...table,pick:rest[0],stake:amount(rest[1])});
    return m.channel.send({content:`🎲 <@${m.author.id}> joined with **${amount(rest[1])} points** on **${rest[0].toLowerCase()}**. Shooter: <@${r.shooter}>. Join with \`!craps join <pass|dont> <points>\`; then the shooter rolls.`,allowedMentions:{parse:[]},components:String(r.shooter)===String(m.author.id)?crapsButton(r.id):[]});
@@ -129,7 +146,14 @@ function register(registry,games,{clock=Date.now,casinoChannelId='',adminRoleId=
    return m.channel.send({content:`🎲 Shooter: <@${r.shooter}>. ${r.state==='open'?'Line betting is open.':`Point: **${r.point}**.`}${fire?` Fire points made: ${made.length?made.join(', '):'none'}.`:''} Bets (page ${page}/${pages}): ${items.length?items.join('; '):'none'}. Use \`!craps status <page>\` for another page. After 10 minutes without a roll, any bettor can roll.`,allowedMentions:{parse:[]},components:crapsButton(r.id)});
   }
   return respond(m,'🎲 **Craps commands** (prefix each with `!craps`):\n`table` opens the betting panel · `status [page]` · `cancel`\n`join <pass|dont> <points>` · `place <number> <points>` · `come <points>` · `dontcome <points>`\n`field <points>` · `anycraps <points>` · `horn <points>` · `fire <points>` · `hardway <4|6|8|10> <points>` · `lay <number> <points>` · `prop <2|3|11|12> <points>`\n`odds <pass|dont> <points>` · `odds <come|dontcome> <number> <points>`\n`on|off|auto <place|hardway|lay> <number>` · `on|off|auto odds <pass|dont|come|dontcome> <number>`\n`take <number|dont|field|anycraps|horn|fire>` · `take <hardway|lay|dontcome|prop> <number>` · `take odds <pass|dont> [number]` · `take odds <come|dontcome> <number>`\nHorn stakes must be multiples of 4. Fire bets must be placed before the first point. Place, hardway and come odds are off on the come-out by default.');
- },true));
+ },true);
+ registry.set('craps',async(m,args)=>{
+  await crapsCommand(m,args);
+  if(m.guild && casinoChannelId && String(m.channel?.id)===String(casinoChannelId)
+    && args[0] && !['table','status'].includes(args[0])){
+   await refreshCraps({guildId:m.guild.id,channelId:m.channel.id},m.channel);
+  }
+ });
  registry.set('duel',wrap(async(m,args,context)=>{
   if(args[0]?.toLowerCase()==='accept'){
    if(args.length!==2||!/^\d+$/.test(args[1]))return respond(m,'Usage: !duel accept <challenge message ID>');
@@ -145,14 +169,17 @@ function register(registry,games,{clock=Date.now,casinoChannelId='',adminRoleId=
   const bj=require('./blackjackPanel');
   if(await bj.handleModal(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
   if(await bj.handle(i,games,{casinoChannelId,clock,refresh:refreshBj,schedule:scheduleBj}))return true;
-  if(await require('./crapsPanel').handle(i,games,casinoChannelId,clock,crapsText))return true;
+  if(await felt.handle(i,games,casinoChannelId,clock,renderCraps))return true;
+  if(await classic.handle(i,games,casinoChannelId,clock,crapsText,refreshCraps))return true;
   const craps=/^point-craps:roll:(\d+)$/.exec(String(i.customId||''));
   if(craps&&i.isButton()&&i.guildId){
    if(!casinoChannelId||String(i.channelId)!==String(casinoChannelId)){await i.reply({content:'This craps table is unavailable in this channel.',ephemeral:true});return true;}
    try{
-    const r=games.crapsRoll({roundId:craps[1],guildId:i.guildId,channelId:i.channelId,userId:i.user.id,context:{operationKey:`craps-button:${i.id}`,actorId:String(i.user.id),now:clock()}});
+    const table={guildId:i.guildId,channelId:i.channelId,userId:i.user.id};
+    const r=felt.roll(games,table,craps[1],{operationKey:`craps-button:${i.id}`,actorId:String(i.user.id),now:clock()});
     const next=r.nextRoundId||(r.state==='point'?r.id:null);
     await i.update({content:`Roll control (updated after each roll): ${crapsText(r)}`,allowedMentions:{parse:[]},components:next?crapsButton(next):[]});
+    await refreshCraps(table,i.channel);
     if(typeof i.followUp==='function'){
      try{await i.followUp({content:crapsText(r),allowedMentions:{parse:[]}});}
      catch(e){console.error('[craps roll history]',e);}

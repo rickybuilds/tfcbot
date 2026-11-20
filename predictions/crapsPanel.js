@@ -12,7 +12,7 @@ function panel(){return {content:'🎲 **Craps table** — choose a wager below,
  ...groups.map((list,index)=>({type:1,components:[{type:3,custom_id:`point-craps:choose:${index}`,placeholder:['Line and place bets','Field, hardways, lays and propositions','Odds bets'][index],min_values:1,max_values:1,options:list}]})),
  {type:1,components:[{type:2,style:1,label:'Roll Dice',custom_id:'point-craps:rolltable'},{type:2,style:2,label:'My Bets',custom_id:'point-craps:mybets'}]}
 ]};}
-async function handle(i,games,casinoChannelId,clock,rollText){
+async function handle(i,games,casinoChannelId,clock,rollText,refresh=async()=>{}){
  const id=String(i.customId||'');if(!/^point-craps:choose:[0-2]$/.test(id)&&!['point-craps:rolltable','point-craps:mybets'].includes(id)&&!id.startsWith('point-craps:stake:'))return false;
  if(!i.guildId||!casinoChannelId||String(i.channelId)!==String(casinoChannelId)){await i.reply({content:'This craps table is unavailable in this channel.',ephemeral:true});return true;}
  const table={guildId:i.guildId,channelId:i.channelId,userId:i.user.id},now=()=>({operationKey:`craps-panel:${i.id}`,actorId:String(i.user.id),now:clock()});
@@ -32,11 +32,11 @@ async function handle(i,games,casinoChannelId,clock,rollText){
    else if(parts[0]==='place')games.crapsPlace({...table,number:Number(parts[1]),stake,context});
    else if(parts[0]==='odds')games.crapsOdds({...table,target:parts[1],number:parts[2]?Number(parts[2]):null,stake,context});
    else games.crapsWager({...table,kind:parts[0],number:parts[1]?Number(parts[1]):null,stake,context});
-   await i.reply({content:`🎲 Placed **${stake} points** on **${options.get(token)}**.`,ephemeral:true});return true;
+   await i.reply({content:`🎲 Placed **${stake} points** on **${options.get(token)}**.`,ephemeral:true});await refresh(table,i.channel);return true;
   }
   if(id==='point-craps:rolltable'&&i.isButton?.()){
    const r=games.crapsStatus(table);if(!r)throw new Error('Craps table is empty. Start with pass or don’t pass.');
-   const result=games.crapsRoll({...table,roundId:r.id,context:now()});await i.reply({content:rollText(result),allowedMentions:{parse:[]}});return true;
+   const result=require('./crapsFelt').roll(games,table,r.id,now());await i.reply({content:rollText(result),allowedMentions:{parse:[]}});await refresh(table,i.channel);return true;
   }
   if(id==='point-craps:mybets'&&i.isButton?.()){
    const r=games.crapsStatus(table);if(!r){await i.reply({content:'There is no active craps table.',ephemeral:true});return true;}

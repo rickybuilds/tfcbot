@@ -402,3 +402,34 @@ test('failed fire payout rolls back the final roll and can be safely retried',t=
  assert.throws(()=>games.crapsRoll({...b,roundId:r.id,context:ctx('fail')}),/fire failure/);assert.equal(store.account('a').balance,1000);assert.equal(games.crapsStatus(b).point,9);assert.equal(store.assertAccounting(),true);
  db.exec('DROP TRIGGER fail_fire');const retry=new PointGames(store,{randomInt:(()=>{let i=0;return ()=>[2,3][i++];})()});retry.crapsRoll({...b,roundId:r.id,context:ctx('retry')});assert.equal(store.account('a').balance,1025);assert.equal(store.assertAccounting(),true);
 });
+test('live board opens separate trays and stale clicks cannot reverse a quick wager',async t=>{
+ const {games,store}=setup(t,[2,3]),registry=new Map(),messages=[];
+ const handle=require('../predictions/gameCommands').register(registry,games,{casinoChannelId:'c',clock:()=>1000});
+ const board={id:'123',edit:async payload=>messages.push(payload)};
+ const channel={id:'c',send:async payload=>{messages.push(payload);return board;},messages:{fetch:async()=>board}};
+ await registry.get('craps')({id:'table',guild:{id:'g'},channel,author:{id:'a'}},['table']);
+ const button=(payload,label)=>payload.components.flatMap(row=>row.components).find(b=>b.label===label).custom_id;
+ const interact=async (customId,user,id)=>{
+  let payload;
+  await handle({customId,id,guildId:'g',channelId:'c',channel,message:board,user:{id:user},isButton:()=>true,
+   reply:async p=>{payload=p;},update:async p=>{payload=p;}});
+  return payload;
+ };
+ const open=button(messages[0],'My Betting Tray');
+ const alice=await interact(open,'a','open-a');
+ assert.equal(alice.ephemeral,true);
+ const pass=button(alice,'Pass Line');
+ await interact(pass,'a','pass');
+ const roll=button(messages.at(-1),'Roll Dice');
+ await interact(roll,'a','roll-live');
+ assert.match(messages.at(-1).embeds[0].description,/POINT ON.*5/);
+ const bob=await interact(open,'b','open-b');
+ const place=button(bob,'Place 6');
+ const placed=await interact(place,'b','place');
+ assert.equal(store.account('b').balance,990);
+ await interact(place,'b','place-stale');
+ assert.equal(store.account('b').balance,990);
+ await interact(button(placed,'Place 6 · 10'),'b','remove');
+ assert.equal(store.account('b').balance,1000);
+ assert.equal(store.assertAccounting(),true);
+});
